@@ -127,8 +127,8 @@ module roam_lid() {
                 concave_bottom();
             }
 
-            // Flat fill to ensure minimum thickness
-            linear_extrude(height = lid_thickness * 0.5)
+            // Flat fill to full lid thickness (connects to lip above)
+            linear_extrude(height = lid_thickness)
                 lid_outline_2d();
 
             // Registration lip on top
