@@ -34,10 +34,11 @@ oled_y_offset  = 10;   // on outer slope, away from ridge/buttons
 oled_z_offset  = body_height * 0.6;  // mid-height on outer slope
 oled_tilt      = 25;   // tilt outward (around X axis) to face user when pronated
 
-// Buttons in a line along X axis (forearm direction), on the inner slope.
-// Left hand fingers drape over ridge, tips land on inner slope.
+// Buttons in a line along X axis (forearm direction), on the outer slope.
+// Left hand fingers approach from outer edge, land naturally on outer slope
+// with palm resting against the ridge. No reaching over required.
 // Index (elbow) → Pinky (wrist), with finger-length Y curve.
-button_zone_y = ridge_y_offset - 6;  // on inner slope, past the ridge
+button_zone_y = ridge_y_offset + 8;  // on outer slope, approaching side of ridge
 
 // Button positions: [x_offset, y_adjust] from button_zone center
 // X spacing ~16mm along forearm, Y follows finger-length arc
