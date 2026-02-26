@@ -31,6 +31,11 @@ button_cluster_y = 0;   // centered across width
 band_elbow_x =  (body_length/2 - band_width/2 - 3);
 band_wrist_x = -(body_length/2 - band_width/2 - 3);
 
+// Slide switch position — side of case, elbow end, accessible with thumb
+switch_y_offset = body_width/2;  // on the right side wall
+switch_x_offset = body_length/4; // toward elbow end
+switch_z_offset = body_height * 0.3;  // lower third of side wall
+
 // Case screw post positions (4 corners, inset)
 screw_inset = 8;
 screw_positions = [
@@ -259,6 +264,39 @@ module screw_posts() {
 }
 
 
+// Slide switch cutout — slot in side wall + internal pocket + indicator recesses
+module switch_cutout() {
+    translate([switch_x_offset, switch_y_offset, switch_z_offset]) {
+        // Slider slot through shell (for nub to poke through)
+        rotate([90, 0, 0])
+            translate([0, 0, -wall_thickness - 1])
+                cube([switch_slot_length, switch_slot_height, wall_thickness + 2],
+                     center = true);
+
+        // Internal cavity for switch body
+        rotate([90, 0, 0])
+            translate([0, 0, wall_thickness/2])
+                cube([switch_body_length + 1,
+                      switch_body_height + 1,
+                      switch_body_width + 1],
+                     center = true);
+
+        // Indicator recesses on outer surface — one on each side of the slot
+        // Left recess (ON / green side)
+        translate([-(switch_slot_length/2 + switch_indicator_dia/2 + 0.5), 0, 0])
+            rotate([90, 0, 0])
+                translate([0, 0, -0.1])
+                    cylinder(d = switch_indicator_dia, h = switch_indicator_depth + 0.1);
+
+        // Right recess (OFF / red side)
+        translate([(switch_slot_length/2 + switch_indicator_dia/2 + 0.5), 0, 0])
+            rotate([90, 0, 0])
+                translate([0, 0, -0.1])
+                    cylinder(d = switch_indicator_dia, h = switch_indicator_depth + 0.1);
+    }
+}
+
+
 // ════════════════════════════════════════════════════════════
 // Assembly
 // ════════════════════════════════════════════════════════════
@@ -282,6 +320,7 @@ module roam_case() {
         button_cluster();
         oled_cutout();
         usbc_cutout();
+        switch_cutout();
         band_slot(band_elbow_x);
         band_slot(band_wrist_x);
         vent_slots();

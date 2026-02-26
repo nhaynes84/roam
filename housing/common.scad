@@ -57,6 +57,18 @@ m2_insert_depth = 4.0;
 m2_head_dia     = 4.0;
 m2_head_depth   = 1.5;
 
+// ── Slide Switch (power, side-mounted) ──
+// MSK-12C02 style: 7×3×1.5mm body, 1mm nub travel
+switch_body_length = 7.0;
+switch_body_width  = 3.0;
+switch_body_height = 1.5;
+switch_nub_width   = 1.5;   // slider nub that protrudes through slot
+switch_nub_height  = 1.0;
+switch_slot_length = switch_body_length + 2;  // travel + clearance
+switch_slot_height = switch_nub_height + 0.6; // nub + clearance
+switch_indicator_depth = 0.6;  // engraved color indicator recesses
+switch_indicator_dia   = 3.0;  // circular indicator marks
+
 // ── Ventilation ──
 vent_slot_width  = 1.0;
 vent_slot_length = 8.0;

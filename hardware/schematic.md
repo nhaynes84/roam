@@ -14,7 +14,7 @@
 
 - **Battery**: 502535 LiPo, 3.7V 400mAh
 - **TP4056**: Micro/USB-C charging module with DW01 protection
-- **Slide switch**: Between TP4056 OUT+ and Pico VSYS for hard power off
+- **Slide switch**: MSK-12C02 style, between TP4056 OUT+ and Pico VSYS. Side-mounted in housing with red/green indicator recesses visible through the shell
 - **Pico VSYS**: Accepts 1.8–5.5V, has onboard 3.3V regulator
 
 ## I2C Bus — OLED Display
