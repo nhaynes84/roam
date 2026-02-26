@@ -17,15 +17,17 @@ pico_z_offset = wall_thickness + 1;  // raised on standoffs
 battery_x_offset = pico_x_offset;
 battery_z_offset = wall_thickness + 0.5;
 
-// OLED positioned between buttons and wrist end, angled 15°
-oled_x_offset  = -15;  // toward wrist
+// OLED positioned at wrist end, clear of button arc, angled 15°
+oled_x_offset  = -25;  // further toward wrist, away from button zone
 oled_z_offset  = body_height - wall_thickness - 2;
 oled_tilt      = 15;   // degrees toward user line-of-sight
 
-// Buttons: 2x2 grid on top surface, positioned for left hand reaching
-// to right forearm. Top row = elbow end (index+middle), bottom = wrist (ring+pinky)
-button_cluster_x = 18;  // toward elbow end
-button_cluster_y = 0;   // centered across width
+// Buttons: curved single row across dome width, following natural finger arc.
+// Left hand reaching to right forearm — index lands nearest elbow, pinky nearest wrist.
+// Each button offset in X (forearm axis) and Y (across forearm) to match finger reach.
+// Finger arc: index reaches furthest, pinky shortest, middle/ring in between.
+button_base_x = 12;   // center of arc along forearm axis (toward elbow)
+button_base_y = 0;     // centered across width
 
 // Band slot positions (along X axis)
 band_elbow_x =  (body_length/2 - band_width/2 - 3);
@@ -138,17 +140,26 @@ module button_well(x, y) {
     }
 }
 
-// 2x2 button cluster
+// Curved button arc — follows natural finger splay of left hand
+// reaching across to right forearm. Positions tuned for ~14mm spacing.
+//
+//  Index (1)    — furthest reach, toward elbow + outer edge
+//  Middle (2)   — slightly inboard, tallest finger
+//  Ring (3)     — shorter reach, curves back toward wrist
+//  Pinky (4)    — shortest reach, closest to wrist + inner edge
+//
+// Y axis: positive = away from body (outer edge of forearm)
 module button_cluster() {
-    half_sp = button_spacing / 2;
+    // [x_offset, y_offset] relative to button_base — parabolic arc
+    positions = [
+        [ 10,  21],   // Index:  furthest elbow + outer
+        [  4,   7],   // Middle: slight elbow + slight outer
+        [ -2,  -7],   // Ring:   slight wrist + slight inner
+        [ -8, -21],   // Pinky:  furthest wrist + inner
+    ];
 
-    // Top row (elbow end): Dictation (index), Mode (middle)
-    button_well(button_cluster_x + half_sp,  button_cluster_y + half_sp);
-    button_well(button_cluster_x + half_sp,  button_cluster_y - half_sp);
-
-    // Bottom row (wrist end): Yes (ring), No (pinky)
-    button_well(button_cluster_x - half_sp,  button_cluster_y + half_sp);
-    button_well(button_cluster_x - half_sp,  button_cluster_y - half_sp);
+    for (pos = positions)
+        button_well(button_base_x + pos[0], button_base_y + pos[1]);
 }
 
 // OLED window cutout + recessed ledge
