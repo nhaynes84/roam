@@ -168,20 +168,38 @@ module oled_cutout() {
         }
 }
 
-// OLED mounting standoffs (inside case)
+// OLED mounting standoffs (inside case) with support ribs to floor
 module oled_standoffs() {
     standoff_h = 4;
-    translate([oled_x_offset, 0, wall_thickness])
-        rotate([oled_tilt, 0, 0])
-            for (sx = [1, -1])
-                for (sy = [1, -1])
-                    translate([sx * oled_hole_spacing_w/2, sy * oled_hole_spacing_h/2, 0]) {
-                        difference() {
-                            cylinder(d = m2_insert_dia + 2, h = standoff_h);
-                            translate([0, 0, standoff_h - m2_insert_depth])
-                                cylinder(d = m2_insert_dia, h = m2_insert_depth + 0.1);
-                        }
+    post_d = m2_insert_dia + 2;
+
+    for (sx = [1, -1])
+        for (sy = [1, -1]) {
+            // Calculate the tilted standoff position
+            ox = oled_x_offset + sx * oled_hole_spacing_w/2;
+            // After 15° tilt: y shifts, z shifts
+            oy = sy * oled_hole_spacing_h/2 * cos(oled_tilt);
+            oz = wall_thickness + sy * oled_hole_spacing_h/2 * sin(oled_tilt);
+
+            // Standoff at tilted position
+            translate([ox, oy, oz])
+                rotate([oled_tilt, 0, 0])
+                    difference() {
+                        cylinder(d = post_d, h = standoff_h);
+                        translate([0, 0, standoff_h - m2_insert_depth])
+                            cylinder(d = m2_insert_dia, h = m2_insert_depth + 0.1);
                     }
+
+            // Support rib from standoff base down to floor
+            hull() {
+                // Base of standoff
+                translate([ox, oy, oz])
+                    cylinder(d = post_d, h = 0.5);
+                // Floor anchor
+                translate([ox, oy, wall_thickness])
+                    cylinder(d = post_d + 1, h = 0.5);
+            }
+        }
 }
 
 // USB-C port cutout on wrist end
