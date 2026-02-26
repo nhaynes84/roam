@@ -17,16 +17,22 @@ pico_z_offset = wall_thickness + 1;  // raised on standoffs
 battery_x_offset = pico_x_offset;
 battery_z_offset = wall_thickness + 0.5;
 
-// OLED positioned at wrist end, clear of button arc, angled 15°
-oled_x_offset  = -25;  // further toward wrist, away from button zone
+// OLED positioned at wrist end, clear of button arc.
+// Tilted toward wrist so it faces your eyes when you glance at
+// the inside of your forearm in neutral (pronated) position.
+oled_x_offset  = -25;  // toward wrist, away from button zone
 oled_z_offset  = body_height - wall_thickness - 2;
-oled_tilt      = 15;   // degrees toward user line-of-sight
+oled_tilt      = 10;   // slight tilt toward wrist for readability
 
-// Buttons: curved single row across dome width, following natural finger arc.
-// Left hand reaching to right forearm — index lands nearest elbow, pinky nearest wrist.
-// Each button offset in X (forearm axis) and Y (across forearm) to match finger reach.
-// Finger arc: index reaches furthest, pinky shortest, middle/ring in between.
-button_base_x = 12;   // center of arc along forearm axis (toward elbow)
+// Buttons: curved row across dome width for supinated forearm interaction.
+// Device on inside of RIGHT forearm. User supinates (palm up), left hand
+// reaches down from above. Fingers land across the dome width (Y axis).
+//
+// When supinated and left hand comes down:
+//   Index = furthest from body (positive Y, outer edge)
+//   Pinky = closest to body (negative Y, inner edge)
+// Slight X offsets follow natural finger arc (middle longest, pinky shortest).
+button_base_x = 10;   // center of button zone, slightly toward elbow
 button_base_y = 0;     // centered across width
 
 // Band slot positions (along X axis)
@@ -140,22 +146,23 @@ module button_well(x, y) {
     }
 }
 
-// Curved button arc — follows natural finger splay of left hand
-// reaching across to right forearm. Positions tuned for ~14mm spacing.
+// Curved button arc across dome width — left hand reaching down onto
+// supinated right forearm. Primarily spread across Y (forearm width),
+// with X offsets for natural finger arc (middle longest, pinky shortest).
 //
-//  Index (1)    — furthest reach, toward elbow + outer edge
-//  Middle (2)   — slightly inboard, tallest finger
-//  Ring (3)     — shorter reach, curves back toward wrist
-//  Pinky (4)    — shortest reach, closest to wrist + inner edge
+//   Index (1)  — outer edge, slight elbow offset (longest reach)
+//   Middle (2) — outer-center, furthest elbow offset (tallest finger)
+//   Ring (3)   — inner-center, slight wrist offset
+//   Pinky (4)  — inner edge, most wrist offset (shortest finger)
 //
-// Y axis: positive = away from body (outer edge of forearm)
+// ~14mm spacing between adjacent buttons across Y
 module button_cluster() {
-    // [x_offset, y_offset] relative to button_base — parabolic arc
+    // [x_offset, y_offset] — arc across width with finger-length X curve
     positions = [
-        [ 10,  21],   // Index:  furthest elbow + outer
-        [  4,   7],   // Middle: slight elbow + slight outer
-        [ -2,  -7],   // Ring:   slight wrist + slight inner
-        [ -8, -21],   // Pinky:  furthest wrist + inner
+        [  2,  21],   // Index:  outer edge, slight elbow
+        [  4,   7],   // Middle: outer-center, furthest elbow (longest finger)
+        [  2,  -7],   // Ring:   inner-center, slight elbow
+        [ -3, -21],   // Pinky:  inner edge, toward wrist (shortest finger)
     ];
 
     for (pos = positions)
