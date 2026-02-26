@@ -50,12 +50,20 @@ battery_width  = 25;
 battery_height = 5;
 battery_clearance = 0.5;
 
-// ── Fasteners (M2) ──
+// ── Fasteners (M2 button head) ──
 m2_screw_dia    = 2.2;   // clearance hole
 m2_insert_dia   = 3.2;   // heat-set insert hole
 m2_insert_depth = 4.0;
-m2_head_dia     = 4.0;
-m2_head_depth   = 1.5;
+m2_head_dia     = 3.8;   // button head is ~3.8mm dia
+m2_head_depth   = 1.0;   // button head is ~1mm tall (lower than socket)
+
+// ── Button Caps ──
+// Printed caps that sit in the button wells for better feel
+button_cap_dia      = button_well_dia - 0.6;  // snug in well with clearance
+button_cap_height   = button_well_depth - 0.5; // sits just below dome surface
+button_cap_stem_dia = button_diameter - 0.2;   // contacts the tactile switch nub
+button_cap_stem_h   = 2.0;                     // reaches down to switch
+button_cap_dish     = 0.4;                     // concave top for finger grip
 
 // ── Slide Switch (power, side-mounted) ──
 // MSK-12C02 style: 7×3×1.5mm body, 1mm nub travel
