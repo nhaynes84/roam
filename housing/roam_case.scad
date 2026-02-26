@@ -1,48 +1,61 @@
 // roam_case.scad — Main parametric enclosure for Roam wrist-mount controller
-// Half-moon / climbing-hold ergonomic dome shape
-// Flat bottom (against forearm), convex top for finger rest
+// Asymmetric dome: ridge offset toward inner (body) edge of forearm.
+// Gentle outer slope holds OLED screen (visible while pronated).
+// Steeper inner slope holds buttons in a line along the forearm axis.
 //
-// Orientation: X = forearm axis (length), Y = across forearm (width)
+// Orientation: X = forearm axis (positive = toward elbow)
+//              Y = across forearm (positive = outer / away from body)
 //              Z = up from forearm surface
 //              Origin at center-bottom of case
+//
+// Wearing: inside of RIGHT forearm, midway up. Left hand makes T-shape
+// to reach buttons. User supinates to expose buttons, pronates to read screen.
 
 include <common.scad>
 
-// ── Layout offsets ──
-// Pico sits centered lengthwise, slightly toward elbow end
-pico_x_offset = 5;
-pico_z_offset = wall_thickness + 1;  // raised on standoffs
+// ── Dome asymmetry ──
+// Ridge offset toward inner edge (negative Y = toward body)
+ridge_y_offset = -8;   // mm toward inner edge
+ridge_height   = body_height;  // peak height at ridge line
 
-// Battery sits below Pico toward bottom
-battery_x_offset = pico_x_offset;
+// ── Layout offsets ──
+// Pico sits centered lengthwise, low in the cavity
+pico_x_offset = 0;
+pico_z_offset = wall_thickness + 1;
+
+// Battery next to Pico
+battery_x_offset = 0;
 battery_z_offset = wall_thickness + 0.5;
 
-// OLED positioned at wrist end, clear of button arc.
-// Tilted toward wrist so it faces your eyes when you glance at
-// the inside of your forearm in neutral (pronated) position.
-oled_x_offset  = -25;  // toward wrist, away from button zone
-oled_z_offset  = body_height - wall_thickness - 2;
-oled_tilt      = 10;   // slight tilt toward wrist for readability
+// OLED on the outer slope (positive Y), toward wrist end for glanceability.
+// Readable while pronated — the outer slope faces toward you.
+oled_x_offset  = -10;  // slight wrist bias
+oled_y_offset  = 10;   // on outer slope, away from ridge/buttons
+oled_z_offset  = body_height * 0.6;  // mid-height on outer slope
+oled_tilt      = 25;   // tilt outward (around X axis) to face user when pronated
 
-// Buttons: curved row across dome width for supinated forearm interaction.
-// Device on inside of RIGHT forearm. User supinates (palm up), left hand
-// reaches down from above. Fingers land across the dome width (Y axis).
-//
-// When supinated and left hand comes down:
-//   Index = furthest from body (positive Y, outer edge)
-//   Pinky = closest to body (negative Y, inner edge)
-// Slight X offsets follow natural finger arc (middle longest, pinky shortest).
-button_base_x = 10;   // center of button zone, slightly toward elbow
-button_base_y = 0;     // centered across width
+// Buttons in a line along X axis (forearm direction), on the inner slope.
+// Left hand fingers drape over ridge, tips land on inner slope.
+// Index (elbow) → Pinky (wrist), with finger-length Y curve.
+button_zone_y = ridge_y_offset - 6;  // on inner slope, past the ridge
 
-// Band slot positions (along X axis)
+// Button positions: [x_offset, y_adjust] from button_zone center
+// X spacing ~16mm along forearm, Y follows finger-length arc
+button_positions = [
+    [ 24,  0],   // Index:  elbow end, longest reach
+    [  8,  2],   // Middle: slight elbow, tallest finger reaches furthest over ridge
+    [ -8,  2],   // Ring:   slight wrist, similar reach to middle
+    [-24, -1],   // Pinky:  wrist end, shortest — doesn't reach as far over ridge
+];
+
+// Band slot positions (along X axis, near ends)
 band_elbow_x =  (body_length/2 - band_width/2 - 3);
 band_wrist_x = -(body_length/2 - band_width/2 - 3);
 
-// Slide switch position — side of case, elbow end, accessible with thumb
-switch_y_offset = body_width/2;  // on the right side wall
-switch_x_offset = body_length/4; // toward elbow end
-switch_z_offset = body_height * 0.3;  // lower third of side wall
+// Slide switch — on elbow END wall (accessible, out of the way)
+switch_x_offset = body_length/2;   // elbow end face
+switch_y_offset = 0;               // centered on end wall
+switch_z_offset = body_height * 0.3;
 
 // Case screw post positions (4 corners, inset)
 screw_inset = 8;
@@ -58,10 +71,12 @@ screw_positions = [
 // Modules
 // ════════════════════════════════════════════════════════════
 
-// Outer dome shape — hull of spheres creating the climbing-hold profile
+// Asymmetric dome — ridge runs along X axis, offset toward inner edge.
+// Outer slope (positive Y) is gentle for screen visibility.
+// Inner slope (negative Y) is steeper for finger grip.
 module dome_outer() {
     hull() {
-        // Four base corners — flattened spheres at bottom plane
+        // Four base corners
         for (sx = [1, -1])
             for (sy = [1, -1])
                 translate([
@@ -71,33 +86,37 @@ module dome_outer() {
                 ])
                     sphere(r = corner_radius);
 
-        // Central dome peak — ellipsoidal apex
-        translate([0, 0, body_height - corner_radius])
-            scale([1, 0.85, 1])
-                sphere(r = corner_radius * 2);
+        // Ridge line — the peak, offset toward inner edge, runs along X
+        for (sx = [1, -1, 0])
+            translate([
+                sx * (body_length/3),
+                ridge_y_offset,
+                ridge_height - corner_radius
+            ])
+                scale([1, 0.6, 1])
+                    sphere(r = corner_radius * 1.8);
 
-        // Two mid-height ridges along length for ergonomic shape
+        // Outer slope control — lower, on the screen side
         for (sx = [1, -1])
             translate([
                 sx * (body_length/3),
-                0,
-                body_height * 0.8
+                body_width/2 - corner_radius * 2,
+                body_height * 0.45
             ])
-                sphere(r = corner_radius * 1.5);
+                sphere(r = corner_radius * 1.2);
 
-        // Edge ridges — lower profile toward sides for finger wrap
+        // Inner slope control — mid-height, steeper drop to inner edge
         for (sx = [1, -1])
-            for (sy = [1, -1])
-                translate([
-                    sx * (body_length/2 - corner_radius * 2),
-                    sy * (body_width/2 - corner_radius),
-                    body_height * 0.4
-                ])
-                    sphere(r = corner_radius);
+            translate([
+                sx * (body_length/3),
+                -body_width/2 + corner_radius * 2,
+                body_height * 0.35
+            ])
+                sphere(r = corner_radius);
     }
 }
 
-// Inner cavity — offset inward from outer dome
+// Inner cavity — follows outer dome shape with wall offset
 module dome_inner() {
     translate([0, 0, wall_thickness])
         hull() {
@@ -110,74 +129,63 @@ module dome_inner() {
                     ])
                         sphere(r = corner_radius - 0.5);
 
-            translate([0, 0, body_height - wall_thickness - corner_radius * 1.5])
-                scale([1, 0.85, 1])
-                    sphere(r = corner_radius * 1.2);
+            // Inner ridge
+            for (sx = [1, -1, 0])
+                translate([
+                    sx * (body_length/3),
+                    ridge_y_offset,
+                    ridge_height - wall_thickness - corner_radius * 2
+                ])
+                    scale([1, 0.6, 1])
+                        sphere(r = corner_radius * 1.0);
 
+            // Inner outer-slope
             for (sx = [1, -1])
                 translate([
                     sx * (body_length/3),
-                    0,
-                    body_height * 0.75
+                    body_width/2 - corner_radius * 2 - wall_thickness,
+                    body_height * 0.4
                 ])
-                    sphere(r = corner_radius);
+                    sphere(r = corner_radius * 0.8);
 
+            // Inner inner-slope
             for (sx = [1, -1])
-                for (sy = [1, -1])
-                    translate([
-                        sx * (body_length/2 - corner_radius * 2 - wall_thickness),
-                        sy * (body_width/2 - corner_radius - wall_thickness),
-                        body_height * 0.35
-                    ])
-                        sphere(r = corner_radius - 0.5);
+                translate([
+                    sx * (body_length/3),
+                    -body_width/2 + corner_radius * 2 + wall_thickness,
+                    body_height * 0.3
+                ])
+                    sphere(r = corner_radius - 0.5);
         }
 }
 
 // Button well — recessed cylindrical well in dome surface
 module button_well(x, y) {
     translate([x, y, 0]) {
-        // Well recess — cuts from dome surface inward (~3mm deep)
-        // Starts at body_height - well_depth, extends well past dome peak
-        translate([0, 0, body_height - button_well_depth])
-            cylinder(d = button_well_dia, h = button_well_depth + 10);
-        // Through-hole for switch stem / button cap — full height
+        // Well recess — cuts from dome surface inward
+        translate([0, 0, body_height - button_well_depth - 3])
+            cylinder(d = button_well_dia, h = button_well_depth + 15);
+        // Through-hole for switch stem / button cap
         translate([0, 0, wall_thickness - 0.1])
             cylinder(d = button_diameter + print_tolerance * 2, h = body_height + 5);
     }
 }
 
-// Curved button arc across dome width — left hand reaching down onto
-// supinated right forearm. Primarily spread across Y (forearm width),
-// with X offsets for natural finger arc (middle longest, pinky shortest).
-//
-//   Index (1)  — outer edge, slight elbow offset (longest reach)
-//   Middle (2) — outer-center, furthest elbow offset (tallest finger)
-//   Ring (3)   — inner-center, slight wrist offset
-//   Pinky (4)  — inner edge, most wrist offset (shortest finger)
-//
-// ~14mm spacing between adjacent buttons across Y
+// Button line along forearm axis on inner slope
 module button_cluster() {
-    // [x_offset, y_offset] — arc across width with finger-length X curve
-    positions = [
-        [  2,  21],   // Index:  outer edge, slight elbow
-        [  4,   7],   // Middle: outer-center, furthest elbow (longest finger)
-        [  2,  -7],   // Ring:   inner-center, slight elbow
-        [ -3, -21],   // Pinky:  inner edge, toward wrist (shortest finger)
-    ];
-
-    for (pos = positions)
-        button_well(button_base_x + pos[0], button_base_y + pos[1]);
+    for (pos = button_positions)
+        button_well(pos[0], button_zone_y + pos[1]);
 }
 
-// OLED window cutout + recessed ledge
+// OLED window cutout + recessed ledge — on outer slope
 module oled_cutout() {
-    translate([oled_x_offset, 0, oled_z_offset])
+    translate([oled_x_offset, oled_y_offset, oled_z_offset])
         rotate([oled_tilt, 0, 0]) {
-            // Visible window — through the shell
+            // Visible window
             translate([0, 0, -1])
                 cube([oled_visible_width + 1, oled_visible_height + 1, wall_thickness + 2], center = true);
 
-            // Recessed ledge for PCB to sit in
+            // Recessed ledge for PCB
             translate([0, 0, -(wall_thickness + 0.5)])
                 cube([oled_board_width + print_tolerance * 2,
                       oled_board_height + print_tolerance * 2,
@@ -185,20 +193,17 @@ module oled_cutout() {
         }
 }
 
-// OLED mounting standoffs (inside case) with support ribs to floor
+// OLED mounting standoffs with support ribs to floor
 module oled_standoffs() {
     standoff_h = 4;
     post_d = m2_insert_dia + 2;
 
     for (sx = [1, -1])
         for (sy = [1, -1]) {
-            // Calculate the tilted standoff position
             ox = oled_x_offset + sx * oled_hole_spacing_w/2;
-            // After 15° tilt: y shifts, z shifts
-            oy = sy * oled_hole_spacing_h/2 * cos(oled_tilt);
+            oy = oled_y_offset + sy * oled_hole_spacing_h/2 * cos(oled_tilt);
             oz = wall_thickness + sy * oled_hole_spacing_h/2 * sin(oled_tilt);
 
-            // Standoff at tilted position
             translate([ox, oy, oz])
                 rotate([oled_tilt, 0, 0])
                     difference() {
@@ -207,19 +212,17 @@ module oled_standoffs() {
                             cylinder(d = m2_insert_dia, h = m2_insert_depth + 0.1);
                     }
 
-            // Support rib from standoff base down to floor
+            // Support rib to floor
             hull() {
-                // Base of standoff
                 translate([ox, oy, oz])
                     cylinder(d = post_d, h = 0.5);
-                // Floor anchor
                 translate([ox, oy, wall_thickness])
                     cylinder(d = post_d + 1, h = 0.5);
             }
         }
 }
 
-// USB-C port cutout on wrist end
+// USB-C port cutout — wrist end
 module usbc_cutout() {
     translate([-body_length/2 - 1, 0, wall_thickness + pico_height/2 + 2])
         rotate([0, 90, 0])
@@ -252,18 +255,16 @@ module battery_compartment() {
               battery_height + battery_clearance], center = true);
 }
 
-// Band slot — bridge loop for strap to thread through
+// Band slot — bridge loop for strap
 module band_slot(x_pos) {
     slot_h = band_thickness + band_slot_clearance * 2;
     slot_total_w = band_width + band_slot_clearance * 2;
     bridge_thick = wall_thickness;
 
     translate([x_pos, 0, 0]) {
-        // Slot through the bottom wall
         translate([0, 0, -0.1])
             cube([bridge_thick + 2, slot_total_w, slot_h + wall_thickness], center = true);
 
-        // Bridge opening on each side of the case floor
         for (sy = [1, -1])
             translate([0, sy * (body_width/2), slot_h/2 + wall_thickness/2])
                 rotate([0, 90, 0])
@@ -271,7 +272,7 @@ module band_slot(x_pos) {
     }
 }
 
-// Ventilation slots on bottom surface
+// Ventilation slots on bottom
 module vent_slots() {
     num_vents = 5;
     start_x = -(num_vents - 1) * vent_slot_spacing / 2;
@@ -298,34 +299,33 @@ module screw_posts() {
             }
 }
 
-
-// Slide switch cutout — slot in side wall + internal pocket + indicator recesses
+// Slide switch cutout — on elbow end wall
 module switch_cutout() {
     translate([switch_x_offset, switch_y_offset, switch_z_offset]) {
-        // Slider slot through shell (for nub to poke through)
-        rotate([90, 0, 0])
+        // Slider slot through end wall
+        rotate([0, 90, 0])
             translate([0, 0, -wall_thickness - 1])
-                cube([switch_slot_length, switch_slot_height, wall_thickness + 2],
+                cube([switch_slot_height, switch_slot_length, wall_thickness + 2],
                      center = true);
 
         // Internal cavity for switch body
-        rotate([90, 0, 0])
-            translate([0, 0, wall_thickness/2])
-                cube([switch_body_length + 1,
-                      switch_body_height + 1,
+        rotate([0, 90, 0])
+            translate([0, 0, -wall_thickness/2])
+                cube([switch_body_height + 1,
+                      switch_body_length + 1,
                       switch_body_width + 1],
                      center = true);
 
-        // Indicator recesses on outer surface — one on each side of the slot
-        // Left recess (ON / green side)
-        translate([-(switch_slot_length/2 + switch_indicator_dia/2 + 0.5), 0, 0])
-            rotate([90, 0, 0])
+        // Indicator recesses — above and below the slot on end wall
+        // Top recess (ON / green)
+        translate([0, -(switch_slot_length/2 + switch_indicator_dia/2 + 0.5), 0])
+            rotate([0, 90, 0])
                 translate([0, 0, -0.1])
                     cylinder(d = switch_indicator_dia, h = switch_indicator_depth + 0.1);
 
-        // Right recess (OFF / red side)
-        translate([(switch_slot_length/2 + switch_indicator_dia/2 + 0.5), 0, 0])
-            rotate([90, 0, 0])
+        // Bottom recess (OFF / red)
+        translate([0, (switch_slot_length/2 + switch_indicator_dia/2 + 0.5), 0])
+            rotate([0, 90, 0])
                 translate([0, 0, -0.1])
                     cylinder(d = switch_indicator_dia, h = switch_indicator_depth + 0.1);
     }
@@ -360,7 +360,7 @@ module roam_case() {
         band_slot(band_wrist_x);
         vent_slots();
 
-        // Trim flat bottom (remove anything below Z=0)
+        // Trim flat bottom
         translate([0, 0, -50])
             cube([200, 200, 100], center = true);
     }
