@@ -127,15 +127,14 @@ module dome_inner() {
 
 // Button well — recessed cylindrical well in dome surface
 module button_well(x, y) {
-    // Find approximate Z at this XY on the dome surface
-    z_surface = body_height * 0.7;  // approximate dome surface height at button zone
-
-    translate([x, y, z_surface - button_well_depth + 0.1]) {
-        // Outer well recess
-        cylinder(d = button_well_dia, h = button_well_depth + 1);
-        // Through-hole for button stem
-        translate([0, 0, -5])
-            cylinder(d = button_diameter + print_tolerance * 2, h = 10);
+    translate([x, y, 0]) {
+        // Well recess — cuts from dome surface inward (~3mm deep)
+        // Starts at body_height - well_depth, extends well past dome peak
+        translate([0, 0, body_height - button_well_depth])
+            cylinder(d = button_well_dia, h = button_well_depth + 10);
+        // Through-hole for switch stem / button cap — full height
+        translate([0, 0, wall_thickness - 0.1])
+            cylinder(d = button_diameter + print_tolerance * 2, h = body_height + 5);
     }
 }
 
