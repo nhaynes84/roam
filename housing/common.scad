@@ -8,13 +8,24 @@ body_height   = 25;    // dome peak above flat bottom
 wall_thickness = 2.0;
 corner_radius  = 5;
 
-// ── Pico 2 W ──
+// ── Pimoroni Pico Plus 2 W ──
+// Same footprint as standard Pico 2W (USB-C, RP2350, 8MB PSRAM, 16MB flash)
 pico_length = 52.3;
 pico_width  = 21.0;
 pico_height = 3.7;
 pico_hole_spacing_l = 47.0;  // mounting hole center-to-center lengthwise
 pico_hole_spacing_w = 11.4;  // mounting hole center-to-center widthwise
 pico_hole_dia       = 2.1;   // M2 through-hole
+
+// ── LiPo SHIM for Pico ──
+// Pimoroni PIM557 — sandwiches under Pico on headers.
+// Handles LiPo charging via Pico USB-C, has built-in power button + LEDs.
+// Replaces TP4056 and slide switch.
+shim_width  = 21.0;   // same width as Pico
+shim_length = 21.0;
+shim_height = 7.0;    // including JST connector height
+// Combined stack: SHIM (7mm) + Pico (3.7mm) = ~11mm
+pico_stack_height = shim_height + pico_height;  // total height of SHIM+Pico
 
 // ── OLED 1.3" (SH1106 / SSD1306) ──
 oled_board_width   = 35;
@@ -39,12 +50,11 @@ usbc_height = 3.5;
 usbc_radius = 1.5;   // corner rounding
 
 // ── Mounting ──
-// Velcro attachment to neoprene forearm band — no strap hardware needed.
+// Velcro attachment to neoprene forearm band.
 // Adhesive hook velcro on lid bottom, loop velcro on neoprene band.
-// Velcro patch sized to cover most of the lid for max grip.
-velcro_patch_length = 70;  // slightly inset from lid edges
+velcro_patch_length = 70;
 velcro_patch_width  = 38;
-velcro_recess_depth = 1.0; // recess in lid bottom so velcro sits flush
+velcro_recess_depth = 1.0;  // flush recess in lid bottom
 
 // ── Battery (502535 LiPo) ──
 battery_length = 35;
@@ -57,27 +67,14 @@ m2_screw_dia    = 2.2;   // clearance hole
 m2_insert_dia   = 3.2;   // heat-set insert hole
 m2_insert_depth = 4.0;
 m2_head_dia     = 3.8;   // button head is ~3.8mm dia
-m2_head_depth   = 1.0;   // button head is ~1mm tall (lower than socket)
+m2_head_depth   = 1.0;   // button head is ~1mm tall
 
 // ── Button Caps ──
-// Printed caps that sit in the button wells for better feel
-button_cap_dia      = button_well_dia - 0.6;  // snug in well with clearance
-button_cap_height   = button_well_depth - 0.5; // sits just below dome surface
-button_cap_stem_dia = button_diameter - 0.2;   // contacts the tactile switch nub
-button_cap_stem_h   = 2.0;                     // reaches down to switch
-button_cap_dish     = 0.4;                     // concave top for finger grip
-
-// ── Slide Switch (power, side-mounted) ──
-// MSK-12C02 style: 7×3×1.5mm body, 1mm nub travel
-switch_body_length = 7.0;
-switch_body_width  = 3.0;
-switch_body_height = 1.5;
-switch_nub_width   = 1.5;   // slider nub that protrudes through slot
-switch_nub_height  = 1.0;
-switch_slot_length = switch_body_length + 2;  // travel + clearance
-switch_slot_height = switch_nub_height + 0.6; // nub + clearance
-switch_indicator_depth = 0.6;  // engraved color indicator recesses
-switch_indicator_dia   = 3.0;  // circular indicator marks
+button_cap_dia      = button_well_dia - 0.6;
+button_cap_height   = button_well_depth - 0.5;
+button_cap_stem_dia = button_diameter - 0.2;
+button_cap_stem_h   = 2.0;
+button_cap_dish     = 0.4;
 
 // ── Ventilation ──
 vent_slot_width  = 1.0;
@@ -87,7 +84,7 @@ vent_slot_spacing = 3.0;
 // ── Derived ──
 inner_length = body_length - 2 * wall_thickness;
 inner_width  = body_width  - 2 * wall_thickness;
-inner_height = body_height - wall_thickness;  // bottom wall only
+inner_height = body_height;  // open bottom, full height available
 
 // ── Tolerances ──
 print_tolerance = 0.2;  // FDM clearance
