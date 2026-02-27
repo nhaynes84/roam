@@ -6,7 +6,11 @@
 
 # Flash all firmware files to Pico
 flash:
-	mpremote cp -r firmware/ :
+	mpremote mkdir :lib 2>/dev/null || true
+	mpremote cp firmware/lib/sh1106.py :lib/sh1106.py
+	@for f in firmware/*.py firmware/*.json; do \
+		mpremote cp "$$f" ":$$(basename $$f)"; \
+	done
 
 # Soft-reset the Pico
 reset:

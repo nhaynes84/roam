@@ -54,18 +54,35 @@ class Battery:
         """Take a single battery voltage reading.
 
         Sets GP25 high to avoid SPI bus contention with the CYW43439,
-        reads ADC, then releases GP25.
+        reads ADC, then releases GP25. Averages 3 samples for stability.
+
+        Note: On Pimoroni Pico Plus 2 W, the VSYS divider ratio may differ
+        from the standard Pico 2 W. If readings are incorrect, adjust
+        VSYS_DIVIDER or use the Pimoroni-specific voltage reading method.
         """
         self._gp25.value(1)
         time.sleep_ms(1)  # Settling time
 
-        raw = self._adc.read_u16()
+        # Average 3 samples
+        total = 0
+        for _ in range(3):
+            total += self._adc.read_u16()
+            time.sleep_ms(1)
+        raw = total // 3
+
         adc_voltage = (raw / self.ADC_RESOLUTION) * self.ADC_VREF
         self._voltage = adc_voltage * self.VSYS_DIVIDER
 
         self._gp25.value(0)
 
-        self._percent = self._voltage_to_percent(self._voltage)
+        # Sanity check: USB power should read ~5V, LiPo 3.0-4.2V
+        # If reading is nonsensical, assume USB power
+        if self._voltage < 1.0 or self._voltage > 6.0:
+            self._voltage = 5.0  # Assume USB power
+            self._percent = 100
+        else:
+            self._percent = self._voltage_to_percent(self._voltage)
+
         self._last_read = time.ticks_ms()
         return self._voltage
 

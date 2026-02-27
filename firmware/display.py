@@ -36,11 +36,24 @@ class Display:
     """
 
     def __init__(self, sda_pin=4, scl_pin=5, i2c_freq=400_000):
-        i2c = machine.I2C(0, sda=machine.Pin(sda_pin), scl=machine.Pin(scl_pin),
-                          freq=i2c_freq)
-        self._oled = SH1106_I2C(SCREEN_WIDTH, SCREEN_HEIGHT, i2c)
+        self._oled = None
         self._dirty = True
         self._dimmed = False
+        self._available = False
+
+        try:
+            i2c = machine.I2C(0, sda=machine.Pin(sda_pin), scl=machine.Pin(scl_pin),
+                              freq=i2c_freq)
+            devices = i2c.scan()
+            if 0x3C in devices or 0x3D in devices:
+                addr = 0x3C if 0x3C in devices else 0x3D
+                self._oled = SH1106_I2C(SCREEN_WIDTH, SCREEN_HEIGHT, i2c, addr=addr)
+                self._available = True
+                print("display: SH1106 found at 0x{:02X}".format(addr))
+            else:
+                print("display: no OLED found on I2C bus")
+        except Exception as e:
+            print("display: init failed:", e)
 
         # State
         self._mode = "Roam"
@@ -98,24 +111,26 @@ class Display:
 
     def dim(self):
         """Dim the display for idle mode."""
-        if not self._dimmed:
+        if self._available and not self._dimmed:
             self._oled.contrast(10)
             self._dimmed = True
 
     def brighten(self):
         """Restore normal brightness."""
-        if self._dimmed:
+        if self._available and self._dimmed:
             self._oled.contrast(0x7F)
             self._dimmed = False
 
     def power_off(self):
         """Turn off the OLED."""
-        self._oled.poweroff()
+        if self._available:
+            self._oled.poweroff()
 
     def power_on(self):
         """Turn on the OLED and mark for redraw."""
-        self._oled.poweron()
-        self._dirty = True
+        if self._available:
+            self._oled.poweron()
+            self._dirty = True
 
     def _render(self):
         """Redraw all 4 status lines to the framebuffer."""
@@ -167,6 +182,10 @@ class Display:
     async def render_loop(self):
         """Main render loop, ~10Hz. Only redraws when dirty."""
         while True:
+            if not self._available:
+                await asyncio.sleep_ms(1000)
+                continue
+
             # Check if action text should fade
             if self._last_action:
                 elapsed = time.ticks_diff(time.ticks_ms(), self._action_time)
