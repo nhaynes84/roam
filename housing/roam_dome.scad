@@ -10,9 +10,9 @@ ridge_height = body_height;
 
 // ── OLED on outer slope ──
 oled_x_offset  = -10;
-oled_y_offset  = 4;
-oled_z_offset  = 9;
-oled_tilt      = 20;
+oled_y_offset  = 10;
+oled_z_offset  = 15;
+oled_tilt      = 25;
 
 
 // ════════════════════════════════════════════════════════════
@@ -118,35 +118,51 @@ module button_cluster() {
 
 // --- OLED ---
 
-// OLED window cutout through dome wall
+// OLED window cutout through dome wall — deep cut to fully penetrate curved surface
 module oled_cutout() {
     translate([oled_x_offset, oled_y_offset, oled_z_offset])
         rotate([oled_tilt, 0, 0])
-            translate([0, 0, 3])
-                cube([oled_visible_width + 1, oled_visible_height + 1, 10], center = true);
+            cube([oled_visible_width + 1, oled_visible_height + 1, 20], center = true);
 }
 
-// OLED mount — 4 corner bosses with press-fit pegs (29x28mm spacing)
-// 1.5mm pads directly against dome interior wall. No X cross-brace.
+// OLED mount — 4 corner bosses anchored to dome wall via intersection,
+// with press-fit pegs protruding inward for board mounting.
+// Everything clipped to dome_outer envelope to prevent protrusion above dome surface.
 module oled_mount() {
-    translate([oled_x_offset, oled_y_offset, oled_z_offset])
-        rotate([oled_tilt, 0, 0])
-            for (sx = [1, -1])
-                for (sy = [1, -1])
-                    translate([sx * oled_hole_spacing_w/2, sy * oled_hole_spacing_h/2,
-                               -(wall_thickness + 1.5)]) {
-                        // Boss pad
-                        cylinder(d = 6, h = 1.5);
-                        // Press-fit peg
-                        cylinder(d = oled_hole_dia - 0.3, h = 1.5 + oled_board_thick);
-                    }
+    intersection() {
+        dome_outer();
+        union() {
+            // Boss pads — tall cylinders spanning through dome wall at corner positions
+            translate([oled_x_offset, oled_y_offset, oled_z_offset])
+                rotate([oled_tilt, 0, 0])
+                    for (sx = [1, -1])
+                        for (sy = [1, -1])
+                            translate([sx * oled_hole_spacing_w/2,
+                                       sy * oled_hole_spacing_h/2, -12])
+                                cylinder(d = 7, h = 16);
+
+            // Press-fit pegs — protrude inward from boss pads
+            translate([oled_x_offset, oled_y_offset, oled_z_offset])
+                rotate([oled_tilt, 0, 0])
+                    for (sx = [1, -1])
+                        for (sy = [1, -1])
+                            translate([sx * oled_hole_spacing_w/2,
+                                       sy * oled_hole_spacing_h/2,
+                                       -(wall_thickness + 1.5)])
+                                cylinder(d = oled_hole_dia - 0.3, h = 1.5 + oled_board_thick);
+        }
+    }
 }
 
 // --- USB-C ---
 
-// USB-C port cutout at wrist end — z position based on Pico stack height
+// USB-C port cutout at wrist end — z position based on Pico stack height.
+// NOTE: dome is only ~10mm tall at wrist end (x=-45). With pico_standoff_height=3
+// the port center is at z≈11.9 which may exceed dome height there.
+// Extended cutout reaches from z=0 upward to catch available wall material.
 module usbc_cutout() {
     usbc_z = pico_standoff_height + shim_height + pico_height/2;
+    // Standard port-shaped cutout at calculated height
     translate([-body_length/2 - 1, pico_y_offset, usbc_z])
         rotate([0, 90, 0])
             hull() {
@@ -154,6 +170,9 @@ module usbc_cutout() {
                     translate([0, sx * (usbc_width/2 - usbc_radius), 0])
                         cylinder(r = usbc_radius, h = wall_thickness + 2);
             }
+    // Extended vertical slot to ensure opening reaches dome edge
+    translate([-body_length/2 - 1, pico_y_offset - usbc_width/2, 0])
+        cube([wall_thickness + 2, usbc_width, usbc_z + usbc_radius]);
 }
 
 // --- Ventilation ---
@@ -172,18 +191,33 @@ module vent_slots() {
 
 // 4 cylinders (6.2mm OD, 6mm tall) at dome rim positions.
 // Heat-set insert holes open at z=0 (rim face, mating with base plate).
-// Print on build plate when dome is printed rim-down — no overhang.
+// Each boss has a connecting rib to the nearest dome wall (y-direction)
+// to ensure solid structural connection to the shell.
 module dome_screw_bosses() {
     boss_od = 6.2;
     boss_height = 6;
+    rib_width = 2;
 
-    for (pos = screw_positions)
+    for (pos = screw_positions) {
+        // Boss cylinder with heat-set insert hole
         translate([pos[0], pos[1], 0])
             difference() {
                 cylinder(d = boss_od, h = boss_height);
                 translate([0, 0, -0.1])
                     cylinder(d = m2_insert_dia, h = m2_insert_depth + 0.1);
             }
+
+        // Connecting rib from boss to nearest dome wall (shortest path in y)
+        y_wall = (pos[1] > 0)
+            ? (body_width/2 - wall_thickness/2)
+            : -(body_width/2 - wall_thickness/2);
+        hull() {
+            translate([pos[0], pos[1], 0])
+                cylinder(d = rib_width, h = boss_height);
+            translate([pos[0], y_wall, 0])
+                cylinder(d = rib_width, h = boss_height);
+        }
+    }
 }
 
 
