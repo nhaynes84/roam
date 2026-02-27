@@ -158,12 +158,15 @@ module button_cluster() {
 }
 
 // OLED window cutout + recessed ledge
+// Cutting volume must be deep enough to fully penetrate the curved dome
+// wall at the tilt angle.
 module oled_cutout() {
     translate([oled_x_offset, oled_y_offset, oled_z_offset])
         rotate([oled_tilt, 0, 0]) {
-            translate([0, 0, -1])
-                cube([oled_visible_width + 1, oled_visible_height + 1, wall_thickness + 2], center = true);
-            translate([0, 0, -(wall_thickness + 0.5)])
+            // Visible window — deep cut to punch fully through dome wall
+            cube([oled_visible_width + 1, oled_visible_height + 1, 20], center = true);
+            // Recessed ledge for PCB
+            translate([0, 0, -10])
                 cube([oled_board_width + print_tolerance * 2,
                       oled_board_height + print_tolerance * 2,
                       oled_board_thick + 0.5], center = true);
