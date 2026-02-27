@@ -38,11 +38,13 @@ usbc_width  = 9.0;
 usbc_height = 3.5;
 usbc_radius = 1.5;   // corner rounding
 
-// ── Band / Strap ──
-band_width     = 25;
-band_thickness = 3;   // silicone strap thickness
-band_slot_depth= 3;
-band_slot_clearance = 1;  // extra clearance around strap
+// ── Mounting ──
+// Velcro attachment to neoprene forearm band — no strap hardware needed.
+// Adhesive hook velcro on lid bottom, loop velcro on neoprene band.
+// Velcro patch sized to cover most of the lid for max grip.
+velcro_patch_length = 70;  // slightly inset from lid edges
+velcro_patch_width  = 38;
+velcro_recess_depth = 1.0; // recess in lid bottom so velcro sits flush
 
 // ── Battery (502535 LiPo) ──
 battery_length = 35;

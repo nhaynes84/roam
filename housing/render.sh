@@ -26,10 +26,6 @@ echo "Rendering roam_button_cap.stl..."
 eval openscad -o roam_button_cap.stl roam_button_cap.scad $FAST_FLAG
 echo "  Done: $(du -h roam_button_cap.stl | cut -f1)"
 
-echo "Rendering roam_tpu_pad.stl..."
-eval openscad -o roam_tpu_pad.stl roam_tpu_pad.scad $FAST_FLAG
-echo "  Done: $(du -h roam_tpu_pad.stl | cut -f1)"
-
 echo ""
 echo "All STLs rendered:"
 ls -lh *.stl
