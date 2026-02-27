@@ -93,33 +93,10 @@ module switch_pedestals() {
                 }
 }
 
-// Battery cradle — perimeter walls with retaining clips
-// Positioned at (battery_x_offset, battery_y_offset) on base plate top
-module battery_cradle() {
-    cradle_wall  = 1.5;
-    clip_height  = 3;
-    clip_thick   = 1.0;
-    clip_overhang = 1.0;
-
-    bl = battery_length + battery_clearance * 2;
-    bw = battery_width  + battery_clearance * 2;
-
-    translate([battery_x_offset, battery_y_offset, base_plate_thick]) {
-        // Perimeter walls
-        difference() {
-            translate([-(bl + cradle_wall * 2)/2, -(bw + cradle_wall * 2)/2, 0])
-                cube([bl + cradle_wall * 2, bw + cradle_wall * 2, clip_height]);
-            translate([-bl/2, -bw/2, -0.1])
-                cube([bl, bw, clip_height + 0.2]);
-        }
-
-        // Retaining clips on short ends (+-x) to hold battery down
-        for (sx = [1, -1])
-            translate([sx * (bl/2 + cradle_wall) - (sx > 0 ? clip_overhang : 0),
-                       -4, clip_height - clip_thick])
-                cube([clip_overhang, 8, clip_thick]);
-    }
-}
+// Battery: 502535 LiPo (35x25x5mm) secured with foam tape during assembly.
+// No cradle — the battery footprint overlaps 3 of 4 switch pedestals at any
+// viable position on this plate. Battery sits in the y>0 zone between pedestals
+// and dome ceiling, held laterally by surrounding structure.
 
 // Screw holes — 4 countersunk M2 through-holes from bottom
 // Hidden by velcro patch on arm-facing side
@@ -154,7 +131,6 @@ module roam_base() {
             registration_lip();
             pico_standoffs();
             switch_pedestals();
-            battery_cradle();
         }
 
         screw_holes();
