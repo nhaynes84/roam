@@ -45,8 +45,8 @@ _REPORT_REFERENCE_UUID = bluetooth.UUID(0x2908)
 # HID appearance: keyboard
 _HID_APPEARANCE = const(961)  # 0x03C1
 
-# Advertising interval (ms)
-_ADV_INTERVAL_MS = const(30_000)
+# Advertising interval (microseconds)
+_ADV_INTERVAL_US = const(100_000)  # 100ms — fast enough for macOS discovery
 
 
 class BleHID:
@@ -266,7 +266,7 @@ class BleHID:
 
             try:
                 connection = await aioble.advertise(
-                    _ADV_INTERVAL_MS * 1000,  # aioble uses microseconds
+                    _ADV_INTERVAL_US,
                     name=self._device_name,
                     services=[_HID_SERVICE_UUID],
                     appearance=_HID_APPEARANCE,
