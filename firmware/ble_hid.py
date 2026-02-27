@@ -13,6 +13,7 @@ import asyncio
 import struct
 
 import aioble
+import aioble.security
 import bluetooth
 
 from hid_report import (
@@ -64,6 +65,9 @@ class BleHID:
         self._consumer_report_char = None
         self._battery_char = None
         self._should_advertise = True
+
+        # Load saved bonding keys for reconnection
+        aioble.security.load_secrets()
 
         self._register_services()
 
@@ -160,12 +164,12 @@ class BleHID:
             read=True,
             initial="Roam v1",
         )
-        # PnP ID: vendor source=0x02 (USB), vendor=0x05AC (placeholder),
-        # product=0x0001, version=0x0001
+        # PnP ID: vendor source=0x02 (USB), vendor=0x1209 (pid.codes open),
+        # product=0x0001, version=0x0100
         aioble.Characteristic(
             device_info_service, _PNP_ID_UUID,
             read=True,
-            initial=struct.pack("<BHHH", 0x02, 0x05AC, 0x0001, 0x0001),
+            initial=struct.pack("<BHHH", 0x02, 0x1209, 0x0001, 0x0100),
         )
 
         # Register all services
@@ -274,6 +278,13 @@ class BleHID:
 
                 self._connection = connection
                 self._connected = True
+
+                # Pair/bond — macOS requires encryption for HID
+                try:
+                    await connection.pair()
+                    print("ble_hid: paired")
+                except Exception as e:
+                    print("ble_hid: pair failed:", e)
 
                 if on_connect:
                     await on_connect()

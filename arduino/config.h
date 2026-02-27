@@ -1,0 +1,87 @@
+// Roam — Pin definitions, button mapping, and timing constants
+// Pimoroni Pico Plus 2 W (RP2350 + CYW43439)
+
+#pragma once
+
+#include <Arduino.h>
+
+// --- I2C (OLED) ---
+#define PIN_SDA        4
+#define PIN_SCL        5
+#define I2C_FREQ       400000
+
+// --- Buttons (active low, internal pull-up) ---
+#define PIN_BTN_INDEX  10
+#define PIN_BTN_MIDDLE 11
+#define PIN_BTN_RING   12
+#define PIN_BTN_PINKY  13
+#define NUM_BUTTONS    4
+
+static const uint8_t BUTTON_PINS[NUM_BUTTONS] = {
+    PIN_BTN_INDEX, PIN_BTN_MIDDLE, PIN_BTN_RING, PIN_BTN_PINKY
+};
+
+// --- Haptic motor (NPN via 1kΩ) ---
+#define PIN_MOTOR      15
+
+// --- Status LED (via 100Ω) ---
+#define ROAM_LED_PIN   16
+
+// --- Battery ADC ---
+#define PIN_BATTERY    29   // ADC3 — VSYS/3
+#define PIN_GP25       25   // Must be HIGH during ADC read (CYW43 SPI)
+
+// --- Timing ---
+#define DEBOUNCE_MS       50
+#define LONG_PRESS_MS     600
+#define BUTTON_POLL_US    10000   // 100 Hz
+#define DISPLAY_PERIOD_MS 100     // 10 Hz
+#define BATTERY_PERIOD_MS 60000   // Every 60s
+#define ACTION_FADE_MS    3000    // Action text display duration
+
+// --- Display ---
+#define SCREEN_WIDTH   128
+#define SCREEN_HEIGHT  64
+
+// --- Action types ---
+enum ActionType : uint8_t {
+    ACTION_NONE = 0,
+    // Index button
+    ACTION_DICTATION,       // Consumer key 0x00CF
+    ACTION_TMUX_PANE,       // Ctrl+B, o
+    // Middle button
+    ACTION_CYCLE_MODE,      // Shift+Tab
+    ACTION_BLE_SWITCH,      // Disconnect + re-advertise
+    // Ring button
+    ACTION_APPROVE_YES,     // y + Enter
+    ACTION_APPROVE_ALWAYS,  // Tab + Enter
+    // Pinky button
+    ACTION_REJECT_ESCAPE,   // Escape
+    ACTION_KILL_PROCESS,    // Ctrl+C
+};
+
+// Button index → short/long action mapping
+struct ButtonMapping {
+    ActionType shortPress;
+    ActionType longPress;
+};
+
+static const ButtonMapping BUTTON_MAP[NUM_BUTTONS] = {
+    { ACTION_DICTATION,     ACTION_TMUX_PANE     },  // Index
+    { ACTION_CYCLE_MODE,    ACTION_BLE_SWITCH    },  // Middle
+    { ACTION_APPROVE_YES,   ACTION_APPROVE_ALWAYS },  // Ring
+    { ACTION_REJECT_ESCAPE, ACTION_KILL_PROCESS  },  // Pinky
+};
+
+// Human-readable action names for display
+static const char* ACTION_NAMES[] = {
+    "",              // ACTION_NONE
+    "Dictation",     // ACTION_DICTATION
+    "Tmux Pane",     // ACTION_TMUX_PANE
+    "Cycle Mode",    // ACTION_CYCLE_MODE
+    "BLE Switch",    // ACTION_BLE_SWITCH
+    "Approve",       // ACTION_APPROVE_YES
+    "Always",        // ACTION_APPROVE_ALWAYS
+    "Escape",        // ACTION_REJECT_ESCAPE
+    "Kill",          // ACTION_KILL_PROCESS
+};
