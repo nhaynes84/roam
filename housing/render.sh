@@ -14,13 +14,13 @@ if [[ "${1:-}" == "--fast" ]]; then
     echo "Fast mode: reduced resolution"
 fi
 
-echo "Rendering roam_case.stl..."
-eval openscad -o roam_case.stl roam_case.scad $FAST_FLAG
-echo "  Done: $(du -h roam_case.stl | cut -f1)"
+echo "Rendering roam_dome.stl..."
+eval openscad -o roam_dome.stl roam_dome.scad $FAST_FLAG
+echo "  Done: $(du -h roam_dome.stl | cut -f1)"
 
-echo "Rendering roam_lid.stl..."
-eval openscad -o roam_lid.stl roam_lid.scad $FAST_FLAG
-echo "  Done: $(du -h roam_lid.stl | cut -f1)"
+echo "Rendering roam_base.stl..."
+eval openscad -o roam_base.stl roam_base.scad $FAST_FLAG
+echo "  Done: $(du -h roam_base.stl | cut -f1)"
 
 echo "Rendering roam_button_cap.stl..."
 eval openscad -o roam_button_cap.stl roam_button_cap.scad $FAST_FLAG

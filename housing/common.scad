@@ -8,6 +8,9 @@ body_height   = 25;    // dome peak above flat bottom
 wall_thickness = 2.0;
 corner_radius  = 5;
 
+// ── Base Plate ──
+base_plate_thick = 2.5;
+
 // ── Pimoroni Pico Plus 2 W ──
 // Same footprint as standard Pico 2W (USB-C, RP2350, 8MB PSRAM, 16MB flash)
 pico_length = 52.3;
@@ -16,6 +19,11 @@ pico_height = 3.7;
 pico_hole_spacing_l = 47.0;  // mounting hole center-to-center lengthwise
 pico_hole_spacing_w = 11.4;  // mounting hole center-to-center widthwise
 pico_hole_dia       = 2.1;   // M2 through-hole
+
+// ── Pico Layout ──
+pico_x_offset = 0;
+pico_y_offset = 0;              // centered (ridge side is too low)
+pico_standoff_height = 3;       // standoff boss height on base plate
 
 // ── LiPo SHIM for Pico ──
 // Pimoroni PIM557 — sandwiches under Pico on headers.
@@ -32,7 +40,7 @@ oled_board_width   = 35;
 oled_board_height  = 34;
 oled_board_thick   = 1.6;
 oled_visible_width = 30;
-oled_visible_height= 30;   // 1.3" SH1106 is nearly square (128x64 tall pixels)
+oled_visible_height= 15;   // 128x64 display area is ~30x15mm (2:1 rectangle)
 oled_hole_spacing_w = 29;   // board mounting holes
 oled_hole_spacing_h = 28;
 oled_hole_dia       = 2.1;
@@ -44,6 +52,19 @@ button_travel   = 1.5;
 button_well_depth = 3;  // depth of recessed well
 button_well_dia   = 9;  // well outer diameter (button + clearance)
 
+// ── Button / Switch Layout (shared between dome and base) ──
+ridge_y_offset = -8;
+button_zone_y = ridge_y_offset + 8;  // = 0
+
+button_positions = [
+    [ 24,  0],   // Index
+    [  8,  2],   // Middle
+    [ -8,  2],   // Ring
+    [-24, -1],   // Pinky
+];
+
+switch_pedestal_height = 14;  // tunable — sets switch nub z-position
+
 // ── USB-C ──
 usbc_width  = 9.0;
 usbc_height = 3.5;
@@ -51,16 +72,18 @@ usbc_radius = 1.5;   // corner rounding
 
 // ── Mounting ──
 // Velcro attachment to neoprene forearm band.
-// Adhesive hook velcro on lid bottom, loop velcro on neoprene band.
+// Adhesive hook velcro on base bottom, loop velcro on neoprene band.
 velcro_patch_length = 70;
 velcro_patch_width  = 38;
-velcro_recess_depth = 1.0;  // flush recess in lid bottom
+velcro_recess_depth = 1.0;  // flush recess in base bottom
 
 // ── Battery (502535 LiPo) ──
 battery_length = 35;
 battery_width  = 25;
 battery_height = 5;
 battery_clearance = 0.5;
+battery_x_offset = -10;     // toward wrist
+battery_y_offset = 10;      // outer slope side, away from Pico
 
 // ── Fasteners (M2 button head) ──
 m2_screw_dia    = 2.2;   // clearance hole
@@ -68,6 +91,14 @@ m2_insert_dia   = 3.2;   // heat-set insert hole
 m2_insert_depth = 4.0;
 m2_head_dia     = 3.8;   // button head is ~3.8mm dia
 m2_head_depth   = 1.0;   // button head is ~1mm tall
+
+// ── Screw Positions (shared between base and dome) ──
+screw_positions = [
+    [ body_length/2 - 10,  body_width/2 - 8],
+    [-body_length/2 + 10,  body_width/2 - 8],
+    [ body_length/2 - 10, -body_width/2 + 8],
+    [-body_length/2 + 10, -body_width/2 + 8],
+];
 
 // ── Button Caps ──
 button_cap_dia      = button_well_dia - 0.6;
