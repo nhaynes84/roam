@@ -3,7 +3,7 @@
 
 // ── Body ──
 body_length   = 90;    // along forearm axis
-body_width    = 50;    // across forearm
+body_width    = 100;   // across forearm — measured 90mm finger spread + walls
 body_height   = 25;    // dome peak above flat bottom
 wall_thickness = 2.0;
 corner_radius  = 5;
@@ -47,20 +47,22 @@ oled_hole_dia       = 2.1;
 
 // ── Buttons ──
 button_diameter = 6;
-button_spacing  = 14;   // center-to-center
+button_spacing  = 14;   // center-to-center (legacy, see positions below)
 button_travel   = 1.5;
 button_well_depth = 3;  // depth of recessed well
 button_well_dia   = 9;  // well outer diameter (button + clearance)
 
 // ── Button / Switch Layout (shared between dome and base) ──
+// Measured finger spread: ~90mm outer pinky to outer index (caliper).
+// Buttons follow a slight arc matching natural finger curl.
 ridge_y_offset = -8;
 button_zone_y = ridge_y_offset + 8;  // = 0
 
 button_positions = [
-    [ 24,  0],   // Index
-    [  8,  2],   // Middle
-    [ -8,  2],   // Ring
-    [-24, -1],   // Pinky
+    [ 42,  0],   // Index  — outer edge ~45mm from center
+    [ 14,  3],   // Middle — slight forward offset
+    [-14,  3],   // Ring   — symmetric with middle
+    [-42, -1],   // Pinky  — outer edge ~45mm from center
 ];
 
 switch_pedestal_height = 14;  // tunable — sets switch nub z-position
@@ -74,7 +76,7 @@ usbc_radius = 1.5;   // corner rounding
 // Velcro attachment to neoprene forearm band.
 // Adhesive hook velcro on base bottom, loop velcro on neoprene band.
 velcro_patch_length = 70;
-velcro_patch_width  = 38;
+velcro_patch_width  = 80;
 velcro_recess_depth = 1.0;  // flush recess in base bottom
 
 // ── Battery (502535 LiPo) ──
