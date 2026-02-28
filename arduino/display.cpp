@@ -51,6 +51,12 @@ void Display::showAction(const char* action) {
     _dirty = true;
 }
 
+void Display::showBleText(const char* text) {
+    strncpy(_bleText, text, sizeof(_bleText) - 1);
+    _bleText[sizeof(_bleText) - 1] = '\0';
+    _dirty = true;
+}
+
 void Display::dim() {
     if (_available && !_dimmed) {
         _u8g2->setContrast(10);
@@ -119,9 +125,11 @@ void Display::render() {
     // Line 3: Battery bar
     _drawBattery();
 
-    // Line 4: Last action
+    // Line 4: Last action (temporary) or BLE text (persistent)
     if (_lastAction[0] != '\0') {
         _u8g2->drawStr(0, 58, _lastAction);
+    } else if (_bleText[0] != '\0') {
+        _u8g2->drawStr(0, 58, _bleText);
     }
 
     _u8g2->sendBuffer();

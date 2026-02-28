@@ -9,9 +9,12 @@
 #include "buttons.h"
 #include "actions.h"
 #include "display.h"
+#include "battery.h"
+#include "ble_text.h"
 
 static ButtonManager buttons;
 static Display display;
+static Battery battery;
 
 void setup() {
     Serial.begin(115200);
@@ -25,11 +28,15 @@ void setup() {
     KeyboardBLE.begin("Roam", "Roam");
     Serial.println("BLE started, advertising as 'Roam'");
 
+    // Add custom GATT text service (must be after KeyboardBLE.begin)
+    bleText.begin();
+
     Serial.println("Initializing display...");
     display.begin();
     Serial.println("Display init done");
 
     display.setBleStatus("Advertising");
+    battery.begin();
     buttons.begin();
 }
 
@@ -82,6 +89,22 @@ void loop() {
         } else {
             Serial.printf("action: %s (not connected)\n", ACTION_NAMES[action]);
         }
+    }
+
+    // Battery monitor (every 60s)
+    if (battery.shouldRead()) {
+        battery.read();
+        display.setBatteryPercent(battery.percent());
+        if (battery.voltage() > 4.5f) {
+            display.setBleStatus(connected ? "Connected (USB)" : "Charging");
+        }
+    }
+
+    // Check for BLE text pushes
+    if (bleText.hasNewText()) {
+        const char* text = bleText.getText();
+        display.showBleText(text);
+        Serial.printf("ble_text: \"%s\"\n", text);
     }
 
     // Render display at 10 Hz

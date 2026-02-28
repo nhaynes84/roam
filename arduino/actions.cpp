@@ -1,6 +1,7 @@
 // Roam — HID action implementation
 
 #include "actions.h"
+#include "ble_text.h"
 
 void actionsBegin() {
     // KeyboardBLE.begin() is called in roam.ino — nothing extra needed here
@@ -46,6 +47,7 @@ void executeAction(ActionType action) {
         KeyboardBLE.end();
         delay(200);
         KeyboardBLE.begin("Roam", "Roam");
+        bleText.begin();  // Re-extend ATT DB after BLE restart
         break;
 
     case ACTION_APPROVE_YES:
