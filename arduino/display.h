@@ -17,7 +17,10 @@ public:
     void setBleStatus(const char* status);
     void setBatteryPercent(uint8_t pct);
     void showAction(const char* action);
-    void showBleText(const char* text);  // Persistent text from BLE (stays until replaced)
+    void showBleText(const char* text);  // Full-screen message (stays until toggled)
+    void toggleScreen();                 // Switch between message and status view
+
+    bool inMessageMode() const { return _messageMode; }
 
     // Render if dirty. Call at ~10 Hz.
     void render();
@@ -38,7 +41,8 @@ private:
     uint8_t _batteryPct = 0;
     char _lastAction[20] = "";
     uint32_t _actionTime = 0;
-    char _bleText[64] = "";
+    char _bleText[128] = "";
+    bool _messageMode = false;
 
     void _drawBattery();
 };

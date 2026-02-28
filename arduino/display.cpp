@@ -54,6 +54,12 @@ void Display::showAction(const char* action) {
 void Display::showBleText(const char* text) {
     strncpy(_bleText, text, sizeof(_bleText) - 1);
     _bleText[sizeof(_bleText) - 1] = '\0';
+    _messageMode = true;
+    _dirty = true;
+}
+
+void Display::toggleScreen() {
+    _messageMode = !_messageMode;
     _dirty = true;
 }
 
@@ -115,21 +121,42 @@ void Display::render() {
 
     _u8g2->clearBuffer();
 
-    // Line 1: Mode name (y=10 for baseline with 6x10 font)
-    _u8g2->setFont(u8g2_font_6x10_tr);
-    _u8g2->drawStr(0, 10, _mode);
+    if (_messageMode && _bleText[0] != '\0') {
+        // Full-screen message mode — BLE text only
+        _u8g2->setFont(u8g2_font_6x10_tr);
+        // Word-wrap into lines (21 chars wide at 6px)
+        const int lineH = 12;
+        const int maxW = 21;
+        int y = 12;
+        const char* p = _bleText;
+        while (*p && y <= 60) {
+            // Find line break point
+            int len = strlen(p);
+            int lineLen = len < maxW ? len : maxW;
+            // Try to break at space
+            if (len > maxW) {
+                int brk = maxW;
+                while (brk > 0 && p[brk] != ' ') brk--;
+                if (brk > 0) lineLen = brk;
+            }
+            char line[22];
+            memcpy(line, p, lineLen);
+            line[lineLen] = '\0';
+            _u8g2->drawStr(0, y, line);
+            p += lineLen;
+            if (*p == ' ') p++;  // skip space at break
+            y += lineH;
+        }
+    } else {
+        // Status mode — normal layout
+        _u8g2->setFont(u8g2_font_6x10_tr);
+        _u8g2->drawStr(0, 10, _mode);
+        _u8g2->drawStr(0, 26, _bleStatus);
+        _drawBattery();
 
-    // Line 2: BLE status
-    _u8g2->drawStr(0, 26, _bleStatus);
-
-    // Line 3: Battery bar
-    _drawBattery();
-
-    // Line 4: Last action (temporary) or BLE text (persistent)
-    if (_lastAction[0] != '\0') {
-        _u8g2->drawStr(0, 58, _lastAction);
-    } else if (_bleText[0] != '\0') {
-        _u8g2->drawStr(0, 58, _bleText);
+        if (_lastAction[0] != '\0') {
+            _u8g2->drawStr(0, 58, _lastAction);
+        }
     }
 
     _u8g2->sendBuffer();

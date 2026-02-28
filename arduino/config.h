@@ -61,6 +61,7 @@ enum ActionType : uint8_t {
     ACTION_KILL_PROCESS,    // Ctrl+C
     // Double-tap
     ACTION_ENTER,           // Enter only (no y prefix)
+    ACTION_TOGGLE_SCREEN,   // Toggle message/status display
 };
 
 // Button index → short/long action mapping
@@ -71,7 +72,7 @@ struct ButtonMapping {
 };
 
 static const ButtonMapping BUTTON_MAP[NUM_BUTTONS] = {
-    { ACTION_DICTATION,     ACTION_TMUX_PANE,      ACTION_NONE  },  // Index
+    { ACTION_DICTATION,     ACTION_TMUX_PANE,      ACTION_TOGGLE_SCREEN },  // Index
     { ACTION_CYCLE_MODE,    ACTION_BLE_SWITCH,      ACTION_NONE  },  // Middle
     { ACTION_APPROVE_YES,   ACTION_APPROVE_ALWAYS,  ACTION_ENTER },  // Ring
     { ACTION_REJECT_ESCAPE, ACTION_KILL_PROCESS,    ACTION_NONE  },  // Pinky
@@ -89,4 +90,5 @@ static const char* ACTION_NAMES[] = {
     "Escape",        // ACTION_REJECT_ESCAPE
     "Kill",          // ACTION_KILL_PROCESS
     "Enter",         // ACTION_ENTER
+    "",              // ACTION_TOGGLE_SCREEN (handled locally, no HID)
 };

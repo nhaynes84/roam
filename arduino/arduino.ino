@@ -76,7 +76,15 @@ void loop() {
     buttons.poll(action);
 
     if (action != ACTION_NONE) {
-        if (connected) {
+        if (action == ACTION_TOGGLE_SCREEN) {
+            // Local action — no HID, no connection required
+            display.toggleScreen();
+            digitalWrite(PIN_MOTOR, HIGH);
+            delay(40);
+            digitalWrite(PIN_MOTOR, LOW);
+            Serial.printf("action: toggle screen (%s)\n",
+                          display.inMessageMode() ? "message" : "status");
+        } else if (connected) {
             executeAction(action);
 
             // Short motor buzz
