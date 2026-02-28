@@ -2,33 +2,35 @@
 
 ## Project Overview
 
-Roam is a wrist-mounted tactile controller for hands-free AI interaction. It runs MicroPython on a Raspberry Pi Pico 2 W with a 1.3" OLED display, 4 buttons, vibration motor, and LED.
+Roam is a wrist-mounted tactile controller for hands-free AI interaction. Pimoroni Pico Plus 2 W (RP2350 + CYW43439) with BLE HID, 4 buttons, vibration motor, LED, and planned OLED display.
 
 ## Tech Stack
 
-- **Firmware**: MicroPython on Pico 2 W
+- **Active firmware**: Arduino-pico (C++) in `arduino/` — BLE HID via `KeyboardBLE`
+- **Legacy firmware**: MicroPython in `firmware/` — BLE pairing broken, kept as reference
 - **Housing CAD**: OpenSCAD (parametric, `housing/` directory)
-- **Flash tool**: `mpremote` (install via pip)
-- **Build**: `make flash`, `make reset`, `make repl`, `make deploy`
+- **Toolchain**: `arduino-cli` with rp2040:rp2040 board core
+- **FQBN**: `rp2040:rp2040:pimoroni_pico_plus_2w:ipbtstack=ipv4btcble`
 
 ## Key Commands
 
 ```bash
-make flash       # Copy firmware/ to Pico via mpremote
-make reset       # Soft-reset the Pico
-make repl        # Open interactive MicroPython REPL
-make deploy      # Flash + reset
-make render      # Render OpenSCAD housing to STL
+make arduino-build   # Compile Arduino firmware
+make arduino-flash   # Flash via USB
+make arduino-monitor # Serial monitor (115200 baud)
+make render          # Render OpenSCAD housing to STL
 ```
 
 ## Code Conventions
 
-### Firmware (MicroPython)
-- Target: MicroPython on RP2350 (Pico 2 W)
-- Use `machine.Pin`, `machine.I2C`, `machine.PWM` — standard MicroPython APIs
-- Pin assignments live in `firmware/config.py` — don't hardcode GPIO numbers elsewhere
-- Async where needed via `uasyncio`
-- Keep memory footprint minimal — Pico 2 has 520KB SRAM but MicroPython overhead is significant
+### Firmware (Arduino-pico C++)
+- Currently single-core minimal build (dual-core display/battery disabled until OLED wired)
+- Pin assignments in `arduino/config.h` — don't hardcode GPIO numbers elsewhere
+- Button events: short press, long press, double-tap
+- All timing via `millis()` — no blocking except brief keystroke delays
+- Motor wired to + pad (VBUS/5V), not 3E (3.3V)
+- **GP25 is off-limits** — shared with CYW43 wireless SPI, toggling it kills BLE
+- After every firmware flash: must "Forget This Device" on macOS and re-pair
 
 ### Housing (OpenSCAD)
 - All shared dimensions in `housing/common.scad`
@@ -39,16 +41,17 @@ make render      # Render OpenSCAD housing to STL
 
 ## Hardware Reference
 
-- **Pinout**: `hardware/pinout.md`
-- **Wiring**: `hardware/schematic.md`
-- GPIO assignments: I2C0 on GP4/5, buttons on GP10-13, motor PWM on GP15, LED on GP16
+- **Pinout**: `hardware/pinout.md` (includes board silkscreen labels and gotchas)
+- **Wiring**: `hardware/wiring-diagram.md`
+- GPIO assignments: I2C0 on GP4/5, buttons on GP10-13, motor on GP15, LED on GP16
 
 ## File Structure
 
 ```
-firmware/    — MicroPython source (copied to Pico root)
-housing/     — OpenSCAD designs + render script
-hardware/    — Wiring docs and pinout tables
+arduino/     — Active firmware (Arduino-pico C++)
+firmware/    — Legacy MicroPython source (reference only)
+housing/     — OpenSCAD designs + STL renders
+hardware/    — Wiring docs, pinout tables, gotchas
 tests/       — Test scripts
 ```
 

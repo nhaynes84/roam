@@ -16,9 +16,18 @@ ButtonEvent Button::poll() {
 
     if (current == 0 && _lastState == 1) {
         // Just pressed
-        _pressed = true;
-        _pressStart = now;
-        _longFired = false;
+        if (_waitingForDouble) {
+            // Second press within window — double tap
+            _waitingForDouble = false;
+            event = BTN_EVENT_DOUBLE;
+            _pressed = true;
+            _pressStart = now;
+            _longFired = true;  // Prevent short/long on this press
+        } else {
+            _pressed = true;
+            _pressStart = now;
+            _longFired = false;
+        }
     } else if (current == 0 && _pressed && !_longFired) {
         // Still held — check long press
         if ((now - _pressStart) >= LONG_PRESS_MS) {
@@ -30,10 +39,18 @@ ButtonEvent Button::poll() {
         if (_pressed) {
             uint32_t held = now - _pressStart;
             if (held >= DEBOUNCE_MS && !_longFired) {
-                event = BTN_EVENT_SHORT;
+                // Don't fire short yet — wait for possible double-tap
+                _waitingForDouble = true;
+                _lastReleaseTime = now;
             }
             _pressed = false;
         }
+    }
+
+    // Double-tap window expired — emit delayed short press
+    if (_waitingForDouble && (now - _lastReleaseTime) >= DOUBLE_TAP_MS) {
+        _waitingForDouble = false;
+        event = BTN_EVENT_SHORT;
     }
 
     _lastState = current;
@@ -57,6 +74,9 @@ void ButtonManager::poll(ActionType &outAction) {
             return;
         } else if (evt == BTN_EVENT_LONG) {
             outAction = BUTTON_MAP[i].longPress;
+            return;
+        } else if (evt == BTN_EVENT_DOUBLE) {
+            outAction = BUTTON_MAP[i].doubleTap;
             return;
         }
     }

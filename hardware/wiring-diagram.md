@@ -79,7 +79,8 @@ Complete point-to-point wiring for the Pimoroni Pico Plus 2 W build.
  ║        │  [Ring]  [Pinky] │     Middle = GP11 (short: cycle mode,   ║
  ║        │                  │                    long:  BLE switch)   ║
  ║        │                  │     Ring   = GP12 (short: y + Enter,    ║
- ║        └─── wrist side ──┘                    long:  Tab + Enter)  ║
+ ║        └─── wrist side ──┘                    long:  Tab + Enter,  ║
+ ║                                               double: Enter only)  ║
  ║                                  Pinky  = GP13 (short: Escape,      ║
  ║                                                 long:  Ctrl+C)     ║
  ╚══════════════════════════════════════════════════════════════════════╝
@@ -87,9 +88,9 @@ Complete point-to-point wiring for the Pimoroni Pico Plus 2 W build.
  ╔══════════════════════════════════════════════════════════════════════╗
  ║  VIBRATION MOTOR — NPN transistor driver                            ║
  ║                                                                     ║
- ║          3V3 ──────────┬──────────── Motor (+)                      ║
+ ║         VBUS (5V) ─────┬──────────── Motor (+, red)                 ║
  ║                        │                │                           ║
- ║                   ┌──┤◄├──┐        Motor (-)                        ║
+ ║                   ┌──┤◄├──┐        Motor (-, blue)                  ║
  ║                   │ 1N4148 │            │                           ║
  ║                   │(flyback)│           │                           ║
  ║                   └────────┘     ┌──────┘                           ║
@@ -100,26 +101,33 @@ Complete point-to-point wiring for the Pimoroni Pico Plus 2 W build.
  ║                                  │  E                               ║
  ║                                 GND                                 ║
  ║                                                                     ║
- ║   Flyback diode: cathode (band) toward 3V3                         ║
+ ║   Motor positive → + pad (VBUS/5V), NOT 3E (3.3V).                 ║
+ ║   Coin motors rated 3V won't spin at 3.3V through transistor.      ║
+ ║   Flyback diode: cathode (band) toward VBUS side.                  ║
  ╚══════════════════════════════════════════════════════════════════════╝
 
  ╔══════════════════════════════════════════════════════════════════════╗
  ║  STATUS LED                                                         ║
  ║                                                                     ║
- ║          GP16 ──── 100Ω ──── LED (+) ──── LED (-) ──── GND         ║
+ ║          GP16 ──── 220Ω ──── LED (+) ──── LED (-) ──── GND         ║
  ║                                 ▲                                   ║
- ║                            3mm green                                ║
- ║                            or white                                 ║
+ ║                            5mm red                                  ║
+ ║                          (diffused)                                 ║
  ║                                                                     ║
- ║   ~10mA at 3.3V. PWM driven for blink/pulse patterns.              ║
+ ║   ~7mA at 3.3V. Solid when BLE connected, blink when advertising.  ║
+ ║   NOTE: Do NOT use "fast flashing RGB" LEDs — they have a          ║
+ ║   built-in IC that cycles colors automatically. Use plain LEDs.     ║
  ╚══════════════════════════════════════════════════════════════════════╝
 
  ╔══════════════════════════════════════════════════════════════════════╗
  ║  BATTERY MONITORING (firmware, no extra wiring)                     ║
  ║                                                                     ║
  ║   GP29 (ADC3) reads VSYS/3 via onboard voltage divider.            ║
- ║   GP25 is driven HIGH during reads to avoid CYW43 SPI contention.  ║
  ║   No external components needed — this is built into the Pico.      ║
+ ║                                                                     ║
+ ║   WARNING: Do NOT toggle GP25 — it's shared with CYW43 wireless    ║
+ ║   SPI. Driving it as GPIO kills BLE. Battery reads work without     ║
+ ║   GP25 coordination; slight ADC noise is acceptable.                ║
  ╚══════════════════════════════════════════════════════════════════════╝
 
 ## Bill of Materials
@@ -129,14 +137,14 @@ Complete point-to-point wiring for the Pimoroni Pico Plus 2 W build.
 | 1   | Pimoroni Pico Plus 2 W       | RP2350 + CYW43439     | Main MCU + BLE                  |
 | 1   | SH1106 OLED module           | 128×64, 1.3", I2C     | 4-pin (VCC/GND/SCL/SDA)        |
 | 4   | Tactile switch               | 6×6mm                 | Through-hole or panel mount     |
-| 1   | Vibration motor              | 3V coin/cylinder      | ~80mA max                       |
+| 1   | Vibration motor              | 3V coin type          | Powered from VBUS (5V)          |
 | 1   | 2N2222 NPN transistor        | or equivalent          | Motor driver                    |
 | 1   | 1N4148 diode                 | Signal diode           | Flyback protection              |
-| 1   | LED                          | 3mm green or white     | Status indicator                |
+| 1   | LED                          | 5mm red diffused       | Plain single-color, NOT RGB     |
 | 1   | TP4056 module                | USB-C, DW01 protection| LiPo charger                    |
 | 1   | LiPo battery                 | 502535, 3.7V 400mAh   |                                 |
 | 1   | Slide switch                 | MSK-12C02 style        | Power on/off                    |
-| 1   | Resistor                     | 100Ω                  | LED current limit               |
+| 1   | Resistor                     | 220Ω (red-red-brown)  | LED current limit               |
 | 1   | Resistor                     | 1kΩ                   | NPN base                        |
 | 2   | Resistor (optional)          | 4.7kΩ                 | I2C pull-ups (if not on module) |
 

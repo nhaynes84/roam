@@ -11,7 +11,7 @@
 | GP12 | 16    | Button 3       | Input     | Yes — internal pull-up         |
 | GP13 | 17    | Button 4       | Input     | No — internal pull-up          |
 | GP15 | 20    | Vibration PWM  | Output    | NPN base via 1kΩ resistor      |
-| GP16 | 21    | Status LED     | Output    | Via 100Ω resistor              |
+| GP16 | 21    | Status LED     | Output    | Via 220Ω resistor              |
 | VSYS | 39    | Power input    | Power     | From TP4056 via slide switch   |
 | GND  | 38    | Ground         | Power     | Common ground                  |
 | 3V3  | 36    | 3.3V output    | Power     | From onboard regulator         |
@@ -75,3 +75,10 @@ The `-` (GND) pad between 13 and 14 is shared ground for all four switches.
 
 - **GP26 (ADC0)**: Could be used for battery voltage monitoring via voltage divider
 - **GP29 (ADC3)**: Connected internally to VSYS/3 — reads system voltage
+
+## Hardware Gotchas
+
+- **GP25**: Do NOT use as GPIO — shared with CYW43 wireless SPI. Setting it as OUTPUT and toggling it kills BLE completely. Battery ADC reads work without GP25 coordination.
+- **BLE re-pairing**: After every firmware flash, must "Forget This Device" on macOS Bluetooth and re-pair fresh. Stale bonding keys cause silent connection failure (shows "paired" but won't connect).
+- **Motor voltage**: Coin motors rated 3V don't spin at 3.3V through a 2N2222 — need VBUS (5V) from the + pad. Flyback diode essential.
+- **LED type**: Use plain single-color LEDs only. "Fast flashing RGB" LEDs have a built-in IC that cycles colors regardless of GPIO state — they can't be controlled.

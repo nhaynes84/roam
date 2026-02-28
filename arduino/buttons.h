@@ -10,6 +10,7 @@ enum ButtonEvent : uint8_t {
     BTN_EVENT_NONE = 0,
     BTN_EVENT_SHORT,
     BTN_EVENT_LONG,
+    BTN_EVENT_DOUBLE,
 };
 
 class Button {
@@ -24,8 +25,10 @@ private:
     uint8_t _index = 0;
     bool _pressed = false;
     bool _longFired = false;
+    bool _waitingForDouble = false;
     uint8_t _lastState = 1;  // pull-up: 1 = released
     uint32_t _pressStart = 0;
+    uint32_t _lastReleaseTime = 0;
 };
 
 class ButtonManager {

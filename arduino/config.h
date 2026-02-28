@@ -34,6 +34,7 @@ static const uint8_t BUTTON_PINS[NUM_BUTTONS] = {
 // --- Timing ---
 #define DEBOUNCE_MS       50
 #define LONG_PRESS_MS     600
+#define DOUBLE_TAP_MS     300   // Max gap between taps for double-tap
 #define BUTTON_POLL_US    10000   // 100 Hz
 #define DISPLAY_PERIOD_MS 100     // 10 Hz
 #define BATTERY_PERIOD_MS 60000   // Every 60s
@@ -58,19 +59,22 @@ enum ActionType : uint8_t {
     // Pinky button
     ACTION_REJECT_ESCAPE,   // Escape
     ACTION_KILL_PROCESS,    // Ctrl+C
+    // Double-tap
+    ACTION_ENTER,           // Enter only (no y prefix)
 };
 
 // Button index → short/long action mapping
 struct ButtonMapping {
     ActionType shortPress;
     ActionType longPress;
+    ActionType doubleTap;
 };
 
 static const ButtonMapping BUTTON_MAP[NUM_BUTTONS] = {
-    { ACTION_DICTATION,     ACTION_TMUX_PANE     },  // Index
-    { ACTION_CYCLE_MODE,    ACTION_BLE_SWITCH    },  // Middle
-    { ACTION_APPROVE_YES,   ACTION_APPROVE_ALWAYS },  // Ring
-    { ACTION_REJECT_ESCAPE, ACTION_KILL_PROCESS  },  // Pinky
+    { ACTION_DICTATION,     ACTION_TMUX_PANE,      ACTION_NONE  },  // Index
+    { ACTION_CYCLE_MODE,    ACTION_BLE_SWITCH,      ACTION_NONE  },  // Middle
+    { ACTION_APPROVE_YES,   ACTION_APPROVE_ALWAYS,  ACTION_ENTER },  // Ring
+    { ACTION_REJECT_ESCAPE, ACTION_KILL_PROCESS,    ACTION_NONE  },  // Pinky
 };
 
 // Human-readable action names for display
@@ -84,4 +88,5 @@ static const char* ACTION_NAMES[] = {
     "Always",        // ACTION_APPROVE_ALWAYS
     "Escape",        // ACTION_REJECT_ESCAPE
     "Kill",          // ACTION_KILL_PROCESS
+    "Enter",         // ACTION_ENTER
 };

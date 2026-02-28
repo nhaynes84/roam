@@ -11,15 +11,12 @@ static const float ADC_VREF        = 3.3f;
 static const float VSYS_DIVIDER    = 3.0f;
 
 void Battery::begin() {
-    pinMode(PIN_GP25, OUTPUT);
-    digitalWrite(PIN_GP25, LOW);
+    // NOTE: On Pico 2 W, GP25 is used by CYW43 wireless SPI.
+    // Do NOT set it as OUTPUT or toggle it — that kills BLE.
+    // Battery ADC reads without GP25 coordination; slight noise is acceptable.
 }
 
 void Battery::read() {
-    // Drive GP25 high to avoid SPI bus contention with CYW43
-    digitalWrite(PIN_GP25, HIGH);
-    delayMicroseconds(1000);
-
     // Average 3 samples for stability
     uint32_t total = 0;
     for (int i = 0; i < 3; i++) {
@@ -27,8 +24,6 @@ void Battery::read() {
         delayMicroseconds(1000);
     }
     uint16_t raw = total / 3;
-
-    digitalWrite(PIN_GP25, LOW);
 
     // Convert: ADC is 12-bit on RP2350 (0-4095)
     float adcVoltage = (float)raw / 4095.0f * ADC_VREF;

@@ -85,6 +85,12 @@ void executeAction(ActionType action) {
         KeyboardBLE.releaseAll();
         break;
 
+    case ACTION_ENTER:
+        KeyboardBLE.press(KEY_RETURN);
+        delay(50);
+        KeyboardBLE.releaseAll();
+        break;
+
     case ACTION_NONE:
     default:
         break;

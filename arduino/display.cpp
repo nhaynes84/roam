@@ -12,6 +12,7 @@ void Display::begin() {
 
     // Scan for SH1106 at common addresses
     Wire.begin();
+    delay(50);  // Let I2C settle
     Wire.beginTransmission(0x3C);
     bool found3C = (Wire.endTransmission() == 0);
     Wire.beginTransmission(0x3D);
@@ -19,6 +20,7 @@ void Display::begin() {
 
     if (!found3C && !found3D) {
         Serial.println("display: no OLED found on I2C");
+        Wire.end();  // Release I2C bus when no display connected
         return;
     }
 
