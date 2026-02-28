@@ -1,36 +1,21 @@
 // Roam — Display implementation
-// SH1106 128x64 OLED via I2C on GP4/GP5
+// SH1106 128x64 OLED via hardware I2C on GP4(SDA)/GP5(SCL)
+// VCC must be on 5V (VBUS) — 3.3V is insufficient for the OLED panel
 
 #include "display.h"
 #include <string.h>
 
 void Display::begin() {
-    // Set up I2C on GP4/GP5 before U8g2 init
+    // Configure Wire pins before U8g2 touches it
     Wire.setSDA(PIN_SDA);
     Wire.setSCL(PIN_SCL);
     Wire.setClock(I2C_FREQ);
-
-    // Scan for SH1106 at common addresses
     Wire.begin();
-    delay(50);  // Let I2C settle
-    Wire.beginTransmission(0x3C);
-    bool found3C = (Wire.endTransmission() == 0);
-    Wire.beginTransmission(0x3D);
-    bool found3D = (Wire.endTransmission() == 0);
 
-    if (!found3C && !found3D) {
-        Serial.println("display: no OLED found on I2C");
-        Wire.end();  // Release I2C bus when no display connected
-        return;
-    }
-
-    uint8_t addr = found3C ? 0x3C : 0x3D;
-    Serial.printf("display: SH1106 found at 0x%02X\n", addr);
-
-    // U8g2 constructor — full framebuffer mode
     _u8g2 = new U8G2_SH1106_128X64_NONAME_F_HW_I2C(U8G2_R0, U8X8_PIN_NONE);
-    _u8g2->setI2CAddress(addr << 1);  // U8g2 uses 8-bit address
+    _u8g2->setI2CAddress(0x3C << 1);
     _u8g2->begin();
+    Serial.println("display: SH1106 initialized (HW I2C, 5V VCC)");
     _u8g2->setFont(u8g2_font_6x10_tr);
     _available = true;
     _dirty = true;

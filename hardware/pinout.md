@@ -82,3 +82,6 @@ The `-` (GND) pad between 13 and 14 is shared ground for all four switches.
 - **BLE re-pairing**: After every firmware flash, must "Forget This Device" on macOS Bluetooth and re-pair fresh. Stale bonding keys cause silent connection failure (shows "paired" but won't connect).
 - **Motor voltage**: Coin motors rated 3V don't spin at 3.3V through a 2N2222 — need VBUS (5V) from the + pad. Flyback diode essential.
 - **LED type**: Use plain single-color LEDs only. "Fast flashing RGB" LEDs have a built-in IC that cycles colors regardless of GPIO state — they can't be controlled.
+- **OLED VCC must be 5V**: The SH1106 OLED needs 5V on VCC (+ pad / VBUS). At 3.3V the I2C bus works (device detected at 0x3C, commands ACK) but the OLED panel won't light up — the internal charge pump needs higher voltage. I2C data lines (SDA/SCL) stay at 3.3V logic which is fine.
+- **OLED + BLE I2C**: U8g2 HW_I2C works alongside btstack BLE when the screen is on 5V. U8g2 SW_I2C (bit-bang) is broken on RP2350 — don't use it. At 3.3V, HW_I2C hangs because the unresponsive screen causes Wire to block indefinitely.
+- **I2C bus recovery after flash**: Entering BOOTSEL mode can leave the OLED's I2C state machine stuck (MCU resets but screen stays powered). If I2C scan fails after flashing, power-cycle the screen (unplug/replug the harness).

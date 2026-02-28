@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Roam is a wrist-mounted tactile controller for hands-free AI interaction. Pimoroni Pico Plus 2 W (RP2350 + CYW43439) with BLE HID, 4 buttons, vibration motor, LED, and planned OLED display.
+Roam is a wrist-mounted tactile controller for hands-free AI interaction. Pimoroni Pico Plus 2 W (RP2350 + CYW43439) with BLE HID, 4 buttons, vibration motor, LED, and SH1106 OLED display.
 
 ## Tech Stack
 
@@ -24,13 +24,15 @@ make render          # Render OpenSCAD housing to STL
 ## Code Conventions
 
 ### Firmware (Arduino-pico C++)
-- Currently single-core minimal build (dual-core display/battery disabled until OLED wired)
+- Single-core build — BLE + buttons + actions + display all on core 0
 - Pin assignments in `arduino/config.h` — don't hardcode GPIO numbers elsewhere
-- Button events: short press, long press, double-tap
+- Button events: short press, long press, double-tap (ring finger only)
 - All timing via `millis()` — no blocking except brief keystroke delays
-- Motor wired to + pad (VBUS/5V), not 3E (3.3V)
+- Motor and OLED VCC wired to + pad (VBUS/5V), not 3E (3.3V)
+- Display uses U8g2 HW_I2C (Wire library) — works alongside btstack BLE at 5V
 - **GP25 is off-limits** — shared with CYW43 wireless SPI, toggling it kills BLE
 - After every firmware flash: must "Forget This Device" on macOS and re-pair
+- After flashing, power-cycle the OLED if I2C scan fails (BOOTSEL can leave bus stuck)
 
 ### Housing (OpenSCAD)
 - All shared dimensions in `housing/common.scad`

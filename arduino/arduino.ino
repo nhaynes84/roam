@@ -21,11 +21,13 @@ void setup() {
     pinMode(PIN_MOTOR, OUTPUT);
     digitalWrite(PIN_MOTOR, LOW);
 
-    display.begin();
-
     Serial.println("Starting BLE keyboard...");
     KeyboardBLE.begin("Roam", "Roam");
     Serial.println("BLE started, advertising as 'Roam'");
+
+    Serial.println("Initializing display...");
+    display.begin();
+    Serial.println("Display init done");
 
     display.setBleStatus("Advertising");
     buttons.begin();

@@ -1,11 +1,11 @@
 // Roam — OLED status display (SH1106 128x64 via I2C)
-// U8g2 library, dirty-flag rendering at 10 Hz on core 1
+// U8g2 HW_I2C — requires 5V on VCC for reliable operation
 
 #pragma once
 
 #include "config.h"
-#include <U8g2lib.h>
 #include <Wire.h>
+#include <U8g2lib.h>
 
 class Display {
 public:

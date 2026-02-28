@@ -48,16 +48,19 @@ Complete point-to-point wiring for the Pimoroni Pico Plus 2 W build.
  ╔══════════════════════════════════════════════════════════════════════╗
  ║  OLED DISPLAY — SH1106 128×64 1.3"                                 ║
  ║                                                                     ║
- ║          3V3 ─────────────────┬───────────┬──── VCC                 ║
- ║                               │           │                         ║
- ║                             4.7kΩ       4.7kΩ                       ║
- ║                               │           │                         ║
- ║          GP4 (SDA) ──────────┴────────── SDA                        ║
- ║          GP5 (SCL) ──────────────────┴── SCL                        ║
+ ║       VBUS (5V) ──────────────────────── VCC                        ║
+ ║          GP4 (SDA) ─────────────────── SDA (or SDK/SCK label)       ║
+ ║          GP5 (SCL) ─────────────────── SCL (or SCK label)           ║
  ║          GND ─────────────────────────── GND                        ║
  ║                                                                     ║
- ║   Note: Some OLED modules have onboard pull-ups.                    ║
- ║   Check before adding external 4.7kΩ resistors.                     ║
+ ║   CRITICAL: VCC must be 5V (+ pad / VBUS), NOT 3.3V (3E pad).      ║
+ ║   At 3.3V the I2C bus responds (device found at 0x3C) but the      ║
+ ║   OLED panel doesn't light up — charge pump needs higher voltage.   ║
+ ║   I2C data lines remain 3.3V logic via the Pico's GPIO.            ║
+ ║                                                                     ║
+ ║   Screen pin labels vary by brand: may say VOC/VCC, SCK/SCL.       ║
+ ║   Pin order: GND, VCC, SCL, SDA (verify on your module).           ║
+ ║   No external pull-ups needed — modules have onboard pull-ups.      ║
  ╚══════════════════════════════════════════════════════════════════════╝
 
  ╔══════════════════════════════════════════════════════════════════════╗
@@ -152,7 +155,7 @@ Complete point-to-point wiring for the Pimoroni Pico Plus 2 W build.
 
 | Color  | Signal     |
 |--------|------------|
-| Red    | 3V3 / VSYS |
+| Red    | 5V / VSYS  |
 | Black  | GND        |
 | Blue   | SDA        |
 | Yellow | SCL        |
