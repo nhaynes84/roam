@@ -6,8 +6,12 @@
 
 void Display::begin() {
     // Configure Wire pins before U8g2 touches it
+#ifdef ARDUINO_ARCH_RP2040
     Wire.setSDA(PIN_SDA);
     Wire.setSCL(PIN_SCL);
+#else
+    Wire.setPins(PIN_SDA, PIN_SCL);
+#endif
     Wire.setClock(I2C_FREQ);
     Wire.begin();
 

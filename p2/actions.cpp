@@ -1,4 +1,5 @@
 // Roam P2 — HID action implementation (Bluefruit BLEHidAdafruit)
+// API: keyPress(char) for ASCII, keyboardReport(modifier, keycodes[6]) for combos
 
 #include "actions.h"
 #include "ble_text.h"
@@ -15,32 +16,43 @@ static void keystrokeDelay() {
     delay(30);
 }
 
+// Helper: send a single keycode with modifier via raw HID report
+static void sendKey(uint8_t modifier, uint8_t keycode) {
+    uint8_t keys[6] = { keycode, 0, 0, 0, 0, 0 };
+    blehid.keyboardReport(modifier, keys);
+}
+
+// Helper: release all keys
+static void releaseKeys() {
+    blehid.keyRelease();
+}
+
 void executeAction(ActionType action) {
     switch (action) {
 
     case ACTION_DICTATION:
         // macOS dictation consumer key 0x00CF
-        blehid.consumerKeyPress(0, 0x00CF);
+        blehid.consumerKeyPress(0x00CF);
         delay(50);
-        blehid.consumerKeyRelease(0);
+        blehid.consumerKeyRelease();
         break;
 
     case ACTION_TMUX_PANE:
         // Ctrl+B then 'o' — tmux next pane
-        blehid.keyPress(0, HID_KEY_B, KEYBOARD_MODIFIER_LEFTCTRL);
+        sendKey(KEYBOARD_MODIFIER_LEFTCTRL, HID_KEY_B);
         keystrokeDelay();
-        blehid.keyRelease(0);
+        releaseKeys();
         delay(50);
-        blehid.keyPress(0, HID_KEY_O);
+        blehid.keyPress('o');
         keystrokeDelay();
-        blehid.keyRelease(0);
+        releaseKeys();
         break;
 
     case ACTION_CYCLE_MODE:
         // Shift+Tab — cycle mode
-        blehid.keyPress(0, HID_KEY_TAB, KEYBOARD_MODIFIER_LEFTSHIFT);
+        sendKey(KEYBOARD_MODIFIER_LEFTSHIFT, HID_KEY_TAB);
         delay(50);
-        blehid.keyRelease(0);
+        releaseKeys();
         break;
 
     case ACTION_BLE_SWITCH:
@@ -52,44 +64,44 @@ void executeAction(ActionType action) {
 
     case ACTION_APPROVE_YES:
         // 'y' then Enter
-        blehid.keyPress(0, HID_KEY_Y);
+        blehid.keyPress('y');
         keystrokeDelay();
-        blehid.keyRelease(0);
+        releaseKeys();
         keystrokeDelay();
-        blehid.keyPress(0, HID_KEY_ENTER);
+        sendKey(0, HID_KEY_ENTER);
         keystrokeDelay();
-        blehid.keyRelease(0);
+        releaseKeys();
         break;
 
     case ACTION_APPROVE_ALWAYS:
         // Tab then Enter — select "Always allow"
-        blehid.keyPress(0, HID_KEY_TAB);
+        sendKey(0, HID_KEY_TAB);
         keystrokeDelay();
-        blehid.keyRelease(0);
+        releaseKeys();
         keystrokeDelay();
-        blehid.keyPress(0, HID_KEY_ENTER);
+        sendKey(0, HID_KEY_ENTER);
         keystrokeDelay();
-        blehid.keyRelease(0);
+        releaseKeys();
         break;
 
     case ACTION_REJECT_ESCAPE:
         // Escape
-        blehid.keyPress(0, HID_KEY_ESCAPE);
+        sendKey(0, HID_KEY_ESCAPE);
         delay(50);
-        blehid.keyRelease(0);
+        releaseKeys();
         break;
 
     case ACTION_KILL_PROCESS:
         // Ctrl+C
-        blehid.keyPress(0, HID_KEY_C, KEYBOARD_MODIFIER_LEFTCTRL);
+        sendKey(KEYBOARD_MODIFIER_LEFTCTRL, HID_KEY_C);
         delay(50);
-        blehid.keyRelease(0);
+        releaseKeys();
         break;
 
     case ACTION_ENTER:
-        blehid.keyPress(0, HID_KEY_ENTER);
+        sendKey(0, HID_KEY_ENTER);
         delay(50);
-        blehid.keyRelease(0);
+        releaseKeys();
         break;
 
     case ACTION_NONE:

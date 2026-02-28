@@ -9,15 +9,15 @@ static const float VOLTAGE_NOMINAL = 3.7f;
 static const float VOLTAGE_LOW     = 3.3f;
 static const float VOLTAGE_EMPTY   = 3.0f;
 
-// nRF52840 ADC reference voltage and resolution
-static const float ADC_VREF    = 3.6f;    // nRF52840 internal reference
-static const float ADC_RES     = 4096.0f; // 12-bit ADC
+// nRF52840 ADC: AR_INTERNAL = 0.6V ref with 1/6 gain → 3.6V max input
+static const float ADC_VREF    = 3.6f;    // effective max input voltage
+static const float ADC_RES     = 1024.0f; // 10-bit default (Seeed core)
 static const float VBAT_DIVIDER = 2.0f;   // On-board voltage divider ratio
 
 void Battery::begin() {
-    // nRF52840 ADC configured automatically by analogRead
-    analogReference(AR_INTERNAL_3_6);
-    analogReadResolution(12);
+    // nRF52840 ADC — use default reference (AR_INTERNAL = 3.6V range)
+    analogReference(AR_INTERNAL);
+    analogReadResolution(10);
 }
 
 void Battery::read() {

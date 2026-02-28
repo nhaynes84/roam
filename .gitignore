@@ -1,1 +1,3 @@
 tools/roam-send
+build/
+*.DS_Store

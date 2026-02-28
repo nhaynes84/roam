@@ -5,8 +5,10 @@
 
 void StatusLED::begin() {
     pinMode(ROAM_LED_PIN, OUTPUT);
+#ifdef ARDUINO_ARCH_RP2040
     analogWriteFreq(1000);
     analogWriteRange(255);
+#endif
     analogWrite(ROAM_LED_PIN, 0);
 }
 
