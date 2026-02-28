@@ -1,6 +1,6 @@
 // Roam — Arduino-pico BLE HID Firmware
 // Pimoroni Pico Plus 2 W (RP2350 + CYW43439)
-// Minimal single-core build — BLE + buttons + actions
+// Single-core build — BLE + buttons + actions + display
 // Board: rp2040:rp2040:pimoroni_pico_plus_2w:ipbtstack=ipv4btcble
 
 #include <KeyboardBLE.h>
@@ -8,8 +8,10 @@
 #include "config.h"
 #include "buttons.h"
 #include "actions.h"
+#include "display.h"
 
 static ButtonManager buttons;
+static Display display;
 
 void setup() {
     Serial.begin(115200);
@@ -19,15 +21,20 @@ void setup() {
     pinMode(PIN_MOTOR, OUTPUT);
     digitalWrite(PIN_MOTOR, LOW);
 
+    display.begin();
+
     Serial.println("Starting BLE keyboard...");
     KeyboardBLE.begin("Roam", "Roam");
     Serial.println("BLE started, advertising as 'Roam'");
 
+    display.setBleStatus("Advertising");
     buttons.begin();
 }
 
 void loop() {
     static uint32_t lastStatus = 0;
+    static uint32_t lastRender = 0;
+    static bool wasConnected = false;
     bool connected = PicoBluetoothBLEHID.connected();
 
     // LED: solid when connected, blink when advertising
@@ -41,6 +48,12 @@ void loop() {
             digitalWrite(ROAM_LED_PIN, ledState ? HIGH : LOW);
             lastBlink = millis();
         }
+    }
+
+    // BLE status change
+    if (connected != wasConnected) {
+        wasConnected = connected;
+        display.setBleStatus(connected ? "Connected" : "Advertising");
     }
 
     // Print BLE status every 2 seconds
@@ -62,10 +75,17 @@ void loop() {
             delay(80);
             digitalWrite(PIN_MOTOR, LOW);
 
+            display.showAction(ACTION_NAMES[action]);
             Serial.printf("action: %s\n", ACTION_NAMES[action]);
         } else {
             Serial.printf("action: %s (not connected)\n", ACTION_NAMES[action]);
         }
+    }
+
+    // Render display at 10 Hz
+    if ((millis() - lastRender) >= DISPLAY_PERIOD_MS) {
+        lastRender = millis();
+        display.render();
     }
 
     delay(10);
