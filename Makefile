@@ -3,10 +3,13 @@
 #           arduino-cli (brew install arduino-cli) — for Arduino targets
 #           openscad (brew install openscad) — for render target only
 
-FQBN = rp2040:rp2040:pimoroni_pico_plus_2w:ipbtstack=ipv4btcble
+FQBN    = rp2040:rp2040:pimoroni_pico_plus_2w:ipbtstack=ipv4btcble
+FQBN_P2 = Seeeduino:nrf52:xiaonRF52840Sense
+SEEED_URL = https://files.seeedstudio.com/arduino/package_seeeduino_boards_index.json
 
 .PHONY: flash reset repl deploy render clean
 .PHONY: arduino-setup arduino-build arduino-flash arduino-monitor
+.PHONY: p2-setup p2-build p2-flash p2-monitor
 
 # Flash all firmware files to Pico
 flash:
@@ -58,4 +61,25 @@ arduino-flash:
 
 # Serial monitor
 arduino-monitor:
+	arduino-cli monitor -p $$(arduino-cli board list --format json | python3 -c "import sys,json; boards=json.load(sys.stdin).get('detected_ports',[]); print(boards[0]['port']['address'] if boards else '/dev/ttyACM0')") --config baudrate=115200
+
+# === P2 (XIAO nRF52840 Sense) Targets ===
+
+# Install Seeed nRF52 board core and libraries
+p2-setup:
+	arduino-cli core update-index --additional-urls $(SEEED_URL)
+	arduino-cli core install Seeeduino:nrf52 --additional-urls $(SEEED_URL)
+	arduino-cli lib install U8g2
+
+# Compile P2 firmware
+p2-build:
+	arduino-cli compile --fqbn $(FQBN_P2) p2/
+
+# Compile and upload P2 (USB bootloader — double-tap reset)
+p2-flash:
+	arduino-cli compile --fqbn $(FQBN_P2) p2/
+	arduino-cli upload --fqbn $(FQBN_P2) -p $$(arduino-cli board list --format json | python3 -c "import sys,json; boards=json.load(sys.stdin).get('detected_ports',[]); print(boards[0]['port']['address'] if boards else '/dev/ttyACM0')") p2/
+
+# P2 serial monitor
+p2-monitor:
 	arduino-cli monitor -p $$(arduino-cli board list --format json | python3 -c "import sys,json; boards=json.load(sys.stdin).get('detected_ports',[]); print(boards[0]['port']['address'] if boards else '/dev/ttyACM0')") --config baudrate=115200

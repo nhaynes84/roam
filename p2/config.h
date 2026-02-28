@@ -1,20 +1,20 @@
-// Roam — Pin definitions, button mapping, and timing constants
-// Pimoroni Pico Plus 2 W (RP2350 + CYW43439)
+// Roam P2 — Pin definitions, button mapping, and timing constants
+// Seeed XIAO nRF52840 Sense (nRF52840 + BLE 5.0)
 
 #pragma once
 
 #include <Arduino.h>
 
 // --- I2C (OLED) ---
-#define PIN_SDA        4
-#define PIN_SCL        5
+#define PIN_SDA        D4
+#define PIN_SCL        D5
 #define I2C_FREQ       400000
 
 // --- Buttons (active low, internal pull-up) ---
-#define PIN_BTN_INDEX  10
-#define PIN_BTN_MIDDLE 11
-#define PIN_BTN_RING   12
-#define PIN_BTN_PINKY  13
+#define PIN_BTN_INDEX  D0
+#define PIN_BTN_MIDDLE D1
+#define PIN_BTN_RING   D2
+#define PIN_BTN_PINKY  D3
 #define NUM_BUTTONS    4
 
 static const uint8_t BUTTON_PINS[NUM_BUTTONS] = {
@@ -22,28 +22,31 @@ static const uint8_t BUTTON_PINS[NUM_BUTTONS] = {
 };
 
 // --- Haptic motor (NPN via 1kΩ) ---
-#define PIN_MOTOR      15
+#define PIN_MOTOR      D6
 
-// --- Status LED (via 100Ω) ---
-#define ROAM_LED_PIN   16
+// --- Status LED ---
+#define ROAM_LED_PIN   D7
 
-// --- Battery ADC ---
-#define PIN_BATTERY    29   // ADC3 — VSYS/3
-#define PIN_GP25       25   // Must be HIGH during ADC read (CYW43 SPI)
+// --- Battery ---
+// XIAO nRF52840 has built-in battery management via JST connector.
+// Battery voltage readable via internal ADC channel.
+// PIN_VBAT is defined by the Seeed board core — no need to redefine it.
+#define VBAT_ENABLE_PIN    -1         // No enable pin needed on XIAO
 
 // --- Timing ---
 #define DEBOUNCE_MS       50
 #define LONG_PRESS_MS     600
-#define DOUBLE_TAP_MS     300   // Max gap between taps for double-tap
+#define DOUBLE_TAP_MS     300
 #define BUTTON_POLL_US    10000   // 100 Hz
 #define DISPLAY_PERIOD_MS 100     // 10 Hz
 #define BATTERY_PERIOD_MS 60000   // Every 60s
 #define ACTION_FADE_MS    3000    // Action text display duration
 
 // --- Display ---
-#define SCREEN_WIDTH   128
-#define SCREEN_HEIGHT  64
-#define DISPLAY_TYPE      U8G2_SH1106_128X64_NONAME_F_HW_I2C
+// Placeholder — user picks actual OLED module (must be 3.3V compatible on battery)
+#define SCREEN_WIDTH      128
+#define SCREEN_HEIGHT     64
+#define DISPLAY_TYPE      U8G2_SSD1306_128X64_NONAME_F_HW_I2C
 #define DISPLAY_I2C_ADDR  0x3C
 
 // --- Action types ---
