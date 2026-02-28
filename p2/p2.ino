@@ -42,7 +42,7 @@ void setup() {
     // --- BLE Init ---
     Bluefruit.begin();
     Bluefruit.setTxPower(4);
-    Bluefruit.setName("Roam");
+    Bluefruit.setName("Roam2");
     Bluefruit.Periph.setConnectCallback(connect_callback);
     Bluefruit.Periph.setDisconnectCallback(disconnect_callback);
 
