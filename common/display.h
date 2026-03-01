@@ -1,4 +1,6 @@
-// Roam — OLED status display (U8g2 HW_I2C)
+// Roam — OLED display with unified layout
+// Status bar (BT + battery icons) | content area | scroll indicator
+// Uses Wire library (HW_I2C) — works on RP2040/RP2350
 // DISPLAY_TYPE defined in board-specific config.h
 
 #pragma once
@@ -7,42 +9,62 @@
 #include <Wire.h>
 #include <U8g2lib.h>
 
+#define MSG_RING_SIZE  10
+#define MSG_MAX_LEN    128
+
 class Display {
 public:
     void begin();
     bool isAvailable() const { return _available; }
 
-    // Setters — mark dirty on change
-    void setMode(const char* mode);
-    void setBleStatus(const char* status);
+    // Status bar
+    void setBleConnected(bool connected);
     void setBatteryPercent(uint8_t pct);
+
+    // Content area
     void showAction(const char* action);
-    void showBleText(const char* text);  // Full-screen message (stays until toggled)
-    void toggleScreen();                 // Switch between message and status view
+    void pushMessage(const char* text);
+    void scrollFwd();    // Toward newer messages (> button)
+    void scrollBack();   // Toward older messages (< button)
 
-    bool inMessageMode() const { return _messageMode; }
-
-    // Render if dirty. Call at ~10 Hz.
-    void render();
-
+    // Power management
     void dim();
     void brighten();
     void powerOff();
     void powerOn();
+    void wake();
+    uint32_t lastActivityTime() const { return _lastActivity; }
+
+    // Render at ~10 Hz
+    void render();
 
 private:
     DISPLAY_TYPE* _u8g2 = nullptr;
     bool _available = false;
     bool _dirty = true;
     bool _dimmed = false;
+    bool _powered = true;
 
-    char _mode[16] = "Roam";
-    char _bleStatus[24] = "Advertising";
+    // Status bar
+    bool _bleConnected = false;
     uint8_t _batteryPct = 0;
+
+    // Action confirmation (fades after ACTION_FADE_MS)
     char _lastAction[20] = "";
     uint32_t _actionTime = 0;
-    char _bleText[128] = "";
-    bool _messageMode = false;
 
-    void _drawBattery();
+    // Message ring buffer
+    char _msgRing[MSG_RING_SIZE][MSG_MAX_LEN];
+    uint8_t _msgCount = 0;
+    uint8_t _msgHead = 0;       // Next write position
+    int8_t  _msgViewOffset = 0; // 0 = newest, positive = older
+
+    // Activity tracking for sleep timer
+    uint32_t _lastActivity = 0;
+
+    // Drawing helpers
+    void _drawStatusBar();
+    void _drawContent();
+    void _drawScrollIndicator();
+    int  _viewedMsgIndex() const;
 };

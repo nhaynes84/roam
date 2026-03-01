@@ -39,12 +39,15 @@ static const uint8_t BUTTON_PINS[NUM_BUTTONS] = {
 #define DISPLAY_PERIOD_MS 100     // 10 Hz
 #define BATTERY_PERIOD_MS 60000   // Every 60s
 #define ACTION_FADE_MS    3000    // Action text display duration
+#define SCREEN_DIM_MS     10000   // Dim after 10s inactivity
+#define SCREEN_OFF_MS     30000   // Power off after 30s inactivity
 
 // --- Display ---
 #define SCREEN_WIDTH   128
 #define SCREEN_HEIGHT  64
 #define DISPLAY_TYPE      U8G2_SH1106_128X64_NONAME_F_HW_I2C
 #define DISPLAY_I2C_ADDR  0x3C
+#define PIN_DISPLAY_RST   U8X8_PIN_NONE  // SH1106 — no reset pin wired
 
 // --- Action types ---
 enum ActionType : uint8_t {
@@ -63,7 +66,9 @@ enum ActionType : uint8_t {
     ACTION_KILL_PROCESS,    // Ctrl+C
     // Double-tap
     ACTION_ENTER,           // Enter only (no y prefix)
-    ACTION_TOGGLE_SCREEN,   // Toggle message/status display
+    // Scroll (dedicated buttons on P2, mapped to double-tap for P1 testing)
+    ACTION_SCROLL_FWD,      // Next line (short) or next page (long)
+    ACTION_SCROLL_BACK,     // Prev line (short) or prev page (long)
 };
 
 // Button index → short/long action mapping
@@ -74,8 +79,8 @@ struct ButtonMapping {
 };
 
 static const ButtonMapping BUTTON_MAP[NUM_BUTTONS] = {
-    { ACTION_DICTATION,     ACTION_TMUX_PANE,      ACTION_TOGGLE_SCREEN },  // Index
-    { ACTION_CYCLE_MODE,    ACTION_BLE_SWITCH,      ACTION_NONE  },  // Middle
+    { ACTION_DICTATION,     ACTION_TMUX_PANE,      ACTION_SCROLL_FWD  },  // Index (double-tap: scroll fwd for testing)
+    { ACTION_CYCLE_MODE,    ACTION_BLE_SWITCH,     ACTION_SCROLL_BACK },  // Middle (double-tap: scroll back for testing)
     { ACTION_APPROVE_YES,   ACTION_APPROVE_ALWAYS,  ACTION_ENTER },  // Ring
     { ACTION_REJECT_ESCAPE, ACTION_KILL_PROCESS,    ACTION_NONE  },  // Pinky
 };
@@ -92,5 +97,6 @@ static const char* ACTION_NAMES[] = {
     "Escape",        // ACTION_REJECT_ESCAPE
     "Kill",          // ACTION_KILL_PROCESS
     "Enter",         // ACTION_ENTER
-    "",              // ACTION_TOGGLE_SCREEN (handled locally, no HID)
+    "",              // ACTION_SCROLL_FWD (handled locally)
+    "",              // ACTION_SCROLL_BACK (handled locally)
 };

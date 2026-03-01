@@ -35,7 +35,7 @@ void setup() {
     display.begin();
     Serial.println("Display init done");
 
-    display.setBleStatus("Advertising");
+    display.setBleConnected(false);
     battery.begin();
     buttons.begin();
 }
@@ -62,7 +62,7 @@ void loop() {
     // BLE status change
     if (connected != wasConnected) {
         wasConnected = connected;
-        display.setBleStatus(connected ? "Connected" : "Advertising");
+        display.setBleConnected(connected);
     }
 
     // Print BLE status every 2 seconds
@@ -76,14 +76,17 @@ void loop() {
     buttons.poll(action);
 
     if (action != ACTION_NONE) {
-        if (action == ACTION_TOGGLE_SCREEN) {
+        display.wake();  // Any button press wakes screen
+        if (action == ACTION_SCROLL_FWD || action == ACTION_SCROLL_BACK) {
             // Local action — no HID, no connection required
-            display.toggleScreen();
+            if (action == ACTION_SCROLL_FWD) display.scrollFwd();
+            else display.scrollBack();
+            display.wake();
             digitalWrite(PIN_MOTOR, HIGH);
             delay(40);
             digitalWrite(PIN_MOTOR, LOW);
-            Serial.printf("action: toggle screen (%s)\n",
-                          display.inMessageMode() ? "message" : "status");
+            Serial.printf("action: scroll %s\n",
+                          action == ACTION_SCROLL_FWD ? "fwd" : "back");
         } else if (connected) {
             executeAction(action);
 
@@ -103,16 +106,29 @@ void loop() {
     if (battery.shouldRead()) {
         battery.read();
         display.setBatteryPercent(battery.percent());
-        if (battery.voltage() > 4.5f) {
-            display.setBleStatus(connected ? "Connected (USB)" : "Charging");
-        }
+        // USB power detection — battery icon handles visual feedback
     }
 
     // Check for BLE text pushes
     if (bleText.hasNewText()) {
         const char* text = bleText.getText();
-        display.showBleText(text);
+        display.pushMessage(text);
+        digitalWrite(PIN_MOTOR, HIGH);
+        delay(60);
+        digitalWrite(PIN_MOTOR, LOW);
+        delay(80);
+        digitalWrite(PIN_MOTOR, HIGH);
+        delay(60);
+        digitalWrite(PIN_MOTOR, LOW);
         Serial.printf("ble_text: \"%s\"\n", text);
+    }
+
+    // Screen sleep timer
+    uint32_t idle = millis() - display.lastActivityTime();
+    if (idle >= SCREEN_OFF_MS) {
+        display.powerOff();
+    } else if (idle >= SCREEN_DIM_MS) {
+        display.dim();
     }
 
     // Render display at 10 Hz

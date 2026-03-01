@@ -58,8 +58,13 @@ make render          # Render OpenSCAD housing to STL
 - Pin assignments in `p2/config.h`
 - BLE via Bluefruit: `BLEHidAdafruit` for HID, `BLEService`/`BLECharacteristic` for custom GATT
 - Built-in JST battery connector — no LiPo SHIM needed
-- OLED needs 3.3V-compatible display (no 5V on battery)
-- Double-tap reset to enter bootloader (no BOOTSEL button)
+- **Display uses TWIM1 direct register access** — NOT the Wire library, NOT TWIM0
+  - Bluefruit softdevice claims TWIM0 — data writes hang if you use it
+  - Seeed BSP Wire library has infinite spin loops with no timeout — avoid it
+  - Custom U8g2 byte callback (`u8x8_byte_twim1`) in `display.cpp`
+- **Build 2A** (current): SH1106 1.3" screen, VCC on VUSB (5V), USB power only
+- **Build 2B** (planned): SSD1309 2.42" screen, 3.3V native, works on battery
+- Double-tap reset to enter bootloader (tiny button next to USB-C)
 
 ### Housing (OpenSCAD)
 - All shared dimensions in `housing/common.scad`
@@ -70,9 +75,17 @@ make render          # Render OpenSCAD housing to STL
 
 ## Hardware Reference
 
+### P1 (Pico Plus 2 W)
 - **Pinout**: `hardware/pinout.md` (includes board silkscreen labels and gotchas)
 - **Wiring**: `hardware/wiring-diagram.md`
 - GPIO assignments: I2C0 on GP4/5, buttons on GP10-13, motor on GP15, LED on GP16
+
+### P2 (XIAO nRF52840 Sense)
+- **Pinout**: `hardware/p2-pinout.md` (includes TWIM1 notes and display options)
+- **Wiring**: `hardware/p2-wiring-diagram.md`
+- GPIO assignments: I2C on D4/D5 (TWIM1), buttons on D0-D3, scroll on D8/D9, motor on D6, LED on D7
+- **Two display options** documented: Build 2A (SH1106 1.3", needs 5V) and Build 2B (SSD1309 2.42", 3.3V native, pending)
+- **TWIM1 required** — Bluefruit softdevice conflicts with TWIM0. Wire library has no timeouts. See `display.cpp` for raw register driver.
 
 ## File Structure
 
