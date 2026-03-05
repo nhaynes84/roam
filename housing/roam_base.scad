@@ -1,6 +1,10 @@
 // roam_base.scad — Base plate for Roam wrist-mount controller
 // Just the plate, screw holes, and velcro recess.
 // All interior mounting (pedestals, standoffs, lip) left for manual design.
+//
+// ORIENTATION: see common.scad header
+//   Plate lies flat at Z=0. Velcro recess faces down (Z-).
+//   Screw countersinks on bottom face, through-holes match dome bosses.
 
 include <common.scad>
 

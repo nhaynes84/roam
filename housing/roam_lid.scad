@@ -2,6 +2,10 @@
 // Flat with slight concavity to match forearm curve.
 // Velcro recess on bottom for attachment to neoprene forearm band.
 // Mounts to case via M2 button head screws into heat-set inserts.
+//
+// ORIENTATION: see common.scad header
+//   Lid sits at Z=0. Lip extends upward (Z+) into case opening.
+//   Velcro recess on bottom face (Z-). Screws go up through lid into dome.
 
 include <common.scad>
 
@@ -11,14 +15,7 @@ lid_concavity_radius = 200;  // large radius for subtle forearm curve
 lip_height    = 1.5;         // registration lip into case opening
 lip_clearance = 0.15;        // per-side clearance for lip fit
 
-// Screw positions — must match roam_case.scad
-screw_inset = 8;
-screw_positions = [
-    [ body_length/2 - screw_inset,  body_width/2 - screw_inset],
-    [ body_length/2 - screw_inset, -body_width/2 + screw_inset],
-    [-body_length/2 + screw_inset,  body_width/2 - screw_inset],
-    [-body_length/2 + screw_inset, -body_width/2 + screw_inset],
-];
+// Screw positions — from common.scad (shared with dome and base)
 
 
 // ════════════════════════════════════════════════════════════

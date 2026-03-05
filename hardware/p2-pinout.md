@@ -56,8 +56,7 @@ register access (not the Wire library) with proper timeouts.
 
 The same small screen used on P1. Proven reliable on I2C.
 
-- **VCC must be 5V (VUSB pad)** — charge pump won't light the panel at 3.3V
-- **Only works on USB power** — no 5V available on battery
+- **VCC from battery through switch** — charge pump works at LiPo voltages (3.7–4.2V)
 - **No reset pin** on the 4-pin module (`PIN_DISPLAY_RST = U8X8_PIN_NONE`)
 - **Column offset of 2** — SH1106 has 132-column RAM for a 128-column display
 
@@ -66,7 +65,7 @@ The same small screen used on P1. Proven reliable on I2C.
 | OLED Pin | Connect to    | Notes                              |
 |----------|---------------|------------------------------------|
 | GND      | GND           |                                    |
-| VCC      | 5V (VUSB)     | **NOT 3V3** — screen won't light   |
+| VCC      | Switched BAT+ | Through power switch               |
 | SCL      | D5            |                                    |
 | SDA      | D4            |                                    |
 
@@ -132,7 +131,7 @@ Needs a pre-configured I2C module or verified mod procedure.
   group. I2C display MUST use TWIM1 with direct register access. See `display.cpp`.
 - **Wire library has no timeouts**: Seeed BSP's `Wire_nRF52.cpp` spins forever
   waiting for TWIM events. A stuck bus = bricked firmware. Use raw TWIM registers.
-- **SH1106 needs 5V**: Same as P1. Won't light at 3.3V. Only works on USB power.
+- **SH1106 works on LiPo voltage**: Charge pump runs fine at 3.7–4.2V through switch.
 - **LED_BUILTIN is active LOW**: `LOW` = on, `HIGH` = off. Red LED on P0.26.
 - **Reset button**: Tiny switch next to USB-C. Double-click for UF2 bootloader
   (shows as "XIAO-SENSE" USB drive on Mac).

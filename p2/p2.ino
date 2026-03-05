@@ -14,6 +14,8 @@ BLEHidAdafruit blehid;
 BLEDis bledis;   // Device Information Service
 
 static ButtonManager buttons;
+static Button scrollFwd;
+static Button scrollBack;
 static Display display;
 static Battery battery;
 
@@ -79,6 +81,8 @@ void setup() {
     display.setBleConnected(false);
     battery.begin();
     buttons.begin();
+    scrollFwd.begin(PIN_BTN_SCROLL_FWD, 0);
+    scrollBack.begin(PIN_BTN_SCROLL_BACK, 0);
 }
 
 void loop() {
@@ -108,6 +112,16 @@ void loop() {
     // Poll buttons
     ActionType action = ACTION_NONE;
     buttons.poll(action);
+
+    // Always poll scroll buttons to keep debounce state current
+    ButtonEvent sfEvt = scrollFwd.poll();
+    ButtonEvent sbEvt = scrollBack.poll();
+    if (action == ACTION_NONE) {
+        if (sfEvt == BTN_EVENT_SHORT || sfEvt == BTN_EVENT_LONG)
+            action = ACTION_SCROLL_FWD;
+        else if (sbEvt == BTN_EVENT_SHORT || sbEvt == BTN_EVENT_LONG)
+            action = ACTION_SCROLL_BACK;
+    }
 
     if (action != ACTION_NONE) {
         display.wake();  // Any button press wakes screen

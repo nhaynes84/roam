@@ -1,3 +1,5 @@
 tools/roam-send
 build/
 *.DS_Store
+housing/.venv/
+housing/step/

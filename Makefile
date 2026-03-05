@@ -7,7 +7,7 @@ FQBN    = rp2040:rp2040:pimoroni_pico_plus_2w:ipbtstack=ipv4btcble
 FQBN_P2 = Seeeduino:nrf52:xiaonRF52840Sense
 SEEED_URL = https://files.seeedstudio.com/arduino/package_seeeduino_boards_index.json
 
-.PHONY: flash reset repl deploy render clean
+.PHONY: flash reset repl deploy render clean step
 .PHONY: arduino-setup arduino-build arduino-flash arduino-monitor
 .PHONY: p2-setup p2-build p2-flash p2-monitor
 
@@ -37,6 +37,10 @@ render:
 # Quick render (lower resolution)
 render-fast:
 	cd housing && bash render.sh --fast
+
+# Export STEP files for Shapr3D (requires housing/.venv)
+step:
+	housing/.venv/bin/python3 housing/export_step.py
 
 # Remove rendered STLs
 clean:

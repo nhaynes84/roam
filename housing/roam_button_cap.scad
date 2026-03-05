@@ -2,7 +2,9 @@
 // Sits in the button well, contacts switch nub underneath
 // Print 4x in PLA or TPU (TPU gives softer click feel)
 //
-// Orientation: print flat-side down (dish faces up)
+// ORIENTATION: see common.scad header
+//   Cap printed dish-up. Stem extends downward (Z-) to contact switch.
+//   Dish concavity on top (Z+) for finger grip.
 
 include <common.scad>
 
