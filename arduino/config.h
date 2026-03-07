@@ -79,10 +79,10 @@ struct ButtonMapping {
 };
 
 static const ButtonMapping BUTTON_MAP[NUM_BUTTONS] = {
-    { ACTION_DICTATION,     ACTION_TMUX_PANE,      ACTION_NONE },  // Index
-    { ACTION_CYCLE_MODE,    ACTION_BLE_SWITCH,     ACTION_NONE },  // Middle
-    { ACTION_ENTER,         ACTION_APPROVE_YES,     ACTION_APPROVE_ALWAYS },  // Ring
-    { ACTION_REJECT_ESCAPE, ACTION_KILL_PROCESS,    ACTION_NONE  },  // Pinky
+    { ACTION_DICTATION,     ACTION_TMUX_PANE,      ACTION_NONE },           // Index
+    { ACTION_ENTER,         ACTION_APPROVE_YES,    ACTION_APPROVE_ALWAYS }, // Middle
+    { ACTION_REJECT_ESCAPE, ACTION_KILL_PROCESS,   ACTION_NONE },           // Ring
+    { ACTION_CYCLE_MODE,    ACTION_BLE_SWITCH,     ACTION_NONE },           // Pinky
 };
 
 // Human-readable action names for display
