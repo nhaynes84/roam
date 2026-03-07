@@ -37,6 +37,13 @@ void executeAction(ActionType action) {
         blehid.consumerKeyRelease();
         break;
 
+    case ACTION_DICTATION_ANDROID:
+        // Android inline voice input 0x00D8
+        blehid.consumerKeyPress(0x00D8);
+        delay(50);
+        blehid.consumerKeyRelease();
+        break;
+
     case ACTION_TMUX_PANE:
         // Ctrl+B then 'o' — tmux next pane
         sendKey(KEYBOARD_MODIFIER_LEFTCTRL, HID_KEY_B);
@@ -56,10 +63,8 @@ void executeAction(ActionType action) {
         break;
 
     case ACTION_BLE_SWITCH:
-        // Disconnect BLE — Bluefruit will re-advertise
-        Bluefruit.disconnect(Bluefruit.connHandle());
-        delay(200);
-        Bluefruit.Advertising.start(0);
+        // Disconnect + reject reconnections from current device
+        bleSwitch();
         break;
 
     case ACTION_APPROVE_YES:
@@ -102,6 +107,25 @@ void executeAction(ActionType action) {
         sendKey(0, HID_KEY_ENTER);
         delay(50);
         releaseKeys();
+        break;
+
+    case ACTION_HOME_ANDROID:
+        // Meta+H — Android home
+        sendKey(KEYBOARD_MODIFIER_LEFTGUI, HID_KEY_H);
+        delay(50);
+        releaseKeys();
+        break;
+
+    case ACTION_RECENTS_ANDROID:
+        // Android app switcher consumer key 0x029F
+        blehid.consumerKeyPress(0x029F);
+        delay(50);
+        blehid.consumerKeyRelease();
+        break;
+
+    case ACTION_PROFILE_TOGGLE:
+        // Toggle between Mac ↔ Android profile
+        activeProfile = (activeProfile == PROFILE_MAC) ? PROFILE_ANDROID : PROFILE_MAC;
         break;
 
     case ACTION_NONE:

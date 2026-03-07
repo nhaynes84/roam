@@ -137,6 +137,12 @@ void Display::setBatteryPercent(uint8_t pct) {
     }
 }
 
+void Display::setProfileName(const char* name) {
+    strncpy(_profileName, name, sizeof(_profileName) - 1);
+    _profileName[sizeof(_profileName) - 1] = '\0';
+    _dirty = true;
+}
+
 // --- Content ---
 
 void Display::showAction(const char* action) {
@@ -289,6 +295,13 @@ void Display::_drawStatusBar() {
         _u8g2->drawLine(cx - 1, by + 4, cx + 1, by + 4);
         _u8g2->drawLine(cx + 1, by + 4, cx - 1, by + 7);
         _u8g2->setDrawColor(1);
+    }
+
+    // Profile name (centered in status bar)
+    if (_profileName[0] != '\0') {
+        _u8g2->setFont(u8g2_font_6x10_tr);
+        int w = _u8g2->getStrWidth(_profileName);
+        _u8g2->drawStr((SCREEN_WIDTH - w) / 2, 8, _profileName);
     }
 
     // Separator line

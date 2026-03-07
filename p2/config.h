@@ -50,7 +50,7 @@ static const uint8_t BUTTON_PINS[NUM_BUTTONS] = {
 #define BATTERY_PERIOD_MS 60000   // Every 60s
 #define ACTION_FADE_MS    3000    // Action text display duration
 #define SCREEN_DIM_MS     10000   // Dim after 10s inactivity
-#define SCREEN_OFF_MS     30000   // Power off after 30s inactivity
+#define SCREEN_OFF_MS     15000   // Power off after 15s inactivity
 
 // --- Display ---
 // 1.3" 128x64 I2C OLED (SH1106)
@@ -62,43 +62,68 @@ static const uint8_t BUTTON_PINS[NUM_BUTTONS] = {
 // --- Action types ---
 enum ActionType : uint8_t {
     ACTION_NONE = 0,
-    // Index button
-    ACTION_DICTATION,       // Consumer key 0x00CF
-    ACTION_TMUX_PANE,       // Ctrl+B, o
-    // Middle button
-    ACTION_CYCLE_MODE,      // Shift+Tab
-    ACTION_BLE_SWITCH,      // Disconnect + re-advertise
-    // Ring button
-    ACTION_APPROVE_YES,     // y + Enter
-    ACTION_APPROVE_ALWAYS,  // Tab + Enter
-    // Pinky button
-    ACTION_REJECT_ESCAPE,   // Escape
-    ACTION_KILL_PROCESS,    // Ctrl+C
-    // Double-tap
-    ACTION_ENTER,           // Enter only (no y prefix)
-    // Scroll (dedicated buttons on P2, mapped to double-tap for P1 testing)
-    ACTION_SCROLL_FWD,      // Next line (short) or next page (long)
-    ACTION_SCROLL_BACK,     // Prev line (short) or prev page (long)
+    ACTION_DICTATION,           // macOS: Consumer key 0x00CF
+    ACTION_DICTATION_ANDROID,   // Android: Consumer key 0x00D8
+    ACTION_TMUX_PANE,           // Ctrl+B, o
+    ACTION_CYCLE_MODE,          // Shift+Tab
+    ACTION_BLE_SWITCH,          // Disconnect + re-advertise
+    ACTION_APPROVE_YES,         // y + Enter
+    ACTION_APPROVE_ALWAYS,      // Tab + Enter
+    ACTION_REJECT_ESCAPE,       // Escape (also Android Back)
+    ACTION_KILL_PROCESS,        // Ctrl+C
+    ACTION_ENTER,               // Enter
+    ACTION_HOME_ANDROID,        // Meta+H (Android home)
+    ACTION_RECENTS_ANDROID,     // Consumer 0x029F (Android app switcher)
+    ACTION_LED_TOGGLE,          // Toggle status LED on/off
+    ACTION_PROFILE_TOGGLE,      // Switch Mac ↔ Android
+    ACTION_SCROLL_FWD,          // Next page / newer message
+    ACTION_SCROLL_BACK,         // Prev page / older message
 };
 
-// Button index → short/long action mapping
+// Button index → short/long/double-tap action mapping
 struct ButtonMapping {
     ActionType shortPress;
     ActionType longPress;
     ActionType doubleTap;
 };
 
-static const ButtonMapping BUTTON_MAP[NUM_BUTTONS] = {
-    { ACTION_DICTATION,     ACTION_TMUX_PANE,      ACTION_NONE },           // Index
-    { ACTION_ENTER,         ACTION_APPROVE_YES,    ACTION_APPROVE_ALWAYS }, // Middle
-    { ACTION_REJECT_ESCAPE, ACTION_KILL_PROCESS,   ACTION_NONE },           // Ring
-    { ACTION_CYCLE_MODE,    ACTION_BLE_SWITCH,     ACTION_NONE },           // Pinky
+// --- Profiles ---
+enum Profile : uint8_t {
+    PROFILE_MAC = 0,
+    PROFILE_ANDROID,
+    PROFILE_COUNT
 };
+
+static const ButtonMapping PROFILE_MAPS[PROFILE_COUNT][NUM_BUTTONS] = {
+    // PROFILE_MAC
+    {
+        { ACTION_DICTATION,     ACTION_TMUX_PANE,      ACTION_NONE },           // Index
+        { ACTION_ENTER,         ACTION_APPROVE_YES,    ACTION_APPROVE_ALWAYS }, // Middle
+        { ACTION_REJECT_ESCAPE, ACTION_KILL_PROCESS,   ACTION_LED_TOGGLE },     // Ring
+        { ACTION_CYCLE_MODE,    ACTION_BLE_SWITCH,     ACTION_PROFILE_TOGGLE }, // Pinky
+    },
+    // PROFILE_ANDROID
+    {
+        { ACTION_DICTATION_ANDROID, ACTION_RECENTS_ANDROID, ACTION_NONE },  // Index
+        { ACTION_ENTER,             ACTION_REJECT_ESCAPE,   ACTION_NONE },  // Middle
+        { ACTION_HOME_ANDROID,      ACTION_BLE_SWITCH,      ACTION_LED_TOGGLE },  // Ring
+        { ACTION_REJECT_ESCAPE,     ACTION_KILL_PROCESS,    ACTION_PROFILE_TOGGLE },  // Pinky
+    },
+};
+
+static const char* PROFILE_NAMES[PROFILE_COUNT] = { "Mac", "Android" };
+
+// Active profile — set by connect_callback based on peer MAC
+extern volatile Profile activeProfile;
+
+// Convenience accessor for current button map
+#define BUTTON_MAP  PROFILE_MAPS[activeProfile]
 
 // Human-readable action names for display
 static const char* ACTION_NAMES[] = {
     "",              // ACTION_NONE
     "Dictation",     // ACTION_DICTATION
+    "Dictation",     // ACTION_DICTATION_ANDROID
     "Tmux Pane",     // ACTION_TMUX_PANE
     "Cycle Mode",    // ACTION_CYCLE_MODE
     "BLE Switch",    // ACTION_BLE_SWITCH
@@ -107,6 +132,10 @@ static const char* ACTION_NAMES[] = {
     "Escape",        // ACTION_REJECT_ESCAPE
     "Kill",          // ACTION_KILL_PROCESS
     "Enter",         // ACTION_ENTER
+    "Home",          // ACTION_HOME_ANDROID
+    "Recents",       // ACTION_RECENTS_ANDROID
+    "",              // ACTION_LED_TOGGLE (shows LED On/Off)
+    "",              // ACTION_PROFILE_TOGGLE (shows profile name)
     "",              // ACTION_SCROLL_FWD (handled locally)
     "",              // ACTION_SCROLL_BACK (handled locally)
 };

@@ -23,7 +23,7 @@ Bash script that splits long messages at word boundaries and sends each chunk as
 ./roam-msg "This is a very long message that exceeds the 127 character BLE buffer limit and will be automatically split into multiple messages that you can scroll through on the device"
 ```
 
-- Each chunk becomes a separate message in the ring buffer (10 message capacity)
+- Each chunk becomes a separate message in the ring buffer (100 message capacity)
 - Scroll between chunks using the scroll buttons on the device
 - No prefix tags — chunks are clean text
 
@@ -96,7 +96,7 @@ Sends pane name to Roam on every pane switch.
 
 ## Display Behavior
 
-- Messages stored in a 10-slot ring buffer (oldest evicted when full)
+- Messages stored in a 100-slot ring buffer (oldest evicted when full)
 - New messages auto-display and wake the screen
 - Scroll up (D8) = advance to next message/page (higher numbers)
 - Scroll down (D9) = go back (lower numbers)

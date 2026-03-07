@@ -12,9 +12,13 @@ static const float VOLTAGE_EMPTY   = 3.0f;
 // nRF52840 ADC: AR_INTERNAL = 0.6V ref with 1/6 gain → 3.6V max input
 static const float ADC_VREF    = 3.6f;    // effective max input voltage
 static const float ADC_RES     = 1024.0f; // 10-bit default (Seeed core)
-static const float VBAT_DIVIDER = 2.0f;   // On-board voltage divider ratio
+static const float VBAT_DIVIDER = 1510.0f / 510.0f;  // On-board 1M + 510k divider
 
 void Battery::begin() {
+    // Enable VBAT voltage divider (VBAT_ENABLE must be LOW to read)
+    pinMode(VBAT_ENABLE, OUTPUT);
+    digitalWrite(VBAT_ENABLE, LOW);
+
     // nRF52840 ADC — use default reference (AR_INTERNAL = 3.6V range)
     analogReference(AR_INTERNAL);
     analogReadResolution(10);
@@ -42,6 +46,7 @@ void Battery::read() {
     }
 
     _lastRead = millis();
+    Serial.printf("battery: voltage=%.2fV pct=%d%%\n", _voltage, _percent);
 }
 
 bool Battery::shouldRead() {

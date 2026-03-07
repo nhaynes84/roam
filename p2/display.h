@@ -19,6 +19,7 @@ public:
     // Status bar
     void setBleConnected(bool connected);
     void setBatteryPercent(uint8_t pct);
+    void setProfileName(const char* name);
 
     // Content area
     void showAction(const char* action);
@@ -51,6 +52,7 @@ private:
     bool _bleConnected = false;
     bool _usbPowered = false;
     uint8_t _batteryPct = 0;
+    char _profileName[10] = "";
 
     // Action confirmation (fades after ACTION_FADE_MS)
     char _lastAction[20] = "";

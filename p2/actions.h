@@ -8,3 +8,4 @@
 
 void actionsBegin();
 void executeAction(ActionType action);
+void bleSwitch();  // Disconnect + reject reconnections from current device
