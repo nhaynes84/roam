@@ -64,6 +64,7 @@ void Display::pushMessage(const char* text) {
 }
 
 void Display::scrollFwd() {
+    // > / up = advance: next page, then newer message (higher number)
     if (_msgCount == 0) return;
 
     int idx = _viewedMsgIndex();
@@ -82,6 +83,7 @@ void Display::scrollFwd() {
 }
 
 void Display::scrollBack() {
+    // < / down = go back: prev page, then older message (lower number)
     if (_msgCount == 0) return;
 
     if (_msgPageOffset > 0) {
@@ -240,12 +242,12 @@ void Display::_drawScrollIndicator() {
 
     if (totalPages > 1) {
         // Multi-page message: show page indicator
-        snprintf(buf, sizeof(buf), "%d/%d", _msgPageOffset + 1, totalPages);
+        snprintf(buf, sizeof(buf), "p%d/%d", _msgPageOffset + 1, totalPages);
         canLeft  = _msgPageOffset > 0 || _msgViewOffset < (int8_t)(_msgCount - 1);
         canRight = _msgPageOffset < totalPages - 1 || _msgViewOffset > 0;
     } else if (_msgCount > 1) {
-        // Single-page: show message indicator
-        snprintf(buf, sizeof(buf), "%d/%d", _msgViewOffset + 1, _msgCount);
+        // Single-page: show message indicator (chronological: 1=oldest, N=newest)
+        snprintf(buf, sizeof(buf), "m%d/%d", _msgCount - _msgViewOffset, _msgCount);
         canLeft  = _msgViewOffset < (int8_t)(_msgCount - 1);
         canRight = _msgViewOffset > 0;
     } else {

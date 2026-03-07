@@ -53,7 +53,7 @@ static const uint8_t BUTTON_PINS[NUM_BUTTONS] = {
 #define SCREEN_OFF_MS     30000   // Power off after 30s inactivity
 
 // --- Display ---
-// SH1106 128x64 I2C OLED (V1 screen, same as P1 — needs 5V on VCC)
+// 1.3" 128x64 I2C OLED (SH1106)
 #define SCREEN_WIDTH      128
 #define SCREEN_HEIGHT     64
 #define DISPLAY_TYPE      U8G2_SH1106_128X64_NONAME_F_HW_I2C
@@ -89,9 +89,9 @@ struct ButtonMapping {
 };
 
 static const ButtonMapping BUTTON_MAP[NUM_BUTTONS] = {
-    { ACTION_DICTATION,     ACTION_TMUX_PANE,      ACTION_SCROLL_FWD  },  // Index (double-tap: scroll fwd for testing)
-    { ACTION_CYCLE_MODE,    ACTION_BLE_SWITCH,     ACTION_SCROLL_BACK },  // Middle (double-tap: scroll back for testing)
-    { ACTION_APPROVE_YES,   ACTION_APPROVE_ALWAYS,  ACTION_ENTER },  // Ring
+    { ACTION_DICTATION,     ACTION_TMUX_PANE,      ACTION_NONE },  // Index
+    { ACTION_CYCLE_MODE,    ACTION_BLE_SWITCH,     ACTION_NONE },  // Middle
+    { ACTION_ENTER,         ACTION_APPROVE_YES,     ACTION_APPROVE_ALWAYS },  // Ring
     { ACTION_REJECT_ESCAPE, ACTION_KILL_PROCESS,    ACTION_NONE  },  // Pinky
 };
 

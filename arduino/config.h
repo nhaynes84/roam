@@ -79,9 +79,9 @@ struct ButtonMapping {
 };
 
 static const ButtonMapping BUTTON_MAP[NUM_BUTTONS] = {
-    { ACTION_DICTATION,     ACTION_TMUX_PANE,      ACTION_SCROLL_FWD  },  // Index (double-tap: scroll fwd for testing)
-    { ACTION_CYCLE_MODE,    ACTION_BLE_SWITCH,     ACTION_SCROLL_BACK },  // Middle (double-tap: scroll back for testing)
-    { ACTION_APPROVE_YES,   ACTION_APPROVE_ALWAYS,  ACTION_ENTER },  // Ring
+    { ACTION_DICTATION,     ACTION_TMUX_PANE,      ACTION_NONE },  // Index
+    { ACTION_CYCLE_MODE,    ACTION_BLE_SWITCH,     ACTION_NONE },  // Middle
+    { ACTION_ENTER,         ACTION_APPROVE_YES,     ACTION_APPROVE_ALWAYS },  // Ring
     { ACTION_REJECT_ESCAPE, ACTION_KILL_PROCESS,    ACTION_NONE  },  // Pinky
 };
 

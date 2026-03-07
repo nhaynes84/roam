@@ -1,0 +1,48 @@
+#!/bin/bash
+# roam-msg — Send long messages to Roam, chunked to fit 127-char BLE buffer
+# Splits at word boundaries, sends each chunk with a delay between.
+# Usage: roam-msg "your long message here"
+
+set -euo pipefail
+
+ROAM_SEND="$(dirname "$0")/roam-send"
+MAX_LEN=120  # Leave room for null + safety margin
+DELAY=2      # Seconds between chunks for BLE reconnect
+
+msg="$*"
+
+if [ ${#msg} -le $MAX_LEN ]; then
+    "$ROAM_SEND" "$msg"
+    exit 0
+fi
+
+# Split into chunks at word boundaries
+chunks=()
+while [ ${#msg} -gt 0 ]; do
+    if [ ${#msg} -le $MAX_LEN ]; then
+        chunks+=("$msg")
+        break
+    fi
+
+    # Find last space within MAX_LEN
+    cut="${msg:0:$MAX_LEN}"
+    brk=$(echo "$cut" | grep -ob ' ' | tail -1 | cut -d: -f1 || echo "")
+
+    if [ -z "$brk" ] || [ "$brk" -eq 0 ]; then
+        # No space found, hard cut
+        chunks+=("${msg:0:$MAX_LEN}")
+        msg="${msg:$MAX_LEN}"
+    else
+        chunks+=("${msg:0:$brk}")
+        msg="${msg:$((brk + 1))}"
+    fi
+done
+
+total=${#chunks[@]}
+for i in "${!chunks[@]}"; do
+    n=$((i + 1))
+    "$ROAM_SEND" "${chunks[$i]}"
+    if [ $n -lt $total ]; then
+        sleep $DELAY
+    fi
+done
