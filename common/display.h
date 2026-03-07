@@ -9,7 +9,7 @@
 #include <Wire.h>
 #include <U8g2lib.h>
 
-#define MSG_RING_SIZE  10
+#define MSG_RING_SIZE  100
 #define MSG_MAX_LEN    128
 
 class Display {

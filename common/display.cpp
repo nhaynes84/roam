@@ -100,7 +100,7 @@ void Display::scrollBack() {
 }
 
 int Display::_viewedMsgIndex() const {
-    return (_msgHead - 1 - _msgViewOffset + MSG_RING_SIZE * 2) % MSG_RING_SIZE;
+    return ((int)_msgHead - 1 - _msgViewOffset + MSG_RING_SIZE * 2) % MSG_RING_SIZE;
 }
 
 int Display::_wrapLineLen(const char* p) const {
