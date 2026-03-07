@@ -58,28 +58,70 @@ void Display::pushMessage(const char* text) {
     _msgHead = (_msgHead + 1) % MSG_RING_SIZE;
     if (_msgCount < MSG_RING_SIZE) _msgCount++;
     _msgViewOffset = 0;  // auto-show newest
+    _msgPageOffset = 0;
     wake();              // incoming message wakes screen
     _dirty = true;
 }
 
 void Display::scrollFwd() {
-    if (_msgViewOffset > 0) {
+    if (_msgCount == 0) return;
+
+    int idx = _viewedMsgIndex();
+    int totalPages = _countMsgPages(_msgRing[idx]);
+
+    if (_msgPageOffset < totalPages - 1) {
+        _msgPageOffset++;
+    } else if (_msgViewOffset > 0) {
         _msgViewOffset--;
-        _lastActivity = millis();
-        _dirty = true;
+        _msgPageOffset = 0;
+    } else {
+        return;
     }
+    _lastActivity = millis();
+    _dirty = true;
 }
 
 void Display::scrollBack() {
-    if (_msgCount > 0 && _msgViewOffset < (int8_t)(_msgCount - 1)) {
+    if (_msgCount == 0) return;
+
+    if (_msgPageOffset > 0) {
+        _msgPageOffset--;
+    } else if (_msgViewOffset < (int8_t)(_msgCount - 1)) {
         _msgViewOffset++;
-        _lastActivity = millis();
-        _dirty = true;
+        int idx = _viewedMsgIndex();
+        _msgPageOffset = _countMsgPages(_msgRing[idx]) - 1;
+    } else {
+        return;
     }
+    _lastActivity = millis();
+    _dirty = true;
 }
 
 int Display::_viewedMsgIndex() const {
     return (_msgHead - 1 - _msgViewOffset + MSG_RING_SIZE * 2) % MSG_RING_SIZE;
+}
+
+int Display::_wrapLineLen(const char* p) const {
+    int len = strlen(p);
+    if (len == 0) return 0;
+    const int maxChars = SCREEN_WIDTH / 6;
+    if (len <= maxChars) return len;
+    int brk = maxChars;
+    while (brk > 0 && p[brk] != ' ') brk--;
+    return (brk > 0) ? brk : maxChars;
+}
+
+int Display::_countMsgPages(const char* msg) const {
+    int lines = 0;
+    const char* p = msg;
+    while (*p) {
+        int ll = _wrapLineLen(p);
+        if (ll == 0) break;
+        p += ll;
+        if (*p == ' ') p++;
+        lines++;
+    }
+    return (lines <= 0) ? 1 : (lines + 2) / 3;
 }
 
 // --- Power management ---
@@ -158,54 +200,67 @@ void Display::_drawContent() {
 
     int idx = _viewedMsgIndex();
     const char* msg = _msgRing[idx];
-
-    // Word-wrap into content area (3 lines max, 21 chars wide)
-    const int lineH = 12;
-    const int maxChars = SCREEN_WIDTH / 6;  // 21 at 128px
-    int y = 24;
     const char* p = msg;
 
-    for (int line = 0; line < 3 && *p; line++) {
-        int len = strlen(p);
-        int lineLen = (len < maxChars) ? len : maxChars;
+    // Skip lines for current page
+    int skipLines = _msgPageOffset * 3;
+    for (int i = 0; i < skipLines && *p; i++) {
+        int ll = _wrapLineLen(p);
+        if (ll == 0) break;
+        p += ll;
+        if (*p == ' ') p++;
+    }
 
-        // Break at word boundary if line is full
-        if (len > maxChars) {
-            int brk = maxChars;
-            while (brk > 0 && p[brk] != ' ') brk--;
-            if (brk > 0) lineLen = brk;
-        }
+    // Draw up to 3 lines
+    const int lineH = 12;
+    int y = 24;
+    for (int line = 0; line < 3 && *p; line++) {
+        int ll = _wrapLineLen(p);
+        if (ll == 0) break;
 
         char buf[22];
-        memcpy(buf, p, lineLen);
-        buf[lineLen] = '\0';
+        memcpy(buf, p, ll);
+        buf[ll] = '\0';
         _u8g2->drawStr(0, y, buf);
 
-        p += lineLen;
-        if (*p == ' ') p++;  // skip space at break point
+        p += ll;
+        if (*p == ' ') p++;
         y += lineH;
     }
 }
 
 void Display::_drawScrollIndicator() {
-    if (_msgCount <= 1) return;  // No scrolling when 0 or 1 messages
+    if (_msgCount == 0) return;
 
-    // "< 2/10 >" centered at bottom
+    int idx = _viewedMsgIndex();
+    int totalPages = _countMsgPages(_msgRing[idx]);
+
     char buf[12];
-    snprintf(buf, sizeof(buf), "%d/%d", _msgViewOffset + 1, _msgCount);
+    bool canLeft, canRight;
+
+    if (totalPages > 1) {
+        // Multi-page message: show page indicator
+        snprintf(buf, sizeof(buf), "%d/%d", _msgPageOffset + 1, totalPages);
+        canLeft  = _msgPageOffset > 0 || _msgViewOffset < (int8_t)(_msgCount - 1);
+        canRight = _msgPageOffset < totalPages - 1 || _msgViewOffset > 0;
+    } else if (_msgCount > 1) {
+        // Single-page: show message indicator
+        snprintf(buf, sizeof(buf), "%d/%d", _msgViewOffset + 1, _msgCount);
+        canLeft  = _msgViewOffset < (int8_t)(_msgCount - 1);
+        canRight = _msgViewOffset > 0;
+    } else {
+        return;  // Single message, single page — nothing to show
+    }
 
     _u8g2->setFont(u8g2_font_6x10_tr);
     int w = _u8g2->getStrWidth(buf);
     int cx = (SCREEN_WIDTH - w) / 2;
     _u8g2->drawStr(cx, 62, buf);
 
-    // Left arrow: can scroll back (toward older)
-    if (_msgViewOffset < (int8_t)(_msgCount - 1)) {
+    if (canLeft) {
         _u8g2->drawTriangle(cx - 12, 57, cx - 6, 53, cx - 6, 61);
     }
-
-    // Right arrow: can scroll forward (toward newer)
-    if (_msgViewOffset > 0) {
+    if (canRight) {
         int rx = cx + w + 6;
         _u8g2->drawTriangle(rx + 6, 57, rx, 53, rx, 61);
     }

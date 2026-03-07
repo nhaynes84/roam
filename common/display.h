@@ -58,6 +58,7 @@ private:
     uint8_t _msgCount = 0;
     uint8_t _msgHead = 0;       // Next write position
     int8_t  _msgViewOffset = 0; // 0 = newest, positive = older
+    int8_t  _msgPageOffset = 0; // Page within current message (0 = first)
 
     // Activity tracking for sleep timer
     uint32_t _lastActivity = 0;
@@ -67,4 +68,6 @@ private:
     void _drawContent();
     void _drawScrollIndicator();
     int  _viewedMsgIndex() const;
+    int  _wrapLineLen(const char* p) const;
+    int  _countMsgPages(const char* msg) const;
 };
