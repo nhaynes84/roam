@@ -78,6 +78,7 @@ enum ActionType : uint8_t {
     ACTION_PROFILE_TOGGLE,      // Switch Mac ↔ Android
     ACTION_SCROLL_FWD,          // Next page / newer message
     ACTION_SCROLL_BACK,         // Prev page / older message
+    ACTION_CLEAR_MSGS,          // Clear message queue (scroll fwd long press)
 };
 
 // Button index → short/long/double-tap action mapping
@@ -88,6 +89,8 @@ struct ButtonMapping {
 };
 
 // --- Profiles ---
+#define ROAM_PHONE_RELAY_MODE 1
+
 enum Profile : uint8_t {
     PROFILE_MAC = 0,
     PROFILE_ANDROID,
@@ -104,10 +107,10 @@ static const ButtonMapping PROFILE_MAPS[PROFILE_COUNT][NUM_BUTTONS] = {
     },
     // PROFILE_ANDROID
     {
-        { ACTION_DICTATION_ANDROID, ACTION_RECENTS_ANDROID, ACTION_NONE },  // Index
-        { ACTION_ENTER,             ACTION_REJECT_ESCAPE,   ACTION_NONE },  // Middle
-        { ACTION_HOME_ANDROID,      ACTION_BLE_SWITCH,      ACTION_LED_TOGGLE },  // Ring
-        { ACTION_REJECT_ESCAPE,     ACTION_KILL_PROCESS,    ACTION_PROFILE_TOGGLE },  // Pinky
+        { ACTION_DICTATION_ANDROID, ACTION_TMUX_PANE,      ACTION_NONE },           // Index
+        { ACTION_ENTER,             ACTION_APPROVE_YES,    ACTION_APPROVE_ALWAYS }, // Middle
+        { ACTION_REJECT_ESCAPE,     ACTION_KILL_PROCESS,   ACTION_LED_TOGGLE },     // Ring
+        { ACTION_CYCLE_MODE,        ACTION_BLE_SWITCH,     ACTION_PROFILE_TOGGLE }, // Pinky
     },
 };
 
@@ -138,4 +141,5 @@ static const char* ACTION_NAMES[] = {
     "",              // ACTION_PROFILE_TOGGLE (shows profile name)
     "",              // ACTION_SCROLL_FWD (handled locally)
     "",              // ACTION_SCROLL_BACK (handled locally)
+    "",              // ACTION_CLEAR_MSGS (handled locally)
 };

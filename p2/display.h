@@ -10,6 +10,12 @@
 
 #define MSG_RING_SIZE  100
 #define MSG_MAX_LEN    128
+#define MSG_PANE_GLOBAL 0xFF  // Show in all pane views
+
+struct MsgSlot {
+    char text[MSG_MAX_LEN];
+    uint8_t pane;
+};
 
 class Display {
 public:
@@ -23,7 +29,9 @@ public:
 
     // Content area
     void showAction(const char* action);
-    void pushMessage(const char* text);
+    void pushMessage(const char* text, uint8_t pane = MSG_PANE_GLOBAL);
+    void setActivePane(uint8_t pane);
+    void clearMessages();
     void scrollFwd();    // Toward newer messages (> button)
     void scrollBack();   // Toward older messages (< button)
 
@@ -58,12 +66,13 @@ private:
     char _lastAction[20] = "";
     uint32_t _actionTime = 0;
 
-    // Message ring buffer
-    char _msgRing[MSG_RING_SIZE][MSG_MAX_LEN];
+    // Message ring buffer (with per-pane tagging)
+    MsgSlot _msgRing[MSG_RING_SIZE];
     uint8_t _msgCount = 0;
     uint8_t _msgHead = 0;       // Next write position
-    int8_t  _msgViewOffset = 0; // 0 = newest, positive = older
+    int8_t  _msgViewOffset = 0; // 0 = newest matching, positive = older
     int8_t  _msgPageOffset = 0; // Page within current message (0 = first)
+    uint8_t _activePane = MSG_PANE_GLOBAL;  // Pane filter (GLOBAL = show all)
 
     // Activity tracking for sleep timer
     uint32_t _lastActivity = 0;
@@ -75,4 +84,7 @@ private:
     int  _viewedMsgIndex() const;
     int  _wrapLineLen(const char* p) const;
     int  _countMsgPages(const char* msg) const;
+    bool _msgMatchesFilter(int slot) const;
+    int  _filteredMsgCount() const;
+    int  _nextFilteredOffset(int from, int dir) const;
 };

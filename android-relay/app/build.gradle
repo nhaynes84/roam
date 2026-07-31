@@ -1,0 +1,16 @@
+plugins {
+    id "com.android.application"
+}
+
+android {
+    namespace "io.roam.relay"
+    compileSdk 36
+
+    defaultConfig {
+        applicationId "io.roam.relay"
+        minSdk 26
+        targetSdk 36
+        versionCode 1
+        versionName "0.1"
+    }
+}

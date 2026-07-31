@@ -153,15 +153,64 @@ void Display::showAction(const char* action) {
     _dirty = true;
 }
 
-void Display::pushMessage(const char* text) {
-    strncpy(_msgRing[_msgHead], text, MSG_MAX_LEN - 1);
-    _msgRing[_msgHead][MSG_MAX_LEN - 1] = '\0';
+void Display::pushMessage(const char* text, uint8_t pane) {
+    _msgRing[_msgHead].pane = pane;
+    strncpy(_msgRing[_msgHead].text, text, MSG_MAX_LEN - 1);
+    _msgRing[_msgHead].text[MSG_MAX_LEN - 1] = '\0';
     _msgHead = (_msgHead + 1) % MSG_RING_SIZE;
     if (_msgCount < MSG_RING_SIZE) _msgCount++;
-    _msgViewOffset = 0;  // auto-show newest
-    _msgPageOffset = 0;
+    // Auto-show newest only if it matches the active filter
+    if (pane == MSG_PANE_GLOBAL || pane == _activePane || _activePane == MSG_PANE_GLOBAL) {
+        _msgViewOffset = 0;
+        _msgPageOffset = 0;
+    }
     wake();              // incoming message wakes screen
     _dirty = true;
+}
+
+void Display::clearMessages() {
+    _msgCount = 0;
+    _msgHead = 0;
+    _msgViewOffset = 0;
+    _msgPageOffset = 0;
+    _dirty = true;
+}
+
+void Display::setActivePane(uint8_t pane) {
+    if (pane != _activePane) {
+        _activePane = pane;
+        _msgViewOffset = 0;
+        _msgPageOffset = 0;
+        _dirty = true;
+    }
+}
+
+bool Display::_msgMatchesFilter(int slot) const {
+    if (_activePane == MSG_PANE_GLOBAL) return true;
+    uint8_t p = _msgRing[slot].pane;
+    return p == _activePane || p == MSG_PANE_GLOBAL;
+}
+
+int Display::_filteredMsgCount() const {
+    if (_activePane == MSG_PANE_GLOBAL) return _msgCount;
+    int count = 0;
+    for (int i = 0; i < _msgCount; i++) {
+        int slot = ((int)_msgHead - 1 - i + MSG_RING_SIZE * 2) % MSG_RING_SIZE;
+        if (_msgMatchesFilter(slot)) count++;
+    }
+    return count;
+}
+
+int Display::_nextFilteredOffset(int from, int dir) const {
+    // Find next message offset (from current) in direction dir (+1=older, -1=newer)
+    // that matches the pane filter. Returns -1 if none found.
+    int next = from + dir;
+    while (next >= 0 && next < _msgCount) {
+        int slot = ((int)_msgHead - 1 - next + MSG_RING_SIZE * 2) % MSG_RING_SIZE;
+        if (_msgMatchesFilter(slot)) return next;
+        next += dir;
+    }
+    return -1;
 }
 
 void Display::scrollFwd() {
@@ -169,15 +218,18 @@ void Display::scrollFwd() {
     if (_msgCount == 0) return;
 
     int idx = _viewedMsgIndex();
-    int totalPages = _countMsgPages(_msgRing[idx]);
+    int totalPages = _countMsgPages(_msgRing[idx].text);
 
     if (_msgPageOffset < totalPages - 1) {
         _msgPageOffset++;
-    } else if (_msgViewOffset > 0) {
-        _msgViewOffset--;
-        _msgPageOffset = 0;
     } else {
-        return;
+        int next = _nextFilteredOffset(_msgViewOffset, -1);
+        if (next >= 0) {
+            _msgViewOffset = next;
+            _msgPageOffset = 0;
+        } else {
+            return;
+        }
     }
     _lastActivity = millis();
     _dirty = true;
@@ -189,12 +241,15 @@ void Display::scrollBack() {
 
     if (_msgPageOffset > 0) {
         _msgPageOffset--;
-    } else if (_msgViewOffset < (int8_t)(_msgCount - 1)) {
-        _msgViewOffset++;
-        int idx = _viewedMsgIndex();
-        _msgPageOffset = _countMsgPages(_msgRing[idx]) - 1;
     } else {
-        return;
+        int next = _nextFilteredOffset(_msgViewOffset, +1);
+        if (next >= 0) {
+            _msgViewOffset = next;
+            int idx = _viewedMsgIndex();
+            _msgPageOffset = _countMsgPages(_msgRing[idx].text) - 1;
+        } else {
+            return;
+        }
     }
     _lastActivity = millis();
     _dirty = true;
@@ -323,7 +378,7 @@ void Display::_drawContent() {
     if (_msgCount == 0) return;
 
     int idx = _viewedMsgIndex();
-    const char* msg = _msgRing[idx];
+    const char* msg = _msgRing[idx].text;
     const char* p = msg;
 
     // Skip lines for current page
@@ -357,7 +412,8 @@ void Display::_drawScrollIndicator() {
     if (_msgCount == 0) return;
 
     int idx = _viewedMsgIndex();
-    int totalPages = _countMsgPages(_msgRing[idx]);
+    int totalPages = _countMsgPages(_msgRing[idx].text);
+    int filtered = _filteredMsgCount();
 
     char buf[12];
     bool canLeft, canRight;
@@ -365,13 +421,19 @@ void Display::_drawScrollIndicator() {
     if (totalPages > 1) {
         // Multi-page message: show page indicator
         snprintf(buf, sizeof(buf), "p%d/%d", _msgPageOffset + 1, totalPages);
-        canLeft  = _msgPageOffset > 0 || _msgViewOffset < (int8_t)(_msgCount - 1);
-        canRight = _msgPageOffset < totalPages - 1 || _msgViewOffset > 0;
-    } else if (_msgCount > 1) {
-        // Single-page: show message indicator (chronological: 1=oldest, N=newest)
-        snprintf(buf, sizeof(buf), "m%d/%d", _msgCount - _msgViewOffset, _msgCount);
-        canLeft  = _msgViewOffset < (int8_t)(_msgCount - 1);
-        canRight = _msgViewOffset > 0;
+        canLeft  = _msgPageOffset > 0 || _nextFilteredOffset(_msgViewOffset, +1) >= 0;
+        canRight = _msgPageOffset < totalPages - 1 || _nextFilteredOffset(_msgViewOffset, -1) >= 0;
+    } else if (filtered > 1) {
+        // Single-page: show filtered message count
+        // Count how many filtered messages are newer than current view
+        int pos = 0;
+        for (int i = 0; i < _msgViewOffset; i++) {
+            int slot = ((int)_msgHead - 1 - i + MSG_RING_SIZE * 2) % MSG_RING_SIZE;
+            if (_msgMatchesFilter(slot)) pos++;
+        }
+        snprintf(buf, sizeof(buf), "m%d/%d", filtered - pos, filtered);
+        canLeft  = _nextFilteredOffset(_msgViewOffset, +1) >= 0;
+        canRight = _nextFilteredOffset(_msgViewOffset, -1) >= 0;
     } else {
         return;  // Single message, single page — nothing to show
     }

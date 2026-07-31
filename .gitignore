@@ -1,5 +1,12 @@
 tools/roam-send
 build/
 *.DS_Store
+__pycache__/
+**/__pycache__/
+.venv/
+**/.venv/
+**/fp-info-cache
+**/*-backups/
+*.kicad_prl
 housing/.venv/
 housing/step/

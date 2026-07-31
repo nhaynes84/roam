@@ -124,8 +124,12 @@ void executeAction(ActionType action) {
         break;
 
     case ACTION_PROFILE_TOGGLE:
-        // Toggle between Mac ↔ Android profile
+        // Toggle between Mac ↔ Android profile. Phone-relay mode pins Android.
+#if ROAM_PHONE_RELAY_MODE
+        activeProfile = PROFILE_ANDROID;
+#else
         activeProfile = (activeProfile == PROFILE_MAC) ? PROFILE_ANDROID : PROFILE_MAC;
+#endif
         break;
 
     case ACTION_NONE:

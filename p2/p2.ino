@@ -10,6 +10,7 @@
 #include "battery.h"
 #include "ble_text.h"
 #include "imu.h"
+#include "audio_stream.h"
 
 BLEHidAdafruit blehid;
 BLEDis bledis;   // Device Information Service
@@ -20,8 +21,12 @@ static Button scrollBack;
 static Display display;
 static Battery battery;
 
-// Active profile — defaults to Mac, auto-switches on connect
+// Active profile. Phone-relay mode keeps Android as the only live BLE peer.
+#if ROAM_PHONE_RELAY_MODE
+volatile Profile activeProfile = PROFILE_ANDROID;
+#else
 volatile Profile activeProfile = PROFILE_MAC;
+#endif
 
 // Known device MAC (first 3 bytes = OUI). Set to 0 to match any.
 // After pairing your Android phone, replace with its MAC.
@@ -33,6 +38,7 @@ static bool androidLearned = false;
 
 // LED state — can be toggled by user, auto-off on sleep
 static bool ledEnabled = true;
+static uint32_t lastAdvertisingCheck = 0;
 
 void bleSwitch() {
     // Remove bond for current peer so it can't auto-reconnect
@@ -56,8 +62,19 @@ void connect_callback(uint16_t conn_handle) {
     Serial.printf("BLE: CONNECTED [%02X:%02X:%02X:%02X:%02X:%02X]\n",
                   addr[5], addr[4], addr[3], addr[2], addr[1], addr[0]);
 
-    // Auto-detect profile by MAC
+    // Phone-relay mode: Android owns BLE; Mac receives traffic through Android.
     Profile prev = activeProfile;
+#if ROAM_PHONE_RELAY_MODE
+    activeProfile = PROFILE_ANDROID;
+    display.setBleConnected(true);
+    display.setProfileName(PROFILE_NAMES[activeProfile]);
+    if (activeProfile != prev) {
+        display.showAction(PROFILE_NAMES[activeProfile]);
+    }
+    Serial.println("Profile: Android (phone relay mode)");
+    return;
+#else
+    // Auto-detect profile by MAC.
     if (macLearned && memcmp(addr, knownMacMAC, 6) == 0) {
         activeProfile = PROFILE_MAC;
     } else if (androidLearned && memcmp(addr, knownAndroidMAC, 6) == 0) {
@@ -82,6 +99,7 @@ void connect_callback(uint16_t conn_handle) {
         display.showAction(PROFILE_NAMES[activeProfile]);
     }
     Serial.printf("Profile: %s\n", PROFILE_NAMES[activeProfile]);
+#endif
 }
 
 void disconnect_callback(uint16_t conn_handle, uint8_t reason) {
@@ -104,6 +122,7 @@ void setup() {
     Serial.println("=== Roam P2 boot ===");
 
     // --- BLE Init ---
+    Bluefruit.configPrphBandwidth(BANDWIDTH_MAX);
     Bluefruit.begin();
     Bluefruit.setTxPower(4);
     Bluefruit.setName("Roam2");
@@ -127,12 +146,15 @@ void setup() {
     Bluefruit.Advertising.addTxPower();
     Bluefruit.Advertising.addAppearance(BLE_APPEARANCE_HID_KEYBOARD);
     Bluefruit.Advertising.addService(blehid);
-    Bluefruit.Advertising.addName();
+    if (!bleText.addToAdvertising()) {
+        Serial.println("ble_text: WARNING text service not added to advertising");
+    }
+    Bluefruit.ScanResponse.addName();
     Bluefruit.Advertising.restartOnDisconnect(true);
     Bluefruit.Advertising.setInterval(32, 244);  // in units of 0.625ms
     Bluefruit.Advertising.setFastTimeout(30);     // fast mode for 30 seconds
     Bluefruit.Advertising.start(0);               // advertise forever
-    Serial.println("BLE advertising as 'Roam'");
+    Serial.println("BLE advertising as 'Roam2' with HID + text service");
 
     // --- Peripherals ---
     display.begin();
@@ -140,6 +162,7 @@ void setup() {
     display.setProfileName(PROFILE_NAMES[activeProfile]);
     imuBegin();  // After display — swaps TWIM1 pins temporarily, then restores
     battery.begin();
+    audioStream.begin();
     buttons.begin();
     scrollFwd.begin(PIN_BTN_SCROLL_FWD, 0);
     scrollBack.begin(PIN_BTN_SCROLL_BACK, 0);
@@ -150,6 +173,14 @@ void loop() {
     static uint32_t lastRender = 0;
     bool connected = Bluefruit.connected();
 
+    if (!connected && (millis() - lastAdvertisingCheck) > 1000) {
+        lastAdvertisingCheck = millis();
+        if (!Bluefruit.Advertising.isRunning()) {
+            Bluefruit.Advertising.start(0);
+            Serial.println("BLE: Advertising watchdog restarted advertising");
+        }
+    }
+
     // LED: off when sleeping or disabled, solid when connected, blink when advertising
     static uint32_t lastBlink = 0;
     static bool ledState = false;
@@ -157,13 +188,16 @@ void loop() {
     bool sleeping = idleNow >= SCREEN_OFF_MS;
 
     if (!ledEnabled || sleeping) {
-        digitalWrite(LED_BUILTIN, HIGH);  // Off (active low)
+        digitalWrite(LED_BUILTIN, HIGH);       // Off (active low)
+        digitalWrite(ROAM_LED_PIN, LOW);       // Off (active high)
     } else if (connected) {
-        digitalWrite(LED_BUILTIN, LOW);   // Solid on (active low)
+        digitalWrite(LED_BUILTIN, LOW);        // Solid on (active low)
+        digitalWrite(ROAM_LED_PIN, HIGH);      // Solid on (active high)
     } else {
         if (millis() - lastBlink > 500) {
             ledState = !ledState;
             digitalWrite(LED_BUILTIN, ledState ? LOW : HIGH);
+            digitalWrite(ROAM_LED_PIN, ledState ? HIGH : LOW);
             lastBlink = millis();
         }
     }
@@ -183,15 +217,25 @@ void loop() {
     ButtonEvent sfEvt = scrollFwd.poll();
     ButtonEvent sbEvt = scrollBack.poll();
     if (action == ACTION_NONE) {
-        if (sfEvt == BTN_EVENT_SHORT || sfEvt == BTN_EVENT_LONG)
+        if (sfEvt == BTN_EVENT_LONG)
+            action = ACTION_CLEAR_MSGS;
+        else if (sfEvt == BTN_EVENT_SHORT)
             action = ACTION_SCROLL_FWD;
         else if (sbEvt == BTN_EVENT_SHORT || sbEvt == BTN_EVENT_LONG)
             action = ACTION_SCROLL_BACK;
     }
 
     if (action != ACTION_NONE) {
+        bleText.notifyEvent(RELAY_EVENT_ACTION, (uint8_t)action, (uint8_t)activeProfile, millis());
         display.wake();  // Any button press wakes screen
-        if (action == ACTION_SCROLL_FWD || action == ACTION_SCROLL_BACK) {
+        if (action == ACTION_CLEAR_MSGS) {
+            display.clearMessages();
+            display.showAction("Cleared");
+            digitalWrite(PIN_MOTOR, HIGH);
+            delay(80);
+            digitalWrite(PIN_MOTOR, LOW);
+            Serial.println("action: clear messages");
+        } else if (action == ACTION_SCROLL_FWD || action == ACTION_SCROLL_BACK) {
             // Local action — no HID, no connection required
             if (action == ACTION_SCROLL_FWD) display.scrollFwd();
             else display.scrollBack();
@@ -218,7 +262,35 @@ void loop() {
             delay(60);
             digitalWrite(PIN_MOTOR, LOW);
             Serial.printf("action: profile -> %s\n", PROFILE_NAMES[activeProfile]);
-        } else if (connected) {
+        }
+#if ROAM_PHONE_RELAY_MODE
+        else if (action == ACTION_DICTATION_ANDROID) {
+            // In phone-relay mode this button notifies Android over FF02; Android
+            // starts/stops FF03 mic streaming over FF04.
+            display.showAction("Mic Toggle");
+            digitalWrite(PIN_MOTOR, HIGH);
+            delay(40);
+            digitalWrite(PIN_MOTOR, LOW);
+            Serial.println("action: relay dictation toggle");
+        }
+        else if (action == ACTION_BLE_SWITCH) {
+            executeAction(action);
+            digitalWrite(PIN_MOTOR, HIGH);
+            delay(80);
+            digitalWrite(PIN_MOTOR, LOW);
+            display.showAction(ACTION_NAMES[action]);
+            Serial.println("action: BLE switch");
+        } else {
+            // Phone-relay mode sends Mac commands through Android -> Wi-Fi -> receiver.
+            // Do not emit BLE HID to Android for these actions.
+            digitalWrite(PIN_MOTOR, HIGH);
+            delay(action == ACTION_TMUX_PANE ? 25 : 80);
+            digitalWrite(PIN_MOTOR, LOW);
+            display.showAction(ACTION_NAMES[action]);
+            Serial.printf("action: relay command %s\n", ACTION_NAMES[action]);
+        }
+#else
+        else if (connected) {
             executeAction(action);
 
             // Haptic feedback — quick pulse for pane switch, standard for rest
@@ -231,6 +303,7 @@ void loop() {
         } else {
             Serial.printf("action: %s (not connected)\n", ACTION_NAMES[action]);
         }
+#endif
     }
 
     // Battery monitor (every 60s)
@@ -242,8 +315,24 @@ void loop() {
 
     // Check for BLE text pushes
     if (bleText.hasNewText()) {
-        const char* text = bleText.getText();
-        display.pushMessage(text);
+        const char* raw = bleText.getText();
+        uint8_t pane = MSG_PANE_GLOBAL;
+        const char* text = raw;
+
+        // Parse pane prefix: \x01 + pane_byte + text
+        if (raw[0] == '\x01' && raw[1] != '\0') {
+            pane = (uint8_t)raw[1];
+            text = raw + 2;
+        }
+
+        // Pane-switch messages set the active filter, stored as global
+        if (strncmp(text, "Pane ", 5) == 0) {
+            display.setActivePane(pane);
+            display.pushMessage(text);  // global
+        } else {
+            display.pushMessage(text, pane);
+        }
+
         digitalWrite(PIN_MOTOR, HIGH);
         delay(60);
         digitalWrite(PIN_MOTOR, LOW);
@@ -251,15 +340,37 @@ void loop() {
         digitalWrite(PIN_MOTOR, HIGH);
         delay(60);
         digitalWrite(PIN_MOTOR, LOW);
-        Serial.printf("ble_text: \"%s\"\n", text);
+        Serial.printf("ble_text: pane=%d \"%s\"\n", pane, text);
     }
+
+    if (bleText.hasControlCommand()) {
+        uint8_t cmd = bleText.getControlCommand();
+        if (cmd == RELAY_CONTROL_START_AUDIO) {
+            if (audioStream.start()) {
+                bleText.notifyEvent(RELAY_EVENT_PTT_START, 0, (uint8_t)activeProfile, millis());
+                display.showAction("Mic On");
+                display.wake();
+            }
+        } else if (cmd == RELAY_CONTROL_STOP_AUDIO) {
+            audioStream.stop();
+            bleText.notifyEvent(RELAY_EVENT_PTT_STOP, 0, (uint8_t)activeProfile, millis());
+            display.showAction("Mic Off");
+            display.wake();
+        } else if (cmd == RELAY_CONTROL_STATUS_REQUEST) {
+            bleText.notifyEvent(RELAY_EVENT_STATUS, 0, (uint8_t)activeProfile, millis());
+        }
+        Serial.printf("ble_relay: control=%u\n", cmd);
+    }
+
+    audioStream.poll(bleText);
 
     // IMU wake-on-motion — wrist rotation wakes screen
     if (imuWoke()) {
         display.wake();
     }
 
-    // Screen sleep timer (reuse idleNow from LED section)
+    // Screen sleep timer — recompute idle after all wake sources
+    idleNow = millis() - display.lastActivityTime();
     if (idleNow >= SCREEN_OFF_MS) {
         display.powerOff();
     } else if (idleNow >= SCREEN_DIM_MS) {

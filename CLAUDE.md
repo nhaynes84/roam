@@ -25,7 +25,8 @@ For CAD conventions and housing details, load fragment: `memory/roam-cad.md`
 make arduino-build    # P1 compile
 make arduino-flash    # P1 flash
 make p2-build         # P2 compile
-make p2-flash         # P2 flash (double-tap reset first)
+make p2-flash         # P2 flash via normal Arduino upload
+make p2-flash-sealed  # P2 flash when reset button is inaccessible
 make render           # OpenSCAD → STL
 make step             # build123d → STEP (for Shapr3D)
 ```
@@ -46,7 +47,8 @@ make step             # build123d → STEP (for Shapr3D)
 ### P2 Critical Rules
 - Pin assignments in `p2/config.h`
 - **TWIM1 only** — softdevice claims TWIM0, Wire library hangs. See `p2/display.cpp`.
-- Double-tap reset for bootloader. Port flaps between usbmodem101/1101.
+- Current wearable is sealed; Nick can power-cycle it but cannot double-tap reset. Do not ask him to be the reset-button operator.
+- For sealed-case flashing, use `make p2-flash-sealed`. The working 2026-07-30 path is `adafruit-nrfutil --touch 1200`, wait for Seeed bootloader PID `0x0045`, then upload the DFU zip to that bootloader port without another touch. Normal app PID is `0x8045`.
 
 ### Housing (OpenSCAD)
 - Orientation: X+=elbow, X-=wrist, Y+=outer, Y-=inner, Z+=up, Z=0=rim
@@ -66,6 +68,26 @@ hardware/    Wiring docs, pinout tables
 tools/       Utilities (roam-send Swift BLE tool)
 tests/       Test sketches
 ```
+
+## Roam Wrist Display — Push Messages
+
+The user wears Roam on their wrist so they don't have to sit at the computer. **You must push key messages to Roam so the user can follow along remotely.**
+
+```bash
+~/Projects/roam/tools/roam-msg "your message here"
+```
+
+Codex note: BLE/CoreBluetooth commands must run outside the Codex sandbox. If `roam-send` reports `Bluetooth is unsupported` from a sandboxed shell, rerun the Roam command with escalated command permissions; that error is sandbox visibility, not proof that Roam is disconnected. Verified 2026-07-30: `roam-send` found connected `Roam2` by `FF00` and `roam-msg` displayed successfully.
+
+**When to send:**
+- When you ask a question or need user input — send the question
+- When you finish a task — send a short summary of what was done
+- When you hit an error or blocker — send what went wrong
+- When starting a long multi-step task — send what you're about to do
+
+**Keep messages concise** — the display is 128x64 pixels (~21 chars per line, 3 lines visible). Aim for 1-2 short sentences. Don't send routine tool calls or intermediate steps.
+
+**This is critical** — without these messages, the user has no idea what you're doing or asking. The automatic "Sent"/"Ready" hooks only signal that a prompt was submitted and a response finished, not what was said.
 
 ## Git Workflow
 - Commit directly to main. Use worktrees for parallel Claude sessions.

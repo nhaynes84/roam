@@ -1,7 +1,8 @@
 #!/bin/bash
 # roam-msg — Send long messages to Roam, chunked to fit 127-char BLE buffer
 # Splits at word boundaries, sends each chunk with a delay between.
-# Usage: roam-msg "your long message here"
+# Usage: roam-msg [--pane N] "your long message here"
+# With --pane: prepends \x01 + pane_byte to tag message for per-pane filtering
 
 set -euo pipefail
 
@@ -9,10 +10,21 @@ ROAM_SEND="$(dirname "$0")/roam-send"
 MAX_LEN=120  # Leave room for null + safety margin
 DELAY=2      # Seconds between chunks for BLE reconnect
 
+# Parse --pane flag
+PANE_PREFIX=""
+if [ "${1:-}" = "--pane" ]; then
+    shift
+    PANE_NUM="${1:-0}"
+    shift
+    # Build 2-byte prefix: \x01 + pane index byte
+    PANE_PREFIX=$(printf '\x01'"$(printf '\\x%02x' "$PANE_NUM")")
+    MAX_LEN=118  # Account for 2-byte prefix
+fi
+
 msg="$*"
 
 if [ ${#msg} -le $MAX_LEN ]; then
-    "$ROAM_SEND" "$msg"
+    "$ROAM_SEND" "${PANE_PREFIX}${msg}"
     exit 0
 fi
 
@@ -41,7 +53,7 @@ done
 total=${#chunks[@]}
 for i in "${!chunks[@]}"; do
     n=$((i + 1))
-    "$ROAM_SEND" "${chunks[$i]}"
+    "$ROAM_SEND" "${PANE_PREFIX}${chunks[$i]}"
     if [ $n -lt $total ]; then
         sleep $DELAY
     fi
