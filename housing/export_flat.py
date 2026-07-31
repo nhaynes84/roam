@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
-"""Export flat wrist-mounted Roam housing — slim and large variants.
+"""Export flat wrist-mounted Roam housing — mini, max, and max-mini variants.
 
 Usage:
     source housing/.venv/bin/activate
-    python housing/export_flat.py [slim|large|slim_lid|large_lid]
+    python housing/export_flat.py [mini|max|max_mini|mini_lid|max_lid|max_mini_lid]
 
 Orientation: X=forearm (X-=wrist), Y=across arm (Y+=outer), Z=up from skin
 Components:
-    slim      — small screen (1.3" SH1106) + small battery (502535)
-    large     — big screen (2.42" SSD1309) + big battery
-    slim_lid  — matching lid for slim case
-    large_lid — matching lid for large case
+    mini          — small screen (1.3" SH1106) + small battery (502535)
+    max           — big screen (2.42" SSD1309) + big battery
+    max_mini      — big case + small screen (1.3" SH1106)
+    mini_lid      — matching lid for mini case
+    max_lid       — matching lid for max case
+    max_mini_lid  — matching lid for max-mini case
 
 Internal layout (side view, Z):
     ┌──── top wall (2mm) ─────── screen window + button holes ──┐
@@ -89,9 +91,9 @@ n_vents = 4
 # Layout rule: board_bottom > button_top + 2mm clearance
 # Boss rule: boss inner X edge > board X edge + 2mm
 #
-# Slim: 1.3" SH1106 (board 33×33, vis 30×15) + 502535 battery (25×39×6)
+# Mini: 1.3" SH1106 (board 33×33, vis 30×15) + 502535 battery (25×39×6)
 # Internal: 52×46×12, external: 56×50×16
-SLIM = dict(
+MINI = dict(
     case=(56, 50, 16),
     wall=2.0,
     corner_r=3.0,
@@ -99,16 +101,16 @@ SLIM = dict(
     screen_r=2.0,            # window corner radius
     screen_cy=6,             # window center Y (moved down to clear board from buttons)
     btn_row_y=-18,           # main button row center Y (moved for board clearance)
-    # OLED mounting (SH1106 board: 33×33, holes at 27×27 c-c)
-    oled_holes_cc=(29, 27),
+    # OLED mounting (SH1106 board: 33×33, holes at 27×27 c-c, +2mm X for fit)
+    oled_holes_cc=(31, 27),
     oled_board_cy_off=-1.0,  # board center Y offset from screen vis center
     screw_inset=5,           # case screw distance from edge
     velcro=(40, 30),         # velcro patch X, Y
 )
 
-# Large: 2.42" SSD1309 (board 70×48, vis 55×29) + large battery (34×55×6)
+# Max: 2.42" SSD1309 (board 70×48, vis 55×29) + large battery (34×55×6)
 # Internal: 88×62×12, external: 92×66×16
-LARGE = dict(
+MAX = dict(
     case=(92, 66, 16),
     wall=2.0,
     corner_r=4.0,
@@ -116,14 +118,31 @@ LARGE = dict(
     screen_r=3.0,
     screen_cy=8,             # window center Y (moved down to clear board from buttons)
     btn_row_y=-25,           # main button row center Y (moved for board clearance)
-    # OLED mounting (SSD1309 board: 70×48, holes at 64×42 c-c)
-    oled_holes_cc=(64, 42),
+    # OLED mounting (SSD1309 board: 70×48, holes at 64×42 c-c, +2mm X for fit)
+    oled_holes_cc=(66, 42),
     oled_board_cy_off=-2.5,
     screw_inset=6,           # case screw distance from edge
     velcro=(60, 40),         # velcro patch X, Y
 )
 
-VARIANTS = {'slim': SLIM, 'large': LARGE}
+# Max-Mini: large case body + small screen (1.3" SH1106)
+# Same external as Max, small screen window and mount points
+MAX_MINI = dict(
+    case=(92, 66, 16),
+    wall=2.0,
+    corner_r=4.0,
+    screen_vis=(30, 15),     # small screen visible area
+    screen_r=2.0,            # small screen corner radius
+    screen_cy=8,             # same Y position as Max
+    btn_row_y=-25,           # same button layout as Max
+    # OLED mounting (SH1106 board: 33×33, holes at 27×27 c-c, +2mm X for fit)
+    oled_holes_cc=(31, 27),
+    oled_board_cy_off=-1.0,  # small board offset
+    screw_inset=6,           # same as Max
+    velcro=(60, 40),         # same as Max
+)
+
+VARIANTS = {'mini': MINI, 'max': MAX, 'max_mini': MAX_MINI}
 
 
 def _btn_positions(v):
@@ -502,11 +521,13 @@ def make_button_test():
 
 
 COMPONENTS = {
-    'slim':        ('flat_slim.step',        lambda: make_case(SLIM)),
-    'large':       ('flat_large.step',       lambda: make_case(LARGE)),
-    'slim_lid':    ('flat_slim_lid.step',    lambda: make_lid(SLIM)),
-    'large_lid':   ('flat_large_lid.step',   lambda: make_lid(LARGE)),
-    'button_test': ('flat_button_test.step', make_button_test),
+    'mini':         ('roam_mini.step',         lambda: make_case(MINI)),
+    'max':          ('roam_max.step',          lambda: make_case(MAX)),
+    'max_mini':     ('roam_max_mini.step',     lambda: make_case(MAX_MINI)),
+    'mini_lid':     ('roam_mini_lid.step',     lambda: make_lid(MINI)),
+    'max_lid':      ('roam_max_lid.step',      lambda: make_lid(MAX)),
+    'max_mini_lid': ('roam_max_mini_lid.step', lambda: make_lid(MAX_MINI)),
+    'button_test':  ('flat_button_test.step',  make_button_test),
 }
 
 

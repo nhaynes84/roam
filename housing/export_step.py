@@ -49,6 +49,15 @@ oled_lg_hole_sp_h = 42   # mounting hole spacing Y (48 - 3mm inset each side)
 oled_board_thick = 10    # board + wires underneath
 oled_hole_dia = 2.0      # M2 through-hole
 
+# OLED small (1.3" SH1106)
+oled_sm_board_w = 33
+oled_sm_board_h = 33
+oled_sm_vis_w = 30
+oled_sm_vis_h = 15
+oled_sm_vis_top = 8      # visible area starts 8mm from top board edge
+oled_sm_vis_side = 3
+oled_sm_hole_sp = 27     # 33 - 3mm inset each side = 27mm c-c (both axes)
+
 # Fasteners
 m2_screw_dia = 2.2
 m2_head_dia = 3.8
@@ -590,6 +599,50 @@ def make_lid():
     return plate
 
 
+def make_screen_adapter():
+    """Bezel that sits flush in the big case's 55x29mm screen window.
+
+    Reduces the opening for the small 1.3" SH1106. Glued in place.
+    4 standoffs on the back (2mm tall) with M2 holes to mount the small screen.
+    """
+    bezel_w = oled_lg_vis_w         # 55mm — matches window cutout
+    bezel_h = oled_lg_vis_h         # 29mm
+    bezel_thick = 2.0
+
+    # Window for small screen visible area (+1mm tolerance)
+    window_w = oled_sm_vis_w + 1    # 31mm
+    window_h = oled_sm_vis_h + 1    # 16mm
+    # Vis area offset from board center: -(33/2) + 8 + 15/2 = -1mm
+    window_offset_y = -(oled_sm_board_h / 2) + oled_sm_vis_top + oled_sm_vis_h / 2
+
+    standoff_h = 2.0
+    standoff_dia = 5.0              # wall around M2
+
+    # ── Bezel plate ──
+    plate = extrude(
+        RectangleRounded(bezel_w, bezel_h, 1.5),
+        amount=bezel_thick)
+
+    # ── Window cutout ──
+    plate -= Pos(0, window_offset_y, -0.1) * extrude(
+        RectangleRounded(window_w, window_h, 1),
+        amount=bezel_thick + 0.2)
+
+    # ── 4 standoffs on back face with M2 through-holes ──
+    for dx in [-1, 1]:
+        for dy in [-1, 1]:
+            sx = dx * oled_sm_hole_sp / 2   # ±13.5
+            sy = dy * oled_sm_hole_sp / 2   # ±13.5
+            plate += Pos(sx, sy, bezel_thick) * Cylinder(
+                radius=standoff_dia / 2, height=standoff_h,
+                align=(Align.CENTER, Align.CENTER, Align.MIN))
+            plate -= Pos(sx, sy, -0.1) * Cylinder(
+                radius=m2_screw_dia / 2, height=bezel_thick + standoff_h + 0.2,
+                align=(Align.CENTER, Align.CENTER, Align.MIN))
+
+    return plate
+
+
 COMPONENTS = {
     "box": ("reference_box.step", make_reference_box),
     "base": ("base_plate.step", make_base_plate),
@@ -597,6 +650,7 @@ COMPONENTS = {
     "button_cap": ("button_cap.step", make_button_cap),
     "dome": ("roam_dome.step", make_dome),
     "buttons": ("roam_buttons.step", make_buttons),
+    "adapter": ("screen_adapter.step", make_screen_adapter),
 }
 
 

@@ -75,7 +75,7 @@ oled_sm_vis_w       = 30;
 oled_sm_vis_h       = 15;
 oled_sm_vis_top     = 8;      // visible area starts 8mm from top edge
 oled_sm_vis_side    = 3;      // visible area starts 3mm from side edges
-oled_sm_hole_sp     = 27;     // 33 - 3mm inset each side = 27mm c-c (both axes)
+oled_sm_hole_sp     = 29;     // 27mm nominal + 2mm wider for fit (both axes)
 
 // ── OLED Large 2.42" (SSD1309, Build 2B) — caliper-measured ──
 oled_lg_board_w     = 70;
@@ -84,7 +84,7 @@ oled_lg_vis_w       = 55;
 oled_lg_vis_h       = 29;
 oled_lg_vis_top     = 7;      // visible area starts 7mm from top edge
 oled_lg_vis_side    = 7;      // visible area starts 7mm from side edges (each side)
-oled_lg_hole_sp_w   = 64;     // 70 - 3mm inset each side = 64mm c-c
+oled_lg_hole_sp_w   = 66;     // 64mm nominal + 2mm wider for fit
 oled_lg_hole_sp_h   = 42;     // 48 - 3mm inset each side = 42mm c-c
 
 // ── OLED shared mount ──
