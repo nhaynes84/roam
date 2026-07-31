@@ -1,0 +1,1335 @@
+{
+    "$schema": "https://schemas.kicad.org/erc.v1.json",
+    "coordinate_units": "mm",
+    "date": "2026-03-30T13:27:33-0700",
+    "kicad_version": "9.0.7",
+    "sheets": [
+        {
+            "path": "/",
+            "uuid_path": "/3bbc2819-26f8-40e3-a5b2-257dc06118d3",
+            "violations": [
+                {
+                    "description": "Input Power pin not driven by any Output Power pins",
+                    "items": [
+                        {
+                            "description": "Symbol U2 Pin 4 [VDD, Power input, Line]",
+                            "pos": {
+                                "x": 0.4826,
+                                "y": 0.4318
+                            },
+                            "uuid": "855fe572-eee3-4e7c-a5df-2013645abfb1"
+                        }
+                    ],
+                    "severity": "error",
+                    "type": "power_pin_not_driven"
+                },
+                {
+                    "description": "Input Power pin not driven by any Output Power pins",
+                    "items": [
+                        {
+                            "description": "Symbol U3 Pin 1 [VIN, Power input, Line]",
+                            "pos": {
+                                "x": 0.4826,
+                                "y": 0.7874
+                            },
+                            "uuid": "6a3bd612-09de-40d1-aca7-76117f87a06a"
+                        }
+                    ],
+                    "severity": "error",
+                    "type": "power_pin_not_driven"
+                },
+                {
+                    "description": "Pin not connected",
+                    "items": [
+                        {
+                            "description": "Symbol U3 Pin 4 [BP, Passive, Line]",
+                            "pos": {
+                                "x": 0.635,
+                                "y": 0.8128
+                            },
+                            "uuid": "26bcffb3-cbaf-46e3-9368-66a26e4ba394"
+                        }
+                    ],
+                    "severity": "error",
+                    "type": "pin_not_connected"
+                },
+                {
+                    "description": "Pin not connected",
+                    "items": [
+                        {
+                            "description": "Symbol U5 Pin 2 [SDX, Passive, Line]",
+                            "pos": {
+                                "x": 1.5367,
+                                "y": 1.1684
+                            },
+                            "uuid": "27e215dd-c600-4853-bf05-432b913a6148"
+                        }
+                    ],
+                    "severity": "error",
+                    "type": "pin_not_connected"
+                },
+                {
+                    "description": "Pin not connected",
+                    "items": [
+                        {
+                            "description": "Symbol U5 Pin 3 [SCX, Passive, Line]",
+                            "pos": {
+                                "x": 1.5367,
+                                "y": 1.1938
+                            },
+                            "uuid": "649fedf1-b737-4c89-8984-3fcb65893c1f"
+                        }
+                    ],
+                    "severity": "error",
+                    "type": "pin_not_connected"
+                },
+                {
+                    "description": "Pin not connected",
+                    "items": [
+                        {
+                            "description": "Symbol U5 Pin 4 [INT1, Output, Line]",
+                            "pos": {
+                                "x": 1.5367,
+                                "y": 1.2192
+                            },
+                            "uuid": "d30bcabf-ce29-4c85-94b5-17b9cc997c8c"
+                        }
+                    ],
+                    "severity": "error",
+                    "type": "pin_not_connected"
+                },
+                {
+                    "description": "Pin not connected",
+                    "items": [
+                        {
+                            "description": "Symbol U5 Pin 14 [INT2, Output, Line]",
+                            "pos": {
+                                "x": 1.7145,
+                                "y": 1.2954
+                            },
+                            "uuid": "9689c3e9-6492-44e4-8f3a-52f71c66f057"
+                        }
+                    ],
+                    "severity": "error",
+                    "type": "pin_not_connected"
+                },
+                {
+                    "description": "Input Power pin not driven by any Output Power pins",
+                    "items": [
+                        {
+                            "description": "Symbol D3 Pin 2 [GND, Power input, Line]",
+                            "pos": {
+                                "x": 2.2733,
+                                "y": 0.8509
+                            },
+                            "uuid": "0b1f3fbb-f293-4d15-b7ab-7d56e5b02d9c"
+                        }
+                    ],
+                    "severity": "error",
+                    "type": "power_pin_not_driven"
+                },
+                {
+                    "description": "Pin not connected",
+                    "items": [
+                        {
+                            "description": "Symbol J7 Pin 3 [3, Passive, Line]",
+                            "pos": {
+                                "x": 1.5621,
+                                "y": 1.9558
+                            },
+                            "uuid": "d2e1d26d-d886-4abc-b978-e1f2f37052ee"
+                        }
+                    ],
+                    "severity": "error",
+                    "type": "pin_not_connected"
+                },
+                {
+                    "description": "Pin not connected",
+                    "items": [
+                        {
+                            "description": "Symbol D3 Pin 4 [DOUT, Output, Line]",
+                            "pos": {
+                                "x": 2.4003,
+                                "y": 0.8509
+                            },
+                            "uuid": "679d36c5-a632-482d-b37b-5329e3059049"
+                        }
+                    ],
+                    "severity": "error",
+                    "type": "pin_not_connected"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Capacitor_SMD'.",
+                    "items": [
+                        {
+                            "description": "Symbol C9 [roam_C]",
+                            "pos": {
+                                "x": 0.254,
+                                "y": 0.3556
+                            },
+                            "uuid": "e3f8b9fa-d3a5-45ff-b065-4dc8835d62d5"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the symbol library ''",
+                    "items": [
+                        {
+                            "description": "Symbol C9 [roam_C]",
+                            "pos": {
+                                "x": 0.254,
+                                "y": 0.3556
+                            },
+                            "uuid": "e3f8b9fa-d3a5-45ff-b065-4dc8835d62d5"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Capacitor_SMD'.",
+                    "items": [
+                        {
+                            "description": "Symbol C1 [roam_C]",
+                            "pos": {
+                                "x": 0.381,
+                                "y": 0.3556
+                            },
+                            "uuid": "c836ad50-da5b-4fd9-8524-c2f2c6f4d014"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the symbol library ''",
+                    "items": [
+                        {
+                            "description": "Symbol C1 [roam_C]",
+                            "pos": {
+                                "x": 0.381,
+                                "y": 0.3556
+                            },
+                            "uuid": "c836ad50-da5b-4fd9-8524-c2f2c6f4d014"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Package_TO_SOT_SMD'.",
+                    "items": [
+                        {
+                            "description": "Symbol U2 [roam_MCP73831T]",
+                            "pos": {
+                                "x": 0.5588,
+                                "y": 0.4572
+                            },
+                            "uuid": "5d53e7e6-db26-4bf1-bde7-556e1f976984"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the symbol library ''",
+                    "items": [
+                        {
+                            "description": "Symbol U2 [roam_MCP73831T]",
+                            "pos": {
+                                "x": 0.5588,
+                                "y": 0.4572
+                            },
+                            "uuid": "5d53e7e6-db26-4bf1-bde7-556e1f976984"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Capacitor_SMD'.",
+                    "items": [
+                        {
+                            "description": "Symbol C2 [roam_C]",
+                            "pos": {
+                                "x": 0.762,
+                                "y": 0.3556
+                            },
+                            "uuid": "5eb98625-2f4d-40ef-95c4-0962fa86ddab"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the symbol library ''",
+                    "items": [
+                        {
+                            "description": "Symbol C2 [roam_C]",
+                            "pos": {
+                                "x": 0.762,
+                                "y": 0.3556
+                            },
+                            "uuid": "5eb98625-2f4d-40ef-95c4-0962fa86ddab"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Capacitor_SMD'.",
+                    "items": [
+                        {
+                            "description": "Symbol C3 [roam_C]",
+                            "pos": {
+                                "x": 0.381,
+                                "y": 0.762
+                            },
+                            "uuid": "4198e8ca-925a-4fbd-8174-feb1e35e2b04"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the symbol library ''",
+                    "items": [
+                        {
+                            "description": "Symbol C3 [roam_C]",
+                            "pos": {
+                                "x": 0.381,
+                                "y": 0.762
+                            },
+                            "uuid": "4198e8ca-925a-4fbd-8174-feb1e35e2b04"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Resistor_SMD'.",
+                    "items": [
+                        {
+                            "description": "Symbol R1 [roam_R]",
+                            "pos": {
+                                "x": 0.762,
+                                "y": 0.508
+                            },
+                            "uuid": "ed4f4332-cf6a-455e-90ba-e959945c1338"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the symbol library ''",
+                    "items": [
+                        {
+                            "description": "Symbol R1 [roam_R]",
+                            "pos": {
+                                "x": 0.762,
+                                "y": 0.508
+                            },
+                            "uuid": "ed4f4332-cf6a-455e-90ba-e959945c1338"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Resistor_SMD'.",
+                    "items": [
+                        {
+                            "description": "Symbol R2 [roam_R]",
+                            "pos": {
+                                "x": 0.889,
+                                "y": 0.381
+                            },
+                            "uuid": "dee04fc4-7330-4817-a2b5-882ffe18b3a3"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the symbol library ''",
+                    "items": [
+                        {
+                            "description": "Symbol R2 [roam_R]",
+                            "pos": {
+                                "x": 0.889,
+                                "y": 0.381
+                            },
+                            "uuid": "dee04fc4-7330-4817-a2b5-882ffe18b3a3"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Package_TO_SOT_SMD'.",
+                    "items": [
+                        {
+                            "description": "Symbol U3 [roam_AP2112K]",
+                            "pos": {
+                                "x": 0.5588,
+                                "y": 0.8128
+                            },
+                            "uuid": "d5e6166a-97e3-4dc1-9f0d-07c89a858443"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the symbol library ''",
+                    "items": [
+                        {
+                            "description": "Symbol U3 [roam_AP2112K]",
+                            "pos": {
+                                "x": 0.5588,
+                                "y": 0.8128
+                            },
+                            "uuid": "d5e6166a-97e3-4dc1-9f0d-07c89a858443"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'LED_SMD'.",
+                    "items": [
+                        {
+                            "description": "Symbol D2 [roam_D]",
+                            "pos": {
+                                "x": 0.889,
+                                "y": 0.4572
+                            },
+                            "uuid": "931fe694-2676-4046-adb6-7a6826f54be8"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the symbol library ''",
+                    "items": [
+                        {
+                            "description": "Symbol D2 [roam_D]",
+                            "pos": {
+                                "x": 0.889,
+                                "y": 0.4572
+                            },
+                            "uuid": "931fe694-2676-4046-adb6-7a6826f54be8"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Capacitor_SMD'.",
+                    "items": [
+                        {
+                            "description": "Symbol C4 [roam_C]",
+                            "pos": {
+                                "x": 0.762,
+                                "y": 0.762
+                            },
+                            "uuid": "bfcd4d0d-ce6b-4f9b-8ee1-96bae1b2585a"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the symbol library ''",
+                    "items": [
+                        {
+                            "description": "Symbol C4 [roam_C]",
+                            "pos": {
+                                "x": 0.762,
+                                "y": 0.762
+                            },
+                            "uuid": "bfcd4d0d-ce6b-4f9b-8ee1-96bae1b2585a"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Connector_USB'.",
+                    "items": [
+                        {
+                            "description": "Symbol J1 [roam_Conn6]",
+                            "pos": {
+                                "x": 0.254,
+                                "y": 1.3208
+                            },
+                            "uuid": "3d8c2dee-d500-4779-b7d8-6a1c93cf9f79"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the symbol library ''",
+                    "items": [
+                        {
+                            "description": "Symbol J1 [roam_Conn6]",
+                            "pos": {
+                                "x": 0.254,
+                                "y": 1.3208
+                            },
+                            "uuid": "3d8c2dee-d500-4779-b7d8-6a1c93cf9f79"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Package_TO_SOT_SMD'.",
+                    "items": [
+                        {
+                            "description": "Symbol U4 [roam_USBLC6]",
+                            "pos": {
+                                "x": 0.6096,
+                                "y": 1.3716
+                            },
+                            "uuid": "b520dc0f-2396-4bc6-af7d-faaf0ba20f98"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the symbol library ''",
+                    "items": [
+                        {
+                            "description": "Symbol U4 [roam_USBLC6]",
+                            "pos": {
+                                "x": 0.6096,
+                                "y": 1.3716
+                            },
+                            "uuid": "b520dc0f-2396-4bc6-af7d-faaf0ba20f98"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Resistor_SMD'.",
+                    "items": [
+                        {
+                            "description": "Symbol R11 [roam_R]",
+                            "pos": {
+                                "x": 1.3716,
+                                "y": 0.7112
+                            },
+                            "uuid": "338ad283-b876-47f4-b661-2070501259cc"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the symbol library ''",
+                    "items": [
+                        {
+                            "description": "Symbol R11 [roam_R]",
+                            "pos": {
+                                "x": 1.3716,
+                                "y": 0.7112
+                            },
+                            "uuid": "338ad283-b876-47f4-b661-2070501259cc"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Resistor_SMD'.",
+                    "items": [
+                        {
+                            "description": "Symbol R8 [roam_R]",
+                            "pos": {
+                                "x": 0.381,
+                                "y": 1.524
+                            },
+                            "uuid": "cf491a21-f92e-489e-89ff-67ae21ab9b04"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the symbol library ''",
+                    "items": [
+                        {
+                            "description": "Symbol R8 [roam_R]",
+                            "pos": {
+                                "x": 0.381,
+                                "y": 1.524
+                            },
+                            "uuid": "cf491a21-f92e-489e-89ff-67ae21ab9b04"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Button_Switch_SMD'.",
+                    "items": [
+                        {
+                            "description": "Symbol SW2 [roam_SW]",
+                            "pos": {
+                                "x": 1.3716,
+                                "y": 0.8128
+                            },
+                            "uuid": "ef0c7e09-5e8d-4fd6-8350-df1780599cc5"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the symbol library ''",
+                    "items": [
+                        {
+                            "description": "Symbol SW2 [roam_SW]",
+                            "pos": {
+                                "x": 1.3716,
+                                "y": 0.8128
+                            },
+                            "uuid": "ef0c7e09-5e8d-4fd6-8350-df1780599cc5"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Resistor_SMD'.",
+                    "items": [
+                        {
+                            "description": "Symbol R9 [roam_R]",
+                            "pos": {
+                                "x": 0.381,
+                                "y": 1.6002
+                            },
+                            "uuid": "69eaf1ab-03d2-495d-93eb-abe5122f9b9b"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the symbol library ''",
+                    "items": [
+                        {
+                            "description": "Symbol R9 [roam_R]",
+                            "pos": {
+                                "x": 0.381,
+                                "y": 1.6002
+                            },
+                            "uuid": "69eaf1ab-03d2-495d-93eb-abe5122f9b9b"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'RF_Module'.",
+                    "items": [
+                        {
+                            "description": "Symbol U1 [roam_ESP32C6]",
+                            "pos": {
+                                "x": 1.6256,
+                                "y": 0.6096
+                            },
+                            "uuid": "49ff9bd4-d65a-40d0-8d53-4f479ace2457"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the symbol library ''",
+                    "items": [
+                        {
+                            "description": "Symbol U1 [roam_ESP32C6]",
+                            "pos": {
+                                "x": 1.6256,
+                                "y": 0.6096
+                            },
+                            "uuid": "49ff9bd4-d65a-40d0-8d53-4f479ace2457"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Resistor_SMD'.",
+                    "items": [
+                        {
+                            "description": "Symbol R4 [roam_R]",
+                            "pos": {
+                                "x": 1.3716,
+                                "y": 1.1176
+                            },
+                            "uuid": "a415c2a8-06cf-4bf6-9754-81f7c080cf88"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the symbol library ''",
+                    "items": [
+                        {
+                            "description": "Symbol R4 [roam_R]",
+                            "pos": {
+                                "x": 1.3716,
+                                "y": 1.1176
+                            },
+                            "uuid": "a415c2a8-06cf-4bf6-9754-81f7c080cf88"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Resistor_SMD'.",
+                    "items": [
+                        {
+                            "description": "Symbol R5 [roam_R]",
+                            "pos": {
+                                "x": 1.3716,
+                                "y": 1.2192
+                            },
+                            "uuid": "f5552fd9-c11b-450a-8e0d-d1898cc987f1"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the symbol library ''",
+                    "items": [
+                        {
+                            "description": "Symbol R5 [roam_R]",
+                            "pos": {
+                                "x": 1.3716,
+                                "y": 1.2192
+                            },
+                            "uuid": "f5552fd9-c11b-450a-8e0d-d1898cc987f1"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Capacitor_SMD'.",
+                    "items": [
+                        {
+                            "description": "Symbol C5 [roam_C]",
+                            "pos": {
+                                "x": 1.8796,
+                                "y": 0.4064
+                            },
+                            "uuid": "a6ddd852-5465-43d4-86d0-87b6c8424581"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the symbol library ''",
+                    "items": [
+                        {
+                            "description": "Symbol C5 [roam_C]",
+                            "pos": {
+                                "x": 1.8796,
+                                "y": 0.4064
+                            },
+                            "uuid": "a6ddd852-5465-43d4-86d0-87b6c8424581"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Connector_JST'.",
+                    "items": [
+                        {
+                            "description": "Symbol J2 [roam_Conn5]",
+                            "pos": {
+                                "x": 0.4064,
+                                "y": 1.9304
+                            },
+                            "uuid": "38d5dc43-f247-4924-b897-d6af13d4917e"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the symbol library ''",
+                    "items": [
+                        {
+                            "description": "Symbol J2 [roam_Conn5]",
+                            "pos": {
+                                "x": 0.4064,
+                                "y": 1.9304
+                            },
+                            "uuid": "38d5dc43-f247-4924-b897-d6af13d4917e"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Resistor_SMD'.",
+                    "items": [
+                        {
+                            "description": "Symbol R10 [roam_R]",
+                            "pos": {
+                                "x": 1.9304,
+                                "y": 0.508
+                            },
+                            "uuid": "03bc2190-094a-481a-925a-5cee3093c183"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the symbol library ''",
+                    "items": [
+                        {
+                            "description": "Symbol R10 [roam_R]",
+                            "pos": {
+                                "x": 1.9304,
+                                "y": 0.508
+                            },
+                            "uuid": "03bc2190-094a-481a-925a-5cee3093c183"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Package_LGA'.",
+                    "items": [
+                        {
+                            "description": "Symbol U5 [roam_LSM6DS3]",
+                            "pos": {
+                                "x": 1.6256,
+                                "y": 1.2192
+                            },
+                            "uuid": "d671a061-0991-4e83-a484-5ca653316434"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the symbol library ''",
+                    "items": [
+                        {
+                            "description": "Symbol U5 [roam_LSM6DS3]",
+                            "pos": {
+                                "x": 1.6256,
+                                "y": 1.2192
+                            },
+                            "uuid": "d671a061-0991-4e83-a484-5ca653316434"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Capacitor_SMD'.",
+                    "items": [
+                        {
+                            "description": "Symbol C6 [roam_C]",
+                            "pos": {
+                                "x": 2.032,
+                                "y": 0.4064
+                            },
+                            "uuid": "1a95f30d-4320-44bb-bf5a-8bc9f5f9a997"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the symbol library ''",
+                    "items": [
+                        {
+                            "description": "Symbol C6 [roam_C]",
+                            "pos": {
+                                "x": 2.032,
+                                "y": 0.4064
+                            },
+                            "uuid": "1a95f30d-4320-44bb-bf5a-8bc9f5f9a997"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Capacitor_SMD'.",
+                    "items": [
+                        {
+                            "description": "Symbol C10 [roam_C]",
+                            "pos": {
+                                "x": 2.032,
+                                "y": 0.508
+                            },
+                            "uuid": "c21d4fee-bd51-4ba2-bcd4-236ef14e8958"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the symbol library ''",
+                    "items": [
+                        {
+                            "description": "Symbol C10 [roam_C]",
+                            "pos": {
+                                "x": 2.032,
+                                "y": 0.508
+                            },
+                            "uuid": "c21d4fee-bd51-4ba2-bcd4-236ef14e8958"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Capacitor_SMD'.",
+                    "items": [
+                        {
+                            "description": "Symbol C7 [roam_C]",
+                            "pos": {
+                                "x": 1.8796,
+                                "y": 1.1176
+                            },
+                            "uuid": "f241b89d-2305-4400-bd8b-9b7773f29431"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the symbol library ''",
+                    "items": [
+                        {
+                            "description": "Symbol C7 [roam_C]",
+                            "pos": {
+                                "x": 1.8796,
+                                "y": 1.1176
+                            },
+                            "uuid": "f241b89d-2305-4400-bd8b-9b7773f29431"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Button_Switch_SMD'.",
+                    "items": [
+                        {
+                            "description": "Symbol SW1 [roam_SW]",
+                            "pos": {
+                                "x": 2.1336,
+                                "y": 0.5588
+                            },
+                            "uuid": "605381f1-26bd-48a8-a05c-21152a01ffe0"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the symbol library ''",
+                    "items": [
+                        {
+                            "description": "Symbol SW1 [roam_SW]",
+                            "pos": {
+                                "x": 2.1336,
+                                "y": 0.5588
+                            },
+                            "uuid": "605381f1-26bd-48a8-a05c-21152a01ffe0"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Capacitor_SMD'.",
+                    "items": [
+                        {
+                            "description": "Symbol C8 [roam_C]",
+                            "pos": {
+                                "x": 1.8796,
+                                "y": 1.2192
+                            },
+                            "uuid": "d5d187ea-ef73-49c7-b3c9-85d65268dfe7"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the symbol library ''",
+                    "items": [
+                        {
+                            "description": "Symbol C8 [roam_C]",
+                            "pos": {
+                                "x": 1.8796,
+                                "y": 1.2192
+                            },
+                            "uuid": "d5d187ea-ef73-49c7-b3c9-85d65268dfe7"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Connector_JST'.",
+                    "items": [
+                        {
+                            "description": "Symbol J6 [roam_Conn4]",
+                            "pos": {
+                                "x": 1.2192,
+                                "y": 1.9304
+                            },
+                            "uuid": "fa76e886-5ea9-4e77-94d9-515f86d426b6"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the symbol library ''",
+                    "items": [
+                        {
+                            "description": "Symbol J6 [roam_Conn4]",
+                            "pos": {
+                                "x": 1.2192,
+                                "y": 1.9304
+                            },
+                            "uuid": "fa76e886-5ea9-4e77-94d9-515f86d426b6"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Package_TO_SOT_SMD'.",
+                    "items": [
+                        {
+                            "description": "Symbol Q1 [roam_NMOS]",
+                            "pos": {
+                                "x": 2.3368,
+                                "y": 0.508
+                            },
+                            "uuid": "a9fa2eb5-8469-410d-ab73-6aa5e1574105"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the symbol library ''",
+                    "items": [
+                        {
+                            "description": "Symbol Q1 [roam_NMOS]",
+                            "pos": {
+                                "x": 2.3368,
+                                "y": 0.508
+                            },
+                            "uuid": "a9fa2eb5-8469-410d-ab73-6aa5e1574105"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'LED_SMD'.",
+                    "items": [
+                        {
+                            "description": "Symbol D3 [roam_SK6812]",
+                            "pos": {
+                                "x": 2.3368,
+                                "y": 0.8382
+                            },
+                            "uuid": "24379709-006b-4834-baa2-860bc37835ca"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the symbol library ''",
+                    "items": [
+                        {
+                            "description": "Symbol D3 [roam_SK6812]",
+                            "pos": {
+                                "x": 2.3368,
+                                "y": 0.8382
+                            },
+                            "uuid": "24379709-006b-4834-baa2-860bc37835ca"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Connector_JST'.",
+                    "items": [
+                        {
+                            "description": "Symbol J7 [roam_Conn3]",
+                            "pos": {
+                                "x": 1.6256,
+                                "y": 1.9304
+                            },
+                            "uuid": "84d579fd-7b14-4603-ba8d-ac4560c86644"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the symbol library ''",
+                    "items": [
+                        {
+                            "description": "Symbol J7 [roam_Conn3]",
+                            "pos": {
+                                "x": 1.6256,
+                                "y": 1.9304
+                            },
+                            "uuid": "84d579fd-7b14-4603-ba8d-ac4560c86644"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Diode_SMD'.",
+                    "items": [
+                        {
+                            "description": "Symbol D1 [roam_D]",
+                            "pos": {
+                                "x": 2.4892,
+                                "y": 0.4826
+                            },
+                            "uuid": "2c9f535a-8e71-4c17-8536-f0063d2f0f9c"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the symbol library ''",
+                    "items": [
+                        {
+                            "description": "Symbol D1 [roam_D]",
+                            "pos": {
+                                "x": 2.4892,
+                                "y": 0.4826
+                            },
+                            "uuid": "2c9f535a-8e71-4c17-8536-f0063d2f0f9c"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Resistor_SMD'.",
+                    "items": [
+                        {
+                            "description": "Symbol R6 [roam_R]",
+                            "pos": {
+                                "x": 2.3368,
+                                "y": 1.016
+                            },
+                            "uuid": "9cd04242-48e0-474e-af6f-1ae0db0f802f"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the symbol library ''",
+                    "items": [
+                        {
+                            "description": "Symbol R6 [roam_R]",
+                            "pos": {
+                                "x": 2.3368,
+                                "y": 1.016
+                            },
+                            "uuid": "9cd04242-48e0-474e-af6f-1ae0db0f802f"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Capacitor_SMD'.",
+                    "items": [
+                        {
+                            "description": "Symbol C11 [roam_C]",
+                            "pos": {
+                                "x": 2.54,
+                                "y": 0.8128
+                            },
+                            "uuid": "2f7d1463-ea0a-469a-9f28-ee9323e6afec"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the symbol library ''",
+                    "items": [
+                        {
+                            "description": "Symbol C11 [roam_C]",
+                            "pos": {
+                                "x": 2.54,
+                                "y": 0.8128
+                            },
+                            "uuid": "2f7d1463-ea0a-469a-9f28-ee9323e6afec"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Resistor_SMD'.",
+                    "items": [
+                        {
+                            "description": "Symbol R7 [roam_R]",
+                            "pos": {
+                                "x": 2.54,
+                                "y": 1.016
+                            },
+                            "uuid": "4406141a-6959-4e76-b0c2-5c3087e2b914"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the symbol library ''",
+                    "items": [
+                        {
+                            "description": "Symbol R7 [roam_R]",
+                            "pos": {
+                                "x": 2.54,
+                                "y": 1.016
+                            },
+                            "uuid": "4406141a-6959-4e76-b0c2-5c3087e2b914"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Connector_JST'.",
+                    "items": [
+                        {
+                            "description": "Symbol J4 [roam_Conn2]",
+                            "pos": {
+                                "x": 2.6924,
+                                "y": 0.508
+                            },
+                            "uuid": "a5f8c241-89e3-479d-944b-ca1a20dc1861"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the symbol library ''",
+                    "items": [
+                        {
+                            "description": "Symbol J4 [roam_Conn2]",
+                            "pos": {
+                                "x": 2.6924,
+                                "y": 0.508
+                            },
+                            "uuid": "a5f8c241-89e3-479d-944b-ca1a20dc1861"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Connector_JST'.",
+                    "items": [
+                        {
+                            "description": "Symbol J8 [roam_Conn2]",
+                            "pos": {
+                                "x": 2.032,
+                                "y": 1.9304
+                            },
+                            "uuid": "f57c8cf8-d71e-427f-a8ea-7d72b2d482e5"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the symbol library ''",
+                    "items": [
+                        {
+                            "description": "Symbol J8 [roam_Conn2]",
+                            "pos": {
+                                "x": 2.032,
+                                "y": 1.9304
+                            },
+                            "uuid": "f57c8cf8-d71e-427f-a8ea-7d72b2d482e5"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Connector_PinHeader_2.54mm'.",
+                    "items": [
+                        {
+                            "description": "Symbol J9 [roam_Conn4]",
+                            "pos": {
+                                "x": 2.4384,
+                                "y": 1.9304
+                            },
+                            "uuid": "37616c52-f9eb-49ff-8c3b-88de8ffe9c87"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the symbol library ''",
+                    "items": [
+                        {
+                            "description": "Symbol J9 [roam_Conn4]",
+                            "pos": {
+                                "x": 2.4384,
+                                "y": 1.9304
+                            },
+                            "uuid": "37616c52-f9eb-49ff-8c3b-88de8ffe9c87"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_issues"
+                }
+            ]
+        }
+    ],
+    "source": "roam_main.kicad_sch"
+}

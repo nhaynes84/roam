@@ -1,0 +1,22 @@
+Ref,Value,Package,LCSC,Description,Qty
+U1,XC6206P332MR-G,SOT-23-3,C5446,3.3V 200mA LDO regulator,1
+U2,SX1308,SOT-23-6,C78162,1.2MHz 2A boost converter,1
+D1,SS14,SMA,C2480,1A 40V Schottky diode (boost),1
+D2,1N4148WT,SOD-523,C83482,Fast switching diode (reset discharge),1
+J1,FPC-24P,0.5mm flip-lock,C262669,24-pin 0.5mm bottom-contact FPC connector,1
+P1,Header-4P,2.54mm,C124413,1x4 2.54mm straight male header,1
+R1,910K,0402,C25762,Boost feedback (IREF),1
+R2,4.7K,0402,C25900,I2C pull-up (SCL),1
+R3,4.7K,0402,C25900,I2C pull-up (SDA),1
+R4,10K,0402,C25744,Reset pull-up to VCC3.3,1
+R5,10K,0402,C25744,Boost EN pull-up,1
+R6,200K,0402,C25789,Boost feedback divider,1
+C1,100nF,0402,C14663,LDO output bypass,1
+C2,4.7uF/25V,0805,C1779,OLED VCC filter,1
+C3,4.7uF/25V,0805,C1779,OLED VDD filter,1
+C4,100nF,0402,C14663,SSD1309 VDD bypass,1
+C5,4.7uF/25V,0805,C1779,LDO input,1
+C6,100nF,0402,C14663,VCOMH filter,1
+C7,10uF/25V,0805,C15850,Boost input,1
+C8,100nF,0402,C14663,Reset RC delay,1
+L1,4.7uH,0805/1210,C76622,Boost inductor (>2A sat),1

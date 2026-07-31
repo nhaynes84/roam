@@ -1,0 +1,41 @@
+Ref,Value,Package,LCSC,Description,Qty
+U1,ESP32-C6-MINI-1-N4,SMD Module,C5736265,Pre-certified ESP32-C6 BLE+WiFi module (Espressif),1
+U2,MCP73831T-2ACI/OT,SOT-23-5,C424093,500mA single-cell LiPo charger 4.2V (Microchip),1
+U3,AP2112K-3.3TRG1,SOT-23-5,C51118,600mA 3.3V LDO regulator (Diodes Inc),1
+U4,USBLC6-2SC6,SOT-23-6,C7519,Dual-line USB ESD protection (ST),1
+U5,LSM6DS3TR-C,LGA-14,C967633,6-axis IMU accel+gyro I2C 0x6A (ST),1
+J1,TYPE-C-31-M-12,USB-C 16P,C165948,USB-C receptacle mid-mount (HRO),1
+J2,SM05B-SRSS-TB,JST-SH 5P,C136657,Finger buttons connector (4 sig + GND),1
+J3,SM03B-SRSS-TB,JST-SH 3P,C160403,Scroll buttons connector (2 sig + GND),1
+J4,SM02B-SRSS-TB,JST-SH 2P,C160402,Motor connector,1
+D3,SK6812-MINI-E,3228,C5149201,Addressable RGB LED (on-board status),1
+C11,100nF,0402,C14663,D3 (SK6812) VDD bypass,1
+J6,SM04B-SRSS-TB,JST-SH 4P,C160404,Display I2C connector (VCC/GND/SDA/SCL),1
+J7,SM03B-SRSS-TB,JST-SH 3P,C160403,Power switch connector (VBAT/VBAT_SW/NC),1
+J8,S2B-PH-K-S,JST-PH 2P,C131337,LiPo battery connector (standard polarity),1
+J9,1x4 2.54mm,Pin Header,—,UART debug header (hand-solder),1
+Q1,2N7002,SOT-23,C8545,N-channel MOSFET motor driver 300mA,1
+D1,SS14,SMA,C2480,1A 40V Schottky flyback diode,1
+D2,Red LED,0603,C2286,Charge status indicator,1
+SW1,Tactile 3x6x2.5mm,SMD,C318884,Reset button (EN to GND),1
+SW2,Tactile 3x6x2.5mm,SMD,C318884,BOOT button (GPIO9 to GND),1
+R1,2K,0402,C4109,MCP73831 PROG (sets 500mA charge current),1
+R2,1K,0402,C11702,Charge LED current limit,1
+R4,4.7K,0402,C25900,I2C SCL pull-up to 3V3,1
+R5,4.7K,0402,C25900,I2C SDA pull-up to 3V3,1
+R6,1M,0402,C25585,Battery voltage divider (high side),1
+R7,1M,0402,C25585,Battery voltage divider (low side),1
+R8,5.1K,0402,C25905,USB CC1 pull-down (UFP identification),1
+R9,5.1K,0402,C25905,USB CC2 pull-down (UFP identification),1
+R10,10K,0402,C25744,EN pin pull-up to 3V3 (reset circuit),1
+R11,10K,0402,C25744,GPIO8 strapping pull-up to 3V3,1
+C1,4.7uF,0805,C1779,MCP73831 VDD input bypass,1
+C2,4.7uF,0805,C1779,MCP73831 VBAT output bypass,1
+C3,1uF,0402,C52923,AP2112K VIN input bypass,1
+C4,1uF,0402,C52923,AP2112K VOUT output bypass,1
+C5,100nF,0402,C14663,ESP32-C6 VDD close bypass,1
+C6,10uF,0805,C15850,ESP32-C6 VDD bulk bypass,1
+C7,100nF,0402,C14663,LSM6DS3TR-C VDD bypass,1
+C8,100nF,0402,C14663,LSM6DS3TR-C VDDIO bypass,1
+C9,10uF,0805,C15850,USB VBUS bulk capacitor,1
+C10,1uF,0402,C52923,EN pin RC delay capacitor,1

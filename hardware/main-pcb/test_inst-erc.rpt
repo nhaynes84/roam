@@ -1,0 +1,17 @@
+ERC report (2026-03-13T13:25:51-0700, Encoding UTF8)
+
+***** Sheet /
+[label_dangling]: Label not connected to anything
+    ; error
+    @(96.19 mm, 50.00 mm): Label 'TEST_NET'
+[pin_not_connected]: Pin not connected
+    ; error
+    @(103.81 mm, 50.00 mm): Symbol R1 Pin 2 [2, Passive, Line]
+[endpoint_off_grid]: Symbol pin or wire end off connection grid
+    ; warning
+    @(96.19 mm, 50.00 mm): Symbol R1 Pin 1 [1, Passive, Line]
+[lib_symbol_issues]: The current configuration does not include the symbol library ''
+    ; warning
+    @(100.00 mm, 50.00 mm): Symbol R1 [roam_R]
+
+ ** ERC messages: 4  Errors 2  Warnings 2
