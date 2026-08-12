@@ -314,11 +314,16 @@ for _sx in (-1, 1):
         * Cone(1.8, 1.0, CAP_DIMPLE_D + 0.2,
                align=(Align.CENTER, Align.CENTER, Align.MIN))
 
+# ★ A full collar, not a U: a bottom plate matching the top one. Four walls
+# means the tray slides into a closed rectangular mouth, so loading and
+# unloading reads like a magazine change instead of clipping a lid on. It also
+# roots the snap tongues at both ends instead of leaving them hanging.
 cap = bbox(-(OUT_W / 2 + CAP_CLR + CAP_W), OUT_W / 2 + CAP_CLR + CAP_W,
-           -CAP_T, CAP_D, -CAP_CLR, OUT_H + CAP_CLR + CAP_W)
-# hollow it out to a U that slides over the tray
+           -CAP_T, CAP_D,
+           -(CAP_CLR + CAP_W), OUT_H + CAP_CLR + CAP_W)
+# hollow out the slot the tray slides into
 cap -= bbox(-(OUT_W / 2 + CAP_CLR), OUT_W / 2 + CAP_CLR,
-            -EPS, CAP_D + EPS, -CAP_CLR - EPS, OUT_H + CAP_CLR)
+            -EPS, CAP_D + EPS, -CAP_CLR, OUT_H + CAP_CLR)
 # Cable aperture: a USB-C-shaped slot through the plate, flared on the outside
 # and tapered down to it so any head can find the port behind a 2.4 mm plate.
 cap -= Pos(0, -CAP_T - EPS, USB_Z) * Rot(-90, 0, 0) * extrude(
@@ -329,7 +334,7 @@ cap -= Pos(0, -CAP_T - EPS, USB_Z) * Rot(-90, 0, 0) * extrude(
 # ⚠️ Built as a LOFT, not extrude(taper=). OCCT's extrude_taper throws
 # Standard_TypeMismatch on a rounded profile at this angle (~64 deg).
 _cap_half_w = OUT_W / 2 + CAP_CLR + CAP_W
-_face_z0, _face_z1 = -CAP_CLR, OUT_H + CAP_CLR + CAP_W
+_face_z0, _face_z1 = -(CAP_CLR + CAP_W), OUT_H + CAP_CLR + CAP_W
 _face_zc = (_face_z0 + _face_z1) / 2
 _trough_h = (_face_z1 - _face_z0) - 2 * TROUGH_INSET
 cap -= loft([
