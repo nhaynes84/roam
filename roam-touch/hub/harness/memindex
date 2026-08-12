@@ -1,0 +1,548 @@
+#!/usr/bin/env python3
+"""
+Unified memory index — keeps the openclaw semantic DB up to date.
+
+Sources:
+  memory  — openclaw agent daily logs (~/.openclaw/workspace/memory/)  [FROZEN]
+  ledger  — ROAM hub event ledger (roam-touch/hub/hub.sqlite)
+  sessions— Claude session transcripts (~/.claude/projects/-Users-talos/*.jsonl)
+  physics — physics knowledge fragments (~/Projects/research/physics-foundations/knowledge/)
+  jeanne  — Jeanne Telegram project memory (~/Projects/telegram-jeanne/memory/)
+
+Skips chunks whose content hash hasn't changed (incremental).
+Run with --rebuild to nuke and re-embed everything.
+
+Usage:
+  memindex                    # incremental update, all sources
+  memindex --source memory    # just memory
+  memindex --source physics   # just physics
+  memindex --source jeanne    # just Jeanne Telegram memory
+  memindex --rebuild          # full rebuild
+"""
+import os
+import sys
+import json
+import sqlite3
+import hashlib
+import urllib.request
+import urllib.error
+import time
+import glob
+import itertools
+import argparse
+
+DB_PATH = os.path.expanduser("~/.claude/memory/index.sqlite")
+OLLAMA_URL = "http://localhost:11434/api/embeddings"
+EMBED_MODEL = "nomic-embed-text"
+
+SOURCES = {
+    "memory": os.path.expanduser("~/.openclaw/workspace/memory"),
+    "physics": os.path.expanduser("~/Projects/research/physics-foundations/knowledge"),
+    "claude": os.path.expanduser("~/.claude/projects/-Users-talos/memory"),
+    "rongorongo": os.path.expanduser("~/Projects/research/encoded-knowledge/docs"),
+    "jeanne": os.path.expanduser("~/Projects/telegram-jeanne/memory"),
+    # ~/Projects IS the vault — owner ruling 2026-08-10. DFCL applies to it.
+    "projects": os.path.expanduser("~/Projects"),
+}
+
+
+# Record sources are not markdown files: the hub ledger is a SQLite table and the
+# sessions are JSONL. `ledger_index` (versioned and tested in the roam repo) turns
+# both into the same chunk shape as everything else, so one command and one search
+# still cover the whole corpus.
+RECORD_SOURCES = ("ledger", "sessions")
+LEDGER_INDEX_DIR = os.path.expanduser("~/Projects/roam/roam-touch/hub")
+
+
+def load_record_module():
+    """Import ledger_index, or None if the roam checkout has moved."""
+    if LEDGER_INDEX_DIR not in sys.path:
+        sys.path.insert(0, LEDGER_INDEX_DIR)
+    try:
+        import ledger_index
+        return ledger_index
+    except Exception as e:
+        print(f"  SKIP record sources: {e}")
+        return None
+
+
+def _embed_once(text: str) -> list:
+    payload = json.dumps({"model": EMBED_MODEL, "prompt": text}).encode()
+    req = urllib.request.Request(
+        OLLAMA_URL, data=payload, headers={"Content-Type": "application/json"}
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return json.loads(resp.read())["embedding"]
+
+
+def embed(text: str, _depth: int = 0) -> list:
+    """Embed text, halving it on overflow.
+
+    A character cap alone cannot guarantee the token limit — dense content (genetics tables,
+    rsIDs, hex dumps) tokenizes far worse than prose, and Ollama answers with HTTP 500. Rather
+    than drop that content from the index silently, halve on a paragraph boundary and average
+    the halves' vectors, which keeps the chunk searchable.
+    """
+    try:
+        return _embed_once(text)
+    except urllib.error.HTTPError as e:
+        if e.code != 500 or _depth >= 4 or len(text) < 200:
+            raise
+    cut = text.rfind("\n\n", 0, len(text) // 2 + 1)
+    if cut <= 0:
+        cut = text.rfind("\n", 0, len(text) // 2 + 1)
+    if cut <= 0:
+        cut = len(text) // 2
+    halves = [t for t in (text[:cut].strip(), text[cut:].strip()) if len(t) > 20]
+    if not halves:
+        raise RuntimeError("chunk could not be split for embedding")
+    vecs = [embed(h, _depth + 1) for h in halves]
+    return [sum(vals) / len(vals) for vals in zip(*vecs)]
+
+
+def chunk_markdown(filepath: str) -> list:
+    with open(filepath) as f:
+        lines = f.readlines()
+
+    title = ""
+    for line in lines:
+        if line.startswith("# ") and not line.startswith("## "):
+            title = line.strip()
+            break
+
+    chunks = []
+    current_chunk = []
+    current_start = 1
+
+    for i, line in enumerate(lines, 1):
+        if line.startswith("## ") and current_chunk:
+            text = "".join(current_chunk).strip()
+            if text and len(text) > 50:
+                if title and not text.startswith(title):
+                    text = f"{title}\n\n{text}"
+                chunks.append({
+                    "text": text,
+                    "start_line": current_start,
+                    "end_line": i - 1,
+                })
+            current_chunk = [line]
+            current_start = i
+        else:
+            current_chunk.append(line)
+
+    if current_chunk:
+        text = "".join(current_chunk).strip()
+        if text and len(text) > 50:
+            if title and not text.startswith(title):
+                text = f"{title}\n\n{text}"
+            chunks.append({
+                "text": text,
+                "start_line": current_start,
+                "end_line": len(lines),
+            })
+
+    return [sub for c in chunks for sub in split_oversized(c)]
+
+
+# nomic-embed-text tops out around 2048 tokens; past that Ollama returns HTTP 500 and the
+# chunk is silently dropped from the index. Sections are split on `## ` only, so one long
+# section (or a doc with no `##` at all) used to vanish entirely. ~4x chars-per-token, with
+# headroom for the prepended title.
+MAX_CHUNK_CHARS = 6000
+
+
+def split_oversized(chunk: dict) -> list:
+    """Sub-split a too-large chunk on paragraph, then line, boundaries."""
+    text = chunk["text"]
+    if len(text) <= MAX_CHUNK_CHARS:
+        return [chunk]
+
+    # Paragraphs, falling back to hard line splits for a single monster paragraph.
+    units, buf = [], ""
+    for para in text.split("\n\n"):
+        if len(para) > MAX_CHUNK_CHARS:
+            if buf:
+                units.append(buf)
+                buf = ""
+            lines = para.split("\n")
+            cur = ""
+            for ln in lines:
+                if len(cur) + len(ln) + 1 > MAX_CHUNK_CHARS and cur:
+                    units.append(cur)
+                    cur = ""
+                cur += ln + "\n"
+            if cur:
+                units.append(cur)
+            continue
+        if len(buf) + len(para) + 2 > MAX_CHUNK_CHARS and buf:
+            units.append(buf)
+            buf = ""
+        buf += ("\n\n" if buf else "") + para
+    if buf:
+        units.append(buf)
+
+    # Line spans are approximate for sub-chunks; they stay inside the parent's range so
+    # search results still point at the right region of the file.
+    start, end = chunk["start_line"], chunk["end_line"]
+    span = max(1, (end - start + 1) // max(1, len(units)))
+    out = []
+    for idx, unit in enumerate(units):
+        u_start = start + idx * span
+        u_end = end if idx == len(units) - 1 else min(end, u_start + span - 1)
+        out.append({"text": unit.strip(), "start_line": u_start, "end_line": u_end})
+    return [c for c in out if len(c["text"]) > 50]
+
+
+def init_record_files(conn):
+    """Per-file mtime/size, so an unchanged 6 MB transcript is never reparsed."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS record_files (
+            source TEXT NOT NULL, path TEXT NOT NULL,
+            mtime REAL NOT NULL, size INTEGER NOT NULL,
+            PRIMARY KEY (source, path)
+        )
+    """)
+    conn.commit()
+
+
+def init_fts(conn):
+    """FTS5 for exact recall.
+
+    Embeddings are the wrong tool for "when did the phrase `wifi_sleep_policy`
+    appear" -- a literal string is either there or it is not, and matching it costs
+    no model. `chunks_fts_v2` is ours; the older `chunks_fts` belongs to the retired
+    openclaw indexer and is left alone.
+    """
+    conn.execute("""
+        CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts_v2 USING fts5(
+            id UNINDEXED, path UNINDEXED, source UNINDEXED, text
+        )
+    """)
+    conn.commit()
+
+
+def fts_replace(conn, chunk_id, path, source, text):
+    conn.execute("DELETE FROM chunks_fts_v2 WHERE id = ?", (chunk_id,))
+    conn.execute(
+        "INSERT INTO chunks_fts_v2 (id, path, source, text) VALUES (?, ?, ?, ?)",
+        (chunk_id, path, source, text),
+    )
+
+
+def fts_backfill(conn, quiet=False):
+    """Bring FTS up to date with `chunks` without re-embedding anything."""
+    rows = conn.execute(
+        """SELECT c.id, c.path, c.source, c.text FROM chunks c
+           WHERE NOT EXISTS (SELECT 1 FROM chunks_fts_v2 f WHERE f.id = c.id)"""
+    ).fetchall()
+    for chunk_id, path, source, text in rows:
+        conn.execute(
+            "INSERT INTO chunks_fts_v2 (id, path, source, text) VALUES (?, ?, ?, ?)",
+            (chunk_id, path, source, text),
+        )
+    conn.commit()
+    if rows and not quiet:
+        print(f"  FTS: backfilled {len(rows)} chunks")
+    return len(rows)
+
+
+def init_db(conn):
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS chunks (
+            id TEXT PRIMARY KEY,
+            path TEXT NOT NULL,
+            source TEXT NOT NULL DEFAULT 'memory',
+            start_line INTEGER NOT NULL,
+            end_line INTEGER NOT NULL,
+            hash TEXT NOT NULL,
+            model TEXT NOT NULL,
+            text TEXT NOT NULL,
+            embedding TEXT NOT NULL,
+            updated_at INTEGER NOT NULL
+        )
+    """)
+    conn.commit()
+
+
+# Vendored/build dirs and subtrees that other sources already own. Applied to `projects`,
+# which is the whole ~/Projects tree — the real vault.
+SKIP_DIRS = {
+    "node_modules", "dist", "build", "venv", "site-packages", "vendor",
+    "third_party", "coverage", "__pycache__",
+    "managed_components",  # ESP-IDF pulls upstream component docs in here
+    "Pods", "target", ".pio",
+}
+SKIP_SUBTREES = (
+    "research/physics-foundations/knowledge",  # indexed as `physics`
+    "research/encoded-knowledge/docs",         # indexed as `rongorongo`
+    "telegram-jeanne/memory",                  # indexed as `jeanne`
+)
+
+
+OWNER_MARKERS = ("nhaynes84",)
+
+
+def is_upstream_clone(repo_dir: str) -> bool:
+    """True for third-party clones living under ~/Projects (esp-csi, RuView, …).
+
+    Their docs are upstream's writing, not ours, and they swamp the index. A repo with no
+    remote is ours (local-only work like warble), as is anything whose origin is the owner's.
+    """
+    try:
+        with open(os.path.join(repo_dir, '.git', 'config')) as fh:
+            cfg = fh.read()
+    except OSError:
+        return False
+    if 'url = ' not in cfg:
+        return False
+    return not any(marker in cfg for marker in OWNER_MARKERS)
+
+
+def find_md_files(base_dir: str) -> list:
+    """Recursively find all .md files under base_dir."""
+    results = []
+    for root, dirs, files in os.walk(base_dir):
+        # Skip hidden dirs, vendored trees, and subtrees owned by another source
+        dirs[:] = [d for d in dirs if not d.startswith('.') and d not in SKIP_DIRS]
+        rel = os.path.relpath(root, base_dir)
+        if any(rel == s or rel.startswith(s + os.sep) for s in SKIP_SUBTREES):
+            dirs[:] = []
+            continue
+        if os.path.isdir(os.path.join(root, '.git')) and is_upstream_clone(root):
+            dirs[:] = []
+            continue
+        for f in sorted(files):
+            if f.endswith('.md'):
+                results.append(os.path.join(root, f))
+    return results
+
+
+def index_source(conn, source: str, base_dir: str, stats: dict):
+    if not os.path.isdir(base_dir):
+        print(f"  SKIP {source}: {base_dir} not found")
+        return
+
+    md_files = find_md_files(base_dir)
+    print(f"  {source}: {len(md_files)} files in {base_dir}")
+    current_paths = {
+        f"{source}/{os.path.relpath(filepath, base_dir)}"
+        for filepath in md_files
+    }
+    existing_paths = {
+        row[0]
+        for row in conn.execute(
+            "SELECT DISTINCT path FROM chunks WHERE source = ?",
+            (source,),
+        ).fetchall()
+    }
+    removed_paths = sorted(existing_paths - current_paths)
+    if removed_paths:
+        stale_ids = [
+            row[0]
+            for row in conn.execute(
+                f"SELECT id FROM chunks WHERE source = ? AND path IN ({','.join('?' for _ in removed_paths)})",
+                (source, *removed_paths),
+            ).fetchall()
+        ]
+        conn.execute(
+            f"DELETE FROM chunks WHERE source = ? AND path IN ({','.join('?' for _ in removed_paths)})",
+            (source, *removed_paths),
+        )
+        try:
+            conn.executemany("DELETE FROM chunks_fts WHERE id = ?", [(chunk_id,) for chunk_id in stale_ids])
+        except sqlite3.Error:
+            pass
+        try:
+            conn.executemany("DELETE FROM chunks_vec WHERE id = ?", [(chunk_id,) for chunk_id in stale_ids])
+        except sqlite3.Error:
+            pass
+        stats["deleted"] += len(stale_ids)
+
+    for filepath in md_files:
+        relpath = os.path.relpath(filepath, base_dir)
+        path = f"{source}/{relpath}"
+        chunks = chunk_markdown(filepath)
+        chunk_records = []
+
+        for chunk in chunks:
+            chunk_id = f"{source}-{relpath}-{chunk['start_line']}-{chunk['end_line']}"
+            chunk_records.append((chunk_id, chunk))
+
+        current_ids = {chunk_id for chunk_id, _ in chunk_records}
+        existing_ids = {
+            row[0]
+            for row in conn.execute(
+                "SELECT id FROM chunks WHERE source = ? AND path = ?",
+                (source, path),
+            ).fetchall()
+        }
+        stale_ids = sorted(existing_ids - current_ids)
+        if stale_ids:
+            conn.executemany("DELETE FROM chunks WHERE id = ?", [(chunk_id,) for chunk_id in stale_ids])
+            try:
+                conn.executemany("DELETE FROM chunks_fts WHERE id = ?", [(chunk_id,) for chunk_id in stale_ids])
+            except sqlite3.Error:
+                pass
+            try:
+                conn.executemany("DELETE FROM chunks_vec WHERE id = ?", [(chunk_id,) for chunk_id in stale_ids])
+            except sqlite3.Error:
+                pass
+            stats["deleted"] += len(stale_ids)
+
+        for chunk_id, chunk in chunk_records:
+            text = chunk["text"]
+            text_hash = hashlib.sha256(text.encode()).hexdigest()[:16]
+
+            existing = conn.execute(
+                "SELECT hash FROM chunks WHERE id = ?", (chunk_id,)
+            ).fetchone()
+
+            if existing and existing[0] == text_hash:
+                stats["skipped"] += 1
+                continue
+
+            try:
+                vec = embed(text)
+            except Exception as e:
+                print(f"    ERROR {chunk_id}: {e}")
+                stats["errors"] += 1
+                continue
+
+            conn.execute(
+                """INSERT OR REPLACE INTO chunks
+                   (id, path, source, start_line, end_line, hash, model, text, embedding, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (chunk_id, path, source, chunk["start_line"], chunk["end_line"],
+                 text_hash, EMBED_MODEL, text, json.dumps(vec), int(time.time() * 1000)),
+            )
+            stats["indexed"] += 1
+
+        conn.commit()
+
+
+def index_records(conn, source: str, stats: dict):
+    """Index a record source (ledger, sessions).
+
+    Same incremental contract as the file sources: chunk ids are deterministic
+    and a chunk whose hash is unchanged is never re-embedded. Session files also
+    get an mtime/size guard, so an unchanged 6 MB transcript is not even parsed.
+    """
+    mod = load_record_module()
+    if mod is None:
+        return
+
+    if source == "ledger":
+        chunk_iter = mod.ledger_chunks()
+    else:
+        chunk_iter = []
+        for path, mtime, size in mod.session_sources():
+            row = conn.execute(
+                "SELECT mtime, size FROM record_files WHERE source = ? AND path = ?",
+                (source, str(path)),
+            ).fetchone()
+            if row and abs(row[0] - mtime) < 0.001 and row[1] == size:
+                stats["skipped_files"] = stats.get("skipped_files", 0) + 1
+                continue
+            chunk_iter = itertools.chain(chunk_iter, mod.session_chunks(path))
+            conn.execute(
+                "INSERT OR REPLACE INTO record_files (source, path, mtime, size)"
+                " VALUES (?, ?, ?, ?)",
+                (source, str(path), mtime, size),
+            )
+
+    count = 0
+    for chunk in chunk_iter:
+        count += 1
+        chunk_id, text = chunk["id"], chunk["text"]
+        text_hash = hashlib.sha256(text.encode()).hexdigest()[:16]
+        existing = conn.execute(
+            "SELECT hash FROM chunks WHERE id = ?", (chunk_id,)
+        ).fetchone()
+        if existing and existing[0] == text_hash:
+            stats["skipped"] += 1
+            continue
+        for piece in split_oversized({
+            "text": text,
+            "start_line": chunk["start_line"],
+            "end_line": chunk["end_line"],
+        }):
+            piece_id = chunk_id if piece["text"] == text else (
+                f"{chunk_id}-{piece['start_line']}"
+            )
+            try:
+                vec = embed(piece["text"])
+            except Exception as e:
+                print(f"    ERROR {piece_id}: {e}")
+                stats["errors"] += 1
+                continue
+            conn.execute(
+                """INSERT OR REPLACE INTO chunks
+                   (id, path, source, start_line, end_line, hash, model, text,
+                    embedding, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (piece_id, chunk["path"], source, piece["start_line"],
+                 piece["end_line"], text_hash, EMBED_MODEL, piece["text"],
+                 json.dumps(vec), int(time.time() * 1000)),
+            )
+            fts_replace(conn, piece_id, chunk["path"], source, piece["text"])
+            stats["indexed"] += 1
+        if count % 50 == 0:
+            conn.commit()
+    conn.commit()
+    print(f"  {source}: {count} records seen")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Unified memory indexer")
+    parser.add_argument("--source", choices=list(SOURCES.keys()) + list(RECORD_SOURCES), help="Index only this source")
+    parser.add_argument("--rebuild", action="store_true", help="Delete and reindex")
+    parser.add_argument("--quiet", "-q", action="store_true", help="Minimal output")
+    args = parser.parse_args()
+
+    conn = sqlite3.connect(DB_PATH)
+    init_db(conn)
+    init_fts(conn)
+    init_record_files(conn)
+
+    if args.source in RECORD_SOURCES:
+        sources, record_sources = {}, (args.source,)
+    elif args.source:
+        sources, record_sources = {args.source: SOURCES[args.source]}, ()
+    else:
+        sources, record_sources = SOURCES, RECORD_SOURCES
+
+    if args.rebuild:
+        for src in list(sources) + list(record_sources):
+            conn.execute("DELETE FROM chunks_fts_v2 WHERE source = ?", (src,))
+            if src in RECORD_SOURCES:
+                conn.execute("DELETE FROM record_files WHERE source = ?", (src,))
+            n = conn.execute("DELETE FROM chunks WHERE source = ?", (src,)).rowcount
+            conn.commit()
+            if not args.quiet:
+                print(f"Deleted {n} chunks from {src}")
+
+    stats = {"indexed": 0, "skipped": 0, "deleted": 0, "errors": 0}
+
+    for src, base_dir in sources.items():
+        if not args.quiet:
+            print(f"\nIndexing {src}...")
+        index_source(conn, src, base_dir, stats)
+
+    for src in record_sources:
+        if not args.quiet:
+            print(f"\nIndexing {src}...")
+        index_records(conn, src, stats)
+
+    fts_backfill(conn, quiet=args.quiet)
+    conn.close()
+
+    total = stats["indexed"] + stats["skipped"]
+    if args.quiet:
+        if stats["indexed"] > 0 or stats["deleted"] > 0:
+            print(f"memindex: {stats['indexed']} new, {stats['deleted']} stale deleted, {stats['skipped']} unchanged")
+    else:
+        print(f"\nDone: {stats['indexed']} indexed, {stats['skipped']} unchanged, {stats['deleted']} stale deleted, {stats['errors']} errors ({total} total)")
+
+
+if __name__ == "__main__":
+    main()
