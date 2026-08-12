@@ -40,6 +40,11 @@ fi
 if ! adb -s "$ROAM_DEV" shell \
         "cmd notification post -S bigtext -t '$(q "$ROAM_TITLE")' '$(q "$TAG")' '$(q "$msg")'" \
         >/dev/null 2>&1; then
-    echo "roam-msg: ROAM Touch unreachable at $ROAM_DEV" >&2
+    echo "roam-msg: FAILED — ROAM Touch unreachable at $ROAM_DEV" >&2
     exit 1
 fi
+
+# Confirm delivery. Silence reads as success *or* as a silent no-op, and a
+# caller cannot tell those apart -- so say so explicitly. roam-notify still
+# suppresses this by redirecting.
+echo "roam-msg: delivered to $ROAM_DEV [$TAG] (${#msg} chars)"
