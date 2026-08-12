@@ -28,7 +28,9 @@ cap.fix_normals()
 FLOOR, POCK_D, LIP_H = 2.2, 8.8, 2.4
 OUT_W, OUT_L, OUT_H = 75.1, 147.0, 13.4
 POCK_W = 70.3
-HULL_HW, TEN_D, HULL_BELT = 40.0, 2.3, -3.0
+HULL_HW, TEN_D, HULL_BELT = 40.0, 2.3, -2.0
+VISOR_H, VISOR_HW, WELL_HW = 5.0, 41.5, 36.66
+VZ1 = OUT_H + VISOR_H
 CARD_L, CARD_W, CARD_T = 85.60, 53.98, 0.76   # ISO/IEC 7810 ID-1
 # ★ Calibrated, not picked. The thinnest wall the FROZEN housing deliberately
 # has is 1.20 mm -- the 2.4 mm pocket wall behind the 1.2 mm button counterbore,
@@ -42,7 +44,7 @@ CARD_L, CARD_W, CARD_T = 85.60, 53.98, 0.76   # ISO/IEC 7810 ID-1
 # permanently red harness or quietly relaxing the shell's number too.
 MIN_WALL = 1.15
 MIN_WALL_PLUNGER = 0.8
-CAP_D = 10.0
+CAP_D, CAP_T = 10.0, 6.0
 
 Z_FACE = FLOOR + POCK_D          # phone front face
 probes = [
@@ -95,8 +97,8 @@ probes = [
     # deep the collar rattles. Probed either side of the tenon's flank face.
     ("tenon flank, deep side",       (37.2, 3.0, -8.0), True),
     ("collar space outside tenon",   (39.0, 3.0, -8.0), False),
-    ("snap dimple in tenon flank",   (37.4, 7.0, -8.84), False),
-    ("full section above the belt",  (39.0, 3.0, -1.0), True),
+    ("snap dimple in tenon flank",   (37.4, 7.0, -13.8), False),
+    ("full section above the belt",  (38.5, 3.0, -1.0), True),
 
     # ------------------------------------------------------- card slots
     ("card channel, mid",            (0.0, 40.0, -1.0), False),
@@ -106,8 +108,19 @@ probes = [
     ("card back stop",               (0.0, 87.5, -1.0), True),
     ("floor above the card channel", (0.0, 40.0, 1.0), True),
     ("thick arm band under strap",   (0.0, 34.0, -4.0), True),
-    ("exhaust louvre is open",       (39.0, 56.0, -8.8), False),
-    ("flank between two louvres",    (39.0, 61.0, -8.8), True),
+    # ------------------------------------------------- ribs and visor
+    # The canted louvres are gone; these are the proud ribs that replaced them.
+    ("deep-flank rib",               (41.0, 60.0, -17.07), True),
+    ("gap between the ribs",         (41.0, 60.0, -13.80), False),
+    ("nothing beyond the ribs",      (42.5, 60.0, -17.07), False),
+    # The hood: screen sunk in a well, surround proud around it.
+    ("hood side wall",               (39.0, 70.0, OUT_H + 2.0), True),
+    ("screen well is open",          (0.0, 70.0, OUT_H + 2.0), False),
+    ("well floor is the old face",   (35.0, 70.0, OUT_H - 1.0), True),
+    ("elbow brow",                   (0.0, 4.0, OUT_H + 2.0), True),
+    ("hand brow",                    (20.0, 145.0, OUT_H + 1.0), True),
+    ("notch through the hand brow",  (0.0, 145.0, OUT_H + 3.6), False),
+    ("nothing above the hood",       (0.0, 70.0, VZ1 + 1.0), False),
     # Strap runs in a channel under the hull instead of through side flanges,
     # so the device is tray-width. The bars bridge that channel.
     ("strap channel is open, +X",    (14.0, 34, -13.7), False),
@@ -233,6 +246,85 @@ for name, mesh, limit in _checks:
     print(f"  {'ok  ' if ok else 'FAIL'}  {name:<22} {t:5.2f} mm "
           f"(min {limit}){where}")
 
+
+# ------------------------------------------------------- chamfer audit
+# ★ "Find the edges that got missed" -- systematically, off the mesh, rather
+# than by eye off a render. Every exterior CONVEX crease sharper than
+# SHARP_DEG is listed with its length and where it is. A properly chamfered
+# 90 deg corner becomes two 45 deg creases, so anything still above 55 deg
+# either could not be chamfered or was deliberately left.
+SHARP_DEG = 55.0
+SHARP_MIN_LEN = 4.0      # ignore slivers; they are triangulation, not design
+
+
+def sharp_exterior_edges(mesh, deg=SHARP_DEG):
+    """(length, midpoint, degrees) for every convex exterior crease."""
+    ang = np.degrees(mesh.face_adjacency_angles)
+    keep = mesh.face_adjacency_convex & (ang > deg)
+    if not keep.any():
+        return []
+    ev = mesh.face_adjacency_edges[keep]
+    a, b = mesh.vertices[ev[:, 0]], mesh.vertices[ev[:, 1]]
+    mid = (a + b) / 2.0
+    length = np.linalg.norm(a - b, axis=1)
+    n = mesh.face_normals[mesh.face_adjacency[keep]].mean(axis=1)
+    n /= np.linalg.norm(n, axis=1)[:, None]
+    # exterior if a ray fired outward from just off the crease never comes back
+    hit = mesh.ray.intersects_any(mid + n * 0.05, n)
+    out = [(length[i], mid[i], ang[keep][i])
+           for i in range(len(mid)) if not hit[i] and length[i] >= SHARP_MIN_LEN]
+    return sorted(out, key=lambda r: -r[0])
+
+
+# ★ Classify what is left. A sharp crease is only a defect if it is not one
+# of these -- and naming them here is what turns "we left some edges sharp"
+# into a decision on record. UNCLASSIFIED is the number that must stay small.
+def classify(mid, part_name):
+    x, y, z = mid
+    if part_name == "bracer":
+        if abs(z - OUT_H) < 0.25 or abs(z - (OUT_H - 0.1)) < 0.25:
+            return "screen aperture rim (FROZEN)"
+        if abs(y) < 0.3:
+            return "elbow mouth / cap joint"
+        if abs(y - OUT_L) < 0.3:
+            return "hand end = the print bed"
+        if 2.0 < z < OUT_H - 0.5 and abs(x) > 30.0:
+            return "button bay + jack (FROZEN)"
+        if z < -0.5 and abs(x) < 30.0:
+            return "strap channel / arm face"
+        if abs(z + 0.4) < 0.35:
+            return "card channel mouth + rails"
+        if abs(z - FLOOR) < 0.3:
+            return "floor vent rims (inside the pocket)"
+        if abs(x) > 34.0 and z < 0.0:
+            return "arm saddle edge -- 4 mm pad relief, do not cut"
+    else:
+        if abs(y) < 0.3 or abs(y - CAP_D) < 0.3:
+            return "collar joint faces"
+        if abs(y + CAP_T) < 0.3 and abs(x) < 30.0 and 0.0 < z < OUT_H:
+            return "USB trough / speaker mouths"
+    return "UNCLASSIFIED"
+
+
+UNCLASSIFIED_BUDGET = 120.0     # mm of sharp exterior crease with no excuse
+
+print(f"\n=== chamfer audit (exterior creases sharper than {SHARP_DEG:.0f} deg) ===")
+for _nm, _mesh in (("bracer", _parts[0]), ("end cap", cap)):
+    _sharp = sharp_exterior_edges(_mesh)
+    _by = {}
+    for _l, _m, _a in _sharp:
+        _by.setdefault(classify(_m, _nm), []).append((_l, _m, _a))
+    print(f"  {_nm}: {len(_sharp)} creases, {sum(r[0] for r in _sharp):6.1f} mm total")
+    for _k in sorted(_by, key=lambda k: -sum(r[0] for r in _by[k])):
+        _rows = _by[_k]
+        _mk = "FAIL" if _k == "UNCLASSIFIED" and sum(r[0] for r in _rows) > UNCLASSIFIED_BUDGET else "    "
+        print(f"    {_mk}  {sum(r[0] for r in _rows):7.1f} mm  {len(_rows):3d}x  {_k}")
+        if _k == "UNCLASSIFIED":
+            for _l, _m, _a in _rows[:5]:
+                print(f"              {_l:6.1f} mm at "
+                      f"({_m[0]:6.1f},{_m[1]:6.1f},{_m[2]:6.1f})  {_a:4.0f} deg")
+            if sum(r[0] for r in _rows) > UNCLASSIFIED_BUDGET:
+                bad += 1
 
 # ------------------------------------------------ end cap vs tray clearance
 # The cap has to slide the whole way on, not just fit once it is there. Sweep
