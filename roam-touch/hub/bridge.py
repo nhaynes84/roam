@@ -448,11 +448,12 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
     log.info(
-        "roam-bridge %s -> %s (push %s, suppress panes active within %.0fs)",
+        "roam-bridge %s -> %s (push %s; presence suppression %s; backlog limit %d)",
         BRIDGE_VERSION,
         settings.hub_url,
         "/".join(PUSH_KINDS),
-        settings.active_grace_s,
+        "on" if settings.suppress_when_present else "off",
+        settings.backlog_push_limit,
     )
     asyncio.run(Bridge(settings).run())
 

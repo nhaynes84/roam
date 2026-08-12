@@ -475,6 +475,27 @@ async def test_unknown_frames_are_ignored(tmp_path):
     assert phone.messages == []
 
 
+# ------------------------------------------------------------------ startup
+
+
+def test_main_starts_without_touching_a_setting_that_no_longer_exists(
+    tmp_path, monkeypatch
+):
+    """Regression: `main()` logged a removed setting and the launchd job
+    crash-looped on boot. The suite never called main(), so nothing caught it."""
+    monkeypatch.setenv("ROAM_BRIDGE_TOKEN", "t")
+    monkeypatch.setenv("ROAM_BRIDGE_STATE_FILE", str(tmp_path / "state.json"))
+    ran = {}
+
+    def fake_run(coro):
+        ran["started"] = True
+        coro.close()
+
+    monkeypatch.setattr(bridge_mod.asyncio, "run", fake_run)
+    bridge_mod.main()
+    assert ran["started"] is True
+
+
 # ---------------------------------------------------------------- composing
 
 
