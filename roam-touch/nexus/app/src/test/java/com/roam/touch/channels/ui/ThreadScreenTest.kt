@@ -5,12 +5,15 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import com.roam.touch.channels.ChannelReducer
 import com.roam.touch.channels.ChannelsState
 import com.roam.touch.channels.Fx
 import com.roam.touch.channels.model.Event
 import com.roam.touch.channels.stt.PttState
 import kotlinx.coroutines.flow.MutableStateFlow
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -35,7 +38,11 @@ class ThreadScreenTest {
 
     private val spoken = "Not done yet. Ba-ba-ba-ba-ba-ba-wee-wee."
 
+    /** What the card asked to be opened in the reader, if anything. */
+    private var readRequest: Event? = null
+
     private fun render(vararg events: Event) {
+        readRequest = null
         val state = events.fold(ChannelsState(channels = listOf(channel))) { acc, e ->
             ChannelReducer.applyEvent(acc, e)
         }
@@ -49,7 +56,7 @@ class ThreadScreenTest {
                     pttState = PttState.Idle,
                     pttLevel = MutableStateFlow(-120.0),
                     onBack = {},
-                    onExpand = {},
+                    onRead = { readRequest = it },
                     onPlay = {},
                     onStopPlaying = {},
                     onSend = {},
@@ -115,5 +122,56 @@ class ThreadScreenTest {
         compose.onAllNodesWithText(spoken).assertCountEquals(1)
         compose.onNodeWithText("the suite is green").assertIsDisplayed()
         compose.onNodeWithText("ANSWER").assertIsDisplayed()
+    }
+
+    // -----------------------------------------------------------------------
+    // ★★ Long messages. The owner: *"any message over 6 lines doesn't scroll or
+    // have expandability, i just can't read it on the phone."*
+    // -----------------------------------------------------------------------
+
+    private val longBody = "Done — Andy resolves now. " + "There is a great deal more. ".repeat(80)
+    private val cutSummary = longBody.take(279) + "…"
+
+    private fun longAnswer(id: Long = 350) = Fx.event(
+        id = id, kind = "outcome", body = longBody, summary = cutSummary,
+        chars = longBody.length,
+    )
+
+    /**
+     * ⚠️ The card must never grow into the wall of text it used to. The list is the
+     * glanceable thing; if the body leaks into it, summary-first is dead.
+     */
+    @Test
+    fun `a long answer shows only its summary in the list`() {
+        render(longAnswer())
+        compose.onAllNodesWithText(longBody, substring = true).assertCountEquals(0)
+        compose.onNodeWithText(cutSummary).assertIsDisplayed()
+    }
+
+    /** It has to be obvious there is more, and how much. A silent stop is the bug. */
+    @Test
+    fun `it says how much more there is to read`() {
+        render(longAnswer())
+        compose.onNodeWithText("READ ALL · ${Format.chars(longBody.length)}").assertIsDisplayed()
+    }
+
+    /**
+     * ★ Tapping the affordance opens the reader rather than expanding in place — the
+     * distinction that keeps the read from being destroyed by the list scrolling.
+     */
+    @Test
+    fun `pressing it asks for the whole message`() {
+        render(longAnswer())
+        compose.onNodeWithText("READ ALL · ${Format.chars(longBody.length)}").performClick()
+        assertEquals(350L, readRequest?.id)
+    }
+
+    /** A short message has nothing behind it and must not offer a door to nowhere. */
+    @Test
+    fun `a short message offers nothing to open`() {
+        render(Fx.event(id = 351, kind = "outcome", body = "the suite is green"))
+        compose.onAllNodesWithText("READ ALL", substring = true).assertCountEquals(0)
+        compose.onNodeWithText("the suite is green").performClick()
+        assertNull("a card with nothing behind it must not navigate", readRequest)
     }
 }

@@ -77,9 +77,27 @@ class ChannelsViewModel(
     val speakingEventId: StateFlow<Long?> = speaker.speakingEventId
 
     /** He pressed play on this message. */
+    /**
+     * ★ Read this one aloud — all of it.
+     *
+     * ⚠️ The fetch comes first and is not optional. `repo.expand` is a no-op unless the
+     * payload was trimmed, but when it was, speaking without it means Piper reads 4 KiB
+     * and stops dead in the middle of a sentence with no indication that it did — the
+     * audible version of showing a truncated tail as though it were the whole answer.
+     */
     fun play(event: Event) {
-        val label = repo.state.value.channel(event.paneId)?.displayLabel.orEmpty()
-        speaker.play(event, label)
+        val now = repo.state.value
+        val label = now.channel(event.paneId)?.displayLabel.orEmpty()
+        // The common case: the whole body is already here, so speech starts on the tap
+        // rather than after a round trip. Play has to feel immediate on a worn device.
+        if (!now.needsExpansion(event)) {
+            speaker.play(event, label, now.bodyOf(event))
+            return
+        }
+        viewModelScope.launch {
+            repo.expand(event)
+            speaker.play(event, label, repo.state.value.bodyOf(event))
+        }
     }
 
     fun stopSpeaking() = speaker.stop()

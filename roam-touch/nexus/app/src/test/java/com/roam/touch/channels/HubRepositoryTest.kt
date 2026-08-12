@@ -370,4 +370,73 @@ class HubRepositoryTest {
         assertEquals(0, repo.state.value.unreadCount("%0"))
         assertEquals(mapOf("%0" to 41L), cursors.saved)
     }
+
+    // -----------------------------------------------------------------------
+    // ★ "If a body was trimmed in transit, fetch the rest — never show a
+    //   truncated tail as if it were the whole thing."
+    // -----------------------------------------------------------------------
+
+    /**
+     * `API.md`: a bulk payload trims `body` to 4096 characters and flags it, and
+     * `GET /events/{id}` returns the event whole. Verified against the live hub on
+     * 2026-08-12 — event 331 arrives as 4096 of 5147 over the socket and comes back
+     * complete from the single-event route.
+     */
+    @Test
+    fun `a trimmed body is fetched whole before it can be read`() = runBlocking {
+        server.enqueue(channelsResponse("%0" to "idle", latest = 40))
+        server.enqueue(socketUpgrade())
+        start()
+        awaitOnline()
+
+        val trimmed = "the first four kibibytes"
+        sockets.take().send(
+            """{"type":"event","event":{"id":41,"pane_id":"%0","kind":"outcome",
+            "body":"$trimmed","summary":"the first…","body_chars":5147,
+            "body_truncated":true,"meta":{},"ts":1.0}}"""
+        )
+        await("event applied") { repo.state.value.thread("%0").size == 1 }
+        val event = repo.state.value.thread("%0").single()
+
+        // Before the fetch the client knows it is holding a fragment, and says so.
+        assertTrue("a trimmed body must advertise that it is trimmed",
+            repo.state.value.needsExpansion(event))
+        assertEquals(trimmed, repo.state.value.bodyOf(event))
+
+        server.enqueue(
+            MockResponse().setBody(
+                """{"event":{"id":41,"pane_id":"%0","kind":"outcome",
+                "body":"$trimmed and the 1051 characters that were cut.",
+                "summary":"the first…","body_chars":5147,"body_truncated":false,
+                "meta":{},"ts":1.0}}"""
+            )
+        )
+        repo.expand(event)
+
+        assertTrue("the fetch must clear the caveat", !repo.state.value.needsExpansion(event))
+        assertTrue(
+            "the whole body must replace the fragment",
+            repo.state.value.bodyOf(event).endsWith("characters that were cut."),
+        )
+    }
+
+    /** ⚠️ A body that arrived whole must not cost a round trip every time he opens it. */
+    @Test
+    fun `a body that was never trimmed is not re-fetched`() = runBlocking {
+        server.enqueue(channelsResponse("%0" to "idle", latest = 40))
+        server.enqueue(socketUpgrade())
+        start()
+        awaitOnline()
+
+        sockets.take().send(
+            """{"type":"event","event":{"id":41,"pane_id":"%0","kind":"outcome",
+            "body":"short and complete","summary":"short and complete","body_chars":18,
+            "body_truncated":false,"meta":{},"ts":1.0}}"""
+        )
+        await("event applied") { repo.state.value.thread("%0").size == 1 }
+
+        val before = server.requestCount
+        repo.expand(repo.state.value.thread("%0").single())
+        assertEquals("no request should have been made", before, server.requestCount)
+    }
 }

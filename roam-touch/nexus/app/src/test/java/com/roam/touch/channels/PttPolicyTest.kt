@@ -42,7 +42,7 @@ import java.util.concurrent.TimeUnit
 
 private class MuteSpeaker : Speaker {
     override val speakingEventId: StateFlow<Long?> = MutableStateFlow(null)
-    override fun play(event: Event, channelLabel: String) = Unit
+    override fun play(event: Event, channelLabel: String, body: String) = Unit
     override fun stop() = Unit
 }
 

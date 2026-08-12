@@ -20,8 +20,14 @@ interface Speaker {
     /** The event currently being spoken, or null. Drives the play/stop control. */
     val speakingEventId: StateFlow<Long?>
 
-    /** Speak [event]. Explicit user action only — nothing in this app may call this. */
-    fun play(event: Event, channelLabel: String)
+    /**
+     * Speak [event]. Explicit user action only — nothing in this app may call this.
+     *
+     * ⚠️ [body] is the resolved full body, which the caller may have had to fetch: an
+     * event that arrived in a bulk payload carries only its first 4 KiB. Defaulted so a
+     * caller cannot accidentally fall back to the 280-character summary by omission.
+     */
+    fun play(event: Event, channelLabel: String, body: String = event.body)
 
     fun stop()
 }
@@ -36,8 +42,8 @@ class TtsSpeaker(
 
     private var job: Job? = null
 
-    override fun play(event: Event, channelLabel: String) {
-        val text = Utterance.of(channelLabel, event)
+    override fun play(event: Event, channelLabel: String, body: String) {
+        val text = Utterance.of(channelLabel, event, body)
         if (text.isBlank()) return
         // Tapping play on a different message stops the first one mid-sentence. Two
         // voices at once is worse than none, and he pressed the newer button.

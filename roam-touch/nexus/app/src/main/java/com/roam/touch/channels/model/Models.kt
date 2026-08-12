@@ -154,6 +154,7 @@ data class Event(
         val s = summary.trim()
         if (b.isEmpty() || b == s) return false
         if (ELIDED.containsMatchIn(s)) return true
+        if (CUT.containsMatchIn(s)) return true
         return b.length >= s.length + MATERIALLY_LONGER
     }
 
@@ -161,7 +162,22 @@ data class Event(
         /** What the hub writes when it replaces a block with a placeholder. */
         private val ELIDED = Regex("""\[(code|table)[^]]*]""")
 
-        /** Below this, "more" is punctuation and markdown, not content. */
+        /**
+         * ★ The hub cuts a summary at a sentence boundary within 280 chars and marks the
+         * cut with a trailing ellipsis. That mark is the only reliable evidence that
+         * something was removed, and it closes a hole [MATERIALLY_LONGER] left open:
+         * event 365 on `%0` had a 280-char summary ending `…` and a 324-char body, so it
+         * fell 16 characters short of the threshold and was drawn with **no affordance
+         * at all** — six lines that simply stop. That silent stop is the whole bug.
+         */
+        private val CUT = Regex("""(…|\.\.\.)$""")
+
+        /**
+         * Below this, "more" is punctuation and markdown, not content — the hub's
+         * summary always differs a little because it strips emoji and formatting, and
+         * offering "full text · 16 chars" on a channel-opened event is the clutter that
+         * teaches him to ignore the affordance. Seen on the device, 2026-08-12.
+         */
         private const val MATERIALLY_LONGER = 60
     }
 }

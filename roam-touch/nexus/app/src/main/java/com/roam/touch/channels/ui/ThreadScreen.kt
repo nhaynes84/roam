@@ -39,12 +39,15 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
@@ -60,6 +63,7 @@ import com.roam.touch.channels.model.EventKind
 import com.roam.touch.channels.stt.PttState
 import com.roam.touch.channels.stt.PttTarget
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 
 /**
  * One channel's thread.
@@ -68,6 +72,10 @@ import kotlinx.coroutines.flow.StateFlow
  * not just outcomes. Nothing is a wall of text, nothing is truncated so hard it is
  * useless: the hub's own `summary` is always shown, and anything with more behind it
  * gets an explicit affordance saying how much more.
+ *
+ * ⚠️ **The list shows summaries and nothing else.** "On demand" is [ReaderScreen], a
+ * screen of its own — never a card that grows into a wall of text where a glanceable
+ * list used to be.
  */
 @Composable
 fun ThreadScreen(
@@ -78,7 +86,7 @@ fun ThreadScreen(
     pttState: PttState,
     pttLevel: StateFlow<Double>,
     onBack: () -> Unit,
-    onExpand: (Event) -> Unit,
+    onRead: (Event) -> Unit,
     onPlay: (Event) -> Unit,
     onStopPlaying: () -> Unit,
     onSend: (String) -> Unit,
@@ -94,13 +102,46 @@ fun ThreadScreen(
     // the entry it confirms, so one thing he said is one row. See [ThreadEntries].
     val entries = state.entries(channel.paneId)
     val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
     var stopDialog by remember { mutableStateOf(false) }
 
-    // Follow the tail: an outcome landing while he is reading should scroll into view,
-    // because the reason he is on this screen is that he is waiting for it.
-    LaunchedEffect(entries.lastOrNull()?.id) {
-        if (entries.isNotEmpty()) listState.animateScrollToItem(entries.lastIndex)
+    // ★ See [ThreadFollow]. Follow the tail only from the tail; otherwise the list would
+    // snap to the bottom under his thumb every time the agent emitted anything.
+    val atTail by remember {
+        derivedStateOf {
+            val info = listState.layoutInfo
+            val last = info.visibleItemsInfo.lastOrNull()
+            ThreadFollow.isAtTail(
+                lastVisibleIndex = last?.index ?: -1,
+                lastVisibleBottomPx = last?.let { it.offset + it.size } ?: 0,
+                lastIndex = info.totalItemsCount - 1,
+                viewportBottomPx = info.viewportEndOffset,
+            )
+        }
     }
+
+    // Something landed while he was reading further up. Not silent — see the chip below.
+    var newBelow by remember(channel.paneId) { mutableStateOf(false) }
+
+    // ⚠️ Opening a thread is not "an event arrived": a `LazyColumn` starts at index 0, so
+    // without this the very first frame looks like he had scrolled away from the tail and
+    // the panel greeted him with "NEW BELOW" over the newest answer. Jump, don't animate —
+    // he asked for this channel, not for a tour of it.
+    var settled by remember(channel.paneId) { mutableStateOf(false) }
+    LaunchedEffect(channel.paneId, entries.isNotEmpty()) {
+        if (entries.isNotEmpty() && !settled) {
+            listState.scrollToItem(entries.lastIndex)
+            settled = true
+        }
+    }
+
+    LaunchedEffect(entries.lastOrNull()?.id) {
+        if (entries.isEmpty() || !settled) return@LaunchedEffect
+        // `atTail` is read before the scroll happens, so it describes where he was when
+        // the event arrived rather than where this effect is about to put him.
+        if (atTail) listState.animateScrollToItem(entries.lastIndex) else newBelow = true
+    }
+    LaunchedEffect(atTail) { if (atTail) newBelow = false }
 
     Column(
         Modifier
@@ -124,22 +165,41 @@ fun ThreadScreen(
                 )
             }
         } else {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.weight(1f),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                    start = 12.dp, end = 12.dp, top = 10.dp, bottom = 10.dp
-                ),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                items(entries, key = { it.id }) { entry ->
-                    EventCard(
-                        state = state,
-                        entry = entry,
-                        speaking = speakingEventId == entry.id,
-                        onExpand = { onExpand(entry.event) },
-                        onPlay = { onPlay(entry.event) },
-                        onStopPlaying = onStopPlaying,
+            Box(Modifier.weight(1f)) {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                        start = 12.dp, end = 12.dp, top = 10.dp, bottom = 10.dp
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    items(entries, key = { it.id }) { entry ->
+                        EventCard(
+                            entry = entry,
+                            speaking = speakingEventId == entry.id,
+                            onRead = { onRead(entry.event) },
+                            onPlay = { onPlay(entry.event) },
+                            onStopPlaying = onStopPlaying,
+                        )
+                    }
+                }
+
+                // ⚠️ An answer that arrives while he is reading history must not move the
+                // page, and must not be silent either. A chip, with the way to it.
+                if (newBelow) {
+                    StateChip(
+                        text = "NEW BELOW ↓",
+                        color = RoamColors.Attention,
+                        filled = true,
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(bottom = 10.dp)
+                            .clip(RoundedCornerShape(7.dp))
+                            .clickable {
+                                scope.launch { listState.animateScrollToItem(entries.lastIndex) }
+                            }
+                            .heightIn(min = 40.dp),
                     )
                 }
             }
@@ -259,23 +319,26 @@ private fun ThreadTopBar(
 }
 
 /**
- * One event. Summary always; body only when asked for.
+ * One event, as a summary. The body lives in [ReaderScreen].
  *
- * The expand affordance carries the size (`4.1k chars`) so he can decide whether to
- * open it *before* the screen fills with text — which is the difference between
- * summary-first and summary-then-surprise.
+ * The affordance carries the size (`4.1k chars`) so he can decide whether to open it
+ * *before* committing to it — which is the difference between summary-first and
+ * summary-then-surprise.
+ *
+ * ⚠️ There is deliberately no `expanded` state here any more. It used to be a
+ * `remember` inside the lazy item, which meant the `LazyColumn` destroyed it whenever
+ * the card scrolled out of the viewport: he would open a long answer, look up at the
+ * question, come back, and find it collapsed with no sign it had ever opened.
  */
 @Composable
 private fun EventCard(
-    state: ChannelsState,
     entry: ThreadEntry,
     speaking: Boolean,
-    onExpand: () -> Unit,
+    onRead: () -> Unit,
     onPlay: () -> Unit,
     onStopPlaying: () -> Unit,
 ) {
     val event = entry.event
-    var expanded by remember(event.id) { mutableStateOf(false) }
     val kind = event.kindEnum
     val mine = kind == EventKind.SENT
     val accent = accentFor(entry)
@@ -292,10 +355,7 @@ private fun EventCard(
                 color = accent.copy(alpha = if (kind == EventKind.ERROR) 0.7f else 0.22f),
                 shape = RoundedCornerShape(11.dp),
             )
-            .clickable {
-                if (!expanded && state.needsExpansion(event)) onExpand()
-                if (event.hasMore()) expanded = !expanded
-            }
+            .clickable(enabled = event.hasMore(), onClick = onRead)
             .padding(12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -347,11 +407,8 @@ private fun EventCard(
 
         Spacer(Modifier.height(8.dp))
         Text(
-            text = if (expanded) state.bodyOf(event).trim().ifBlank { event.displaySummary() }
-            else event.displaySummary(),
-            style = if (expanded) MaterialTheme.typography.bodyMedium.copy(
-                fontFamily = FontFamily.SansSerif
-            ) else MaterialTheme.typography.bodyLarge,
+            text = event.displaySummary(),
+            style = MaterialTheme.typography.bodyLarge,
             color = if (kind == EventKind.ERROR) RoamColors.Alarm else RoamColors.TextPrimary,
         )
 
@@ -364,20 +421,19 @@ private fun EventCard(
             )
         }
 
+        // ★ The only affordance, and it is a verb: this opens the message. Filled rather
+        // than outlined because it is the one thing on the card he is meant to press, and
+        // it carries the size so "how much am I committing to" is answered before the tap.
         if (event.hasMore()) {
             Spacer(Modifier.height(9.dp))
-            val loading = expanded && state.needsExpansion(event)
             StateChip(
-                text = when {
-                    loading -> "loading…"
-                    expanded -> "show summary"
-                    else -> "full text · ${Format.chars(event.bodyChars)}"
-                },
+                text = "READ ALL · ${Format.chars(event.bodyChars)}",
                 color = RoamColors.Attention,
-                modifier = Modifier.clickable {
-                    if (!expanded && state.needsExpansion(event)) onExpand()
-                    expanded = !expanded
-                },
+                filled = true,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(7.dp))
+                    .clickable(onClick = onRead)
+                    .heightIn(min = 40.dp),
             )
         }
     }
@@ -406,7 +462,7 @@ internal fun accentFor(entry: ThreadEntry): Color =
 private val ThreadEntry.advanced: Boolean
     get() = delivered && event.controlKey == null
 
-private fun kindLabel(event: Event): String =
+internal fun kindLabel(event: Event): String =
     event.controlKey?.label ?: when (event.kindEnum) {
         EventKind.SENT -> "YOU"
         EventKind.RECEIPT -> "PROMPT"
@@ -420,7 +476,7 @@ private fun kindLabel(event: Event): String =
         EventKind.OTHER -> event.kind.uppercase().take(12)
     }
 
-private fun accentFor(kind: EventKind): Color = when (kind) {
+internal fun accentFor(kind: EventKind): Color = when (kind) {
     EventKind.OUTCOME -> RoamColors.Working
     EventKind.ERROR, EventKind.CLOSED -> RoamColors.Alarm
     EventKind.SENT -> RoamColors.Attention

@@ -78,6 +78,14 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
     var openPane by remember { mutableStateOf<String?>(null) }
     var toast by remember { mutableStateOf<Toast?>(null) }
 
+    // ★★ The message he is reading in full, by id.
+    //
+    // ⚠️ It lives **here**, above the thread list, and that placement is the fix rather
+    // than an implementation detail: the old in-place expansion kept its state inside a
+    // `LazyColumn` item, so scrolling the card off screen disposed it and silently
+    // collapsed the answer. Nothing in the list can reach this.
+    var readingEventId by remember { mutableStateOf<Long?>(null) }
+
     // --- the headset as a control surface ---------------------------------
     val controls = Roam.controls
     val headset by controls.active.collectAsStateWithLifecycle()
@@ -129,8 +137,13 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
     // open mic must not survive the screen that opened it, and a transcript confirmed
     // against a channel he has walked away from is exactly the mis-routing the confirm
     // step exists to prevent.
-    BackHandler(enabled = openPane != null || screen != Screen.Channels) {
+    BackHandler(enabled = readingEventId != null || openPane != null || screen != Screen.Channels) {
         when {
+            // ⚠️ The reader unwinds to the thread it came from, not to Channels: he
+            // opened it from a conversation he is still in the middle of. Speech is
+            // deliberately left running — walking away from the text while still
+            // listening to it is the point of having both.
+            readingEventId != null -> readingEventId = null
             openPane != null -> { openPane = null; vm.stopSpeaking(); vm.pttCancel() }
             else -> screen = Screen.Channels
         }
@@ -192,8 +205,24 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
         onDispose { controls.surface = null }
     }
 
+    // The event being read, resolved fresh each frame so the expanded body landing from
+    // `GET /events/{id}` reaches the open reader.
+    val reading = readingEventId?.let { id ->
+        state.thread(openPane.orEmpty()).firstOrNull { it.id == id }
+    }
+
     Box(Modifier.fillMaxSize()) {
-        if (channel != null) {
+        if (channel != null && reading != null) {
+            ReaderScreen(
+                state = state,
+                channel = channel,
+                event = reading,
+                speaking = speakingEventId == reading.id,
+                onBack = { readingEventId = null },
+                onPlay = { vm.play(reading) },
+                onStopPlaying = vm::stopSpeaking,
+            )
+        } else if (channel != null) {
             ThreadScreen(
                 state = state,
                 channel = channel,
@@ -202,7 +231,10 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
                 pttState = pttState,
                 pttLevel = vm.pttLevel,
                 onBack = { openPane = null; vm.stopSpeaking(); vm.pttCancel() },
-                onExpand = vm::expand,
+                // ⚠️ The fetch is kicked off with the navigation, not after it: a body
+                // trimmed to 4 KiB in transit must be made whole before he can mistake
+                // its tail for the end of the answer. `expand` is a no-op otherwise.
+                onRead = { event -> vm.expand(event); readingEventId = event.id },
                 onPlay = vm::play,
                 onStopPlaying = vm::stopSpeaking,
                 onSend = { vm.send(channel.paneId, it) },

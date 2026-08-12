@@ -5,6 +5,7 @@ import com.roam.touch.channels.net.HubApi
 import com.roam.touch.channels.net.HubConfig
 import com.roam.touch.channels.net.HubSocket
 import com.roam.touch.channels.tts.Speaker
+import com.roam.touch.channels.tts.Speech
 import com.roam.touch.channels.tts.Utterance
 import com.roam.touch.channels.ui.ChannelsViewModel
 import kotlinx.coroutines.CoroutineScope
@@ -23,6 +24,7 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -36,8 +38,8 @@ private class FakeSpeaker : Speaker {
     override val speakingEventId: StateFlow<Long?> = _id
     var stopped = 0
 
-    override fun play(event: Event, channelLabel: String) {
-        spoken += event.id to Utterance.of(channelLabel, event)
+    override fun play(event: Event, channelLabel: String, body: String) {
+        spoken += event.id to Utterance.of(channelLabel, event, body)
         _id.value = event.id
     }
 
@@ -219,10 +221,25 @@ class SpeechPolicyTest {
 class UtteranceTest {
 
     @Test
-    fun `the label comes first, then the hub's own summary`() {
-        val e = Fx.event(id = 1, kind = "outcome", body = "long body",
+    fun `the label comes first, then the message itself`() {
+        val e = Fx.event(id = 1, kind = "outcome", body = "The suite is green.",
             summary = "The suite is green.")
         assertEquals("Augment things. The suite is green.", Utterance.of("✳ Augment things", e))
+    }
+
+    /**
+     * ★★ The regression that matters most here: the summary is the *glance*, and play is
+     * not a glance. Speaking `summary` is what made the voice stop in the same place the
+     * screen did — *"the TTS also cuts off there."*
+     */
+    @Test
+    fun `play speaks the body, not the shorter summary the hub sent alongside it`() {
+        val e = Fx.event(
+            id = 1, kind = "outcome",
+            body = "First sentence. Second sentence, which the summary never carried.",
+            summary = "First sentence.…",
+        )
+        assertTrue(Utterance.of("x", e).endsWith("which the summary never carried."))
     }
 
     @Test
@@ -238,12 +255,37 @@ class UtteranceTest {
         assertTrue(Utterance.of("✳ Augment things", e).startsWith("Error in Augment things"))
     }
 
+    /**
+     * ⚠️ The API.md rule survives in the form that actually matters: **nothing is
+     * summarised client-side.** Markdown scaffolding is removed so Piper does not read
+     * hashes and backticks aloud, but every word is still there — this strips, it never
+     * chooses. Dropping content client-side is the bug, wearing a different hat.
+     */
     @Test
-    fun `the summary is never re-derived client-side`() {
-        // API.md: one implementation, so the panel and the voice say the same thing.
-        val e = Fx.event(id = 3, kind = "outcome",
-            body = "# Heading\n\nlots of markdown", summary = "hub says this")
-        assertTrue(Utterance.of("x", e).endsWith("hub says this"))
+    fun `nothing is summarised client-side — only the markdown is taken out`() {
+        val e = Fx.event(
+            id = 3, kind = "outcome",
+            body = "# Heading\n\n**Every** word `survives` the [strip](http://x/y).",
+            summary = "hub says this",
+        )
+        val spoken = Utterance.of("x", e)
+        assertTrue(spoken.contains("Heading"))
+        assertTrue(spoken.contains("Every word survives the strip."))
+        assertFalse("markdown syntax must not be read aloud", spoken.contains("**"))
+        assertFalse("a spoken URL is noise", spoken.contains("http"))
+    }
+
+    /** A code block is content he asked to hear, not decoration to be dropped. */
+    @Test
+    fun `a fenced code block keeps its code and loses its fences`() {
+        val e = Fx.event(
+            id = 7, kind = "outcome",
+            body = "Here:\n```bash\nmake p2-flash\n```\nthat is all.",
+            summary = "Here: [code, 1 line] that is all.",
+        )
+        val spoken = Utterance.of("", e)
+        assertTrue(spoken.contains("make p2-flash"))
+        assertFalse(spoken.contains("```"))
     }
 
     @Test
@@ -257,9 +299,17 @@ class UtteranceTest {
         assertEquals("done", Utterance.of("◑✳", e))
     }
 
+    /**
+     * ⚠️ The bound is a guard against a pathological payload, not a message cap — so it
+     * has to be well clear of a real answer. A 6000-character outcome is ordinary on
+     * `%0` and must arrive whole; only something absurd gets cut.
+     */
     @Test
-    fun `a rambling body is bounded`() {
-        val e = Fx.event(id = 6, kind = "outcome", body = "x".repeat(5_000), summary = "")
-        assertTrue(Utterance.of("", e).length <= Utterance.MAX_CHARS)
+    fun `a real answer is spoken whole, and only an absurd one is bounded`() {
+        val real = Fx.event(id = 6, kind = "outcome", body = "word ".repeat(1_200), summary = "s")
+        assertEquals(Speech.plain("word ".repeat(1_200)), Utterance.of("", real))
+
+        val absurd = Fx.event(id = 7, kind = "outcome", body = "x".repeat(80_000), summary = "")
+        assertTrue(Utterance.of("", absurd).length <= Utterance.MAX_CHARS)
     }
 }
