@@ -290,8 +290,12 @@ USB_FLARE = 5.0            # per side, so a ~10 mm spread down to the opening
 # spanning the whole face with the port at its centre. The loft tapers to
 # nothing at the edges, so it never breaches the 2.4 mm plate -- it reads as a
 # machined scoop rather than a punched hole with a chamfer round it.
-TROUGH_INSET = 3.0         # margin left at each end of the face
-TROUGH_H = 11.0            # trough height at the outer face
+# ⚠️ The mouth is centred on the FACE, the port is not: the cap face spans
+# Z -CAP_CLR..OUT_H+CAP_CLR+CAP_W (centre 7.7) while USB_Z is 6.45. Centring
+# the mouth on the port left 3.75 mm at the top and 1.25 at the bottom, which
+# reads as a mistake. Lofting a face-centred mouth to a port-centred throat
+# skews it slightly, which is the intent.
+TROUGH_INSET = 0.8         # margin left all round -- near edge to edge
 
 # Dimples in the tray's outer side walls. TRUNCATED CONES, not cylinders and
 # not spheres: a cylinder presents a sharp edge square to the travel direction
@@ -320,9 +324,12 @@ cap -= Pos(0, -CAP_T - EPS, USB_Z) * Rot(-90, 0, 0) * extrude(
 # ⚠️ Built as a LOFT, not extrude(taper=). OCCT's extrude_taper throws
 # Standard_TypeMismatch on a rounded profile at this angle (~64 deg).
 _cap_half_w = OUT_W / 2 + CAP_CLR + CAP_W
+_face_z0, _face_z1 = -CAP_CLR, OUT_H + CAP_CLR + CAP_W
+_face_zc = (_face_z0 + _face_z1) / 2
+_trough_h = (_face_z1 - _face_z0) - 2 * TROUGH_INSET
 cap -= loft([
-    Plane(origin=(0, -CAP_T - EPS, USB_Z), x_dir=(1, 0, 0), z_dir=(0, 1, 0))
-    * RectangleRounded(2 * (_cap_half_w - TROUGH_INSET), TROUGH_H, 2.0),
+    Plane(origin=(0, -CAP_T - EPS, _face_zc), x_dir=(1, 0, 0), z_dir=(0, 1, 0))
+    * RectangleRounded(2 * (_cap_half_w - TROUGH_INSET), _trough_h, 2.0),
     Plane(origin=(0, EPS, USB_Z), x_dir=(1, 0, 0), z_dir=(0, 1, 0))
     * RectangleRounded(USB_W, USB_H, USB_H / 2 - 0.01),
 ])
