@@ -41,15 +41,30 @@ interface PcmSource {
  * so streaming would only overlap a ~100 ms upload over the tailnet while keeping a
  * socket open for as long as a thumb stays down. A minute of speech is 1.9 MB.
  *
- * ⚠️ [MediaRecorder.AudioSource.VOICE_RECOGNITION], not `MIC`: it is the one source
- * Android guarantees will not have the "assistant" processing chain or an unpredictable
- * AGC applied, which is what an ASR model wants to be handed.
+ * ⚠️⚠️⚠️ **[MediaRecorder.AudioSource.VOICE_RECOGNITION] IS LOAD-BEARING. DO NOT CHANGE
+ * IT.** It is not a preference about AGC — it is the only source on this handset that
+ * actually reaches the Bluetooth headset microphone, which is the only working microphone
+ * this device has.
  *
- * ★ Measured on sailfish 2026-08-12, so nobody swaps it hoping for a cure: `MIC`,
- * `DEFAULT`, `VOICE_COMMUNICATION`, `UNPROCESSED` and `CAMCORDER` route to five
- * different `snd_device`s (handset-mic, speaker-dmic-endfire, unprocessed-mic,
- * camcorder-mic) and **all five fail identically** to this one. The source is not a
- * lever on that device.
+ * ★★ **The trap it defuses, measured on sailfish 2026-08-12.** `startBluetoothSco()` +
+ * `setBluetoothScoOn(true)` sets the routing policy correctly and
+ * `AudioRecord.getRoutedDevice()` will then report `BLUETOOTH_SCO` — **while the HAL
+ * quietly opens the dead built-in mic anyway.** This Qualcomm HAL derives the capture
+ * `snd_device` from the **output** device for `MIC`, `VOICE_COMMUNICATION` and `DEFAULT`,
+ * so all three land back on `speaker-mic` with SCO forced and up, and look for all the
+ * world like "the headset doesn't work either". Only `VOICE_RECOGNITION` selects
+ * `70: bt-sco-mic-wb`: 48640 frames, 0 muted, 0 errors, peak −6.2 dBFS, against
+ * 2560/2560 muted and −inf from every source on the built-in codec in the same run.
+ *
+ * ⚠️ **Never verify this with `getRoutedDevice()`** — it lies here, and it is the reason
+ * the fault took an evening. The evidence is `adb logcat | grep select_devices`, and the
+ * `snd_device` in it must read `70: bt-sco-mic-wb`.
+ *
+ * ★ Measured 2026-08-12, so nobody swaps it hoping for a cure on the *built-in* path
+ * either: `MIC`, `DEFAULT`, `VOICE_COMMUNICATION`, `UNPROCESSED` and `CAMCORDER` route to
+ * five different `snd_device`s (handset-mic, speaker-dmic-endfire, unprocessed-mic,
+ * camcorder-mic) and **all five fail identically**. The source is not a lever there.
+ * It is the only lever that matters here.
  */
 class MicRecorder(
     private val onLevel: (Double) -> Unit = {},
@@ -302,6 +317,9 @@ private fun openAudioRecord(): PcmSource? {
     val size = MicRecorder.bufferFor(minBuf)
     val rec = try {
         AudioRecord(
+            // ⚠️⚠️ DO NOT "improve" this to MIC/VOICE_COMMUNICATION/DEFAULT. Those three
+            // silently fall back to the dead built-in mic even with SCO up — see the
+            // class doc. This is the only source that reaches bt-sco-mic-wb.
             MediaRecorder.AudioSource.VOICE_RECOGNITION,
             Pcm.RATE,
             AudioFormat.CHANNEL_IN_MONO,

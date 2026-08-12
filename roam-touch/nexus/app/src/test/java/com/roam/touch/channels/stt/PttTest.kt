@@ -17,20 +17,37 @@ import java.io.IOException
 import kotlin.math.sin
 import kotlin.math.PI
 
-/** A microphone that records nothing but remembers exactly when it was asked to. */
+/**
+ * A microphone that records nothing but remembers exactly when it was asked to.
+ *
+ * ⚠️ **Every counter is `@Volatile`, and that is not decoration.** A press now brings a
+ * Bluetooth link up before it opens anything, so `start()` is called from the controller's
+ * own coroutine while the test asserts from another thread. Without a barrier the
+ * assertion can read a stale zero forever — which is exactly how `PttPolicyTest` began
+ * failing one run in two, on code that was correct.
+ */
 class FakeRecorder(private var next: Recording = speech()) : Recorder {
+    @Volatile
     var starts = 0
         private set
+
+    @Volatile
     var stops = 0
         private set
+
+    @Volatile
     var discards = 0
         private set
 
     /** ⚠️ Must always be zero: one press, one recorder. */
+    @Volatile
     var overlappingStarts = 0
         private set
+
+    @Volatile
     var refuse = false
 
+    @Volatile
     override var recording: Boolean = false
         private set
 
@@ -130,17 +147,47 @@ class PttTest {
 
     private fun mic() = FakeRecorder()
 
+    /**
+     * A headset that is present and comes up instantly.
+     *
+     * ⚠️ Instant on purpose: this file is about everything *downstream* of the link —
+     * gates, confirmation, routing. The link itself, the ~600 ms it really costs and
+     * what happens when it is missing are pinned in [HeadsetPttTest], which is where a
+     * change to that behaviour should break.
+     */
+    private fun link() = FakeHeadset().also { it.setupMs = 0 }
+
+    private fun newPtt(
+        recorder: Recorder,
+        stt: SttClient,
+        scope: CoroutineScope,
+        clock: () -> Long = System::currentTimeMillis,
+    ): Ptt = Ptt(recorder, stt, scope, link(), clock)
+
+    /**
+     * Thumb down, and let the press get as far as it can without the clock moving.
+     *
+     * ⚠️ [Ptt.press] is asynchronous now — it has a headset link to bring up before a
+     * microphone opens — so a bare `press()` on a [StandardTestDispatcher] has not
+     * reached `Listening` yet. That is real behaviour, not a test artifact: the wearer
+     * sees `Connecting` first.
+     */
+    private fun Ptt.hold(target: PttTarget) {
+        press(target)
+        dispatcher.scheduler.runCurrent()
+    }
+
     // --- the happy path -----------------------------------------------------
 
     @Test
     fun `press listens, release transcribes, and the result awaits confirmation`() = runTest(dispatcher) {
         val rec = mic()
         val stt = FakeStt("run the test suite")
-        val ptt = Ptt(rec, stt, scope) { 1_000L }
+        val ptt = newPtt(rec, stt, scope) { 1_000L }
 
         assertEquals(PttState.Idle, ptt.state.value)
 
-        ptt.press(augment)
+        ptt.hold(augment)
         assertEquals(1, rec.starts)
         assertTrue(rec.recording)
         assertEquals(PttState.Listening(augment, 1_000L), ptt.state.value)
@@ -156,8 +203,8 @@ class PttTest {
 
     @Test
     fun `confirm hands over the words and the pane they were spoken to`() = runTest(dispatcher) {
-        val ptt = Ptt(mic(), FakeStt("continue"), scope)
-        ptt.press(roam)
+        val ptt = newPtt(mic(), FakeStt("continue"), scope)
+        ptt.hold(roam)
         ptt.release()
         advanceUntilIdle()
 
@@ -178,9 +225,9 @@ class PttTest {
      */
     @Test
     fun `the destination is the one that was on screen when he started talking`() = runTest(dispatcher) {
-        val ptt = Ptt(mic(), FakeStt("deploy it"), scope)
+        val ptt = newPtt(mic(), FakeStt("deploy it"), scope)
 
-        ptt.press(augment)
+        ptt.hold(augment)
         ptt.release()
         advanceUntilIdle()
         assertEquals(augment, (ptt.state.value as PttState.Confirming).target)
@@ -189,7 +236,7 @@ class PttTest {
 
         // A second press, on a different channel, routes to that one — and only from
         // the press, which is the only place a target is ever taken from.
-        ptt.press(roam)
+        ptt.hold(roam)
         ptt.release()
         advanceUntilIdle()
         assertEquals("%3", ptt.confirm()!!.paneId)
@@ -197,8 +244,8 @@ class PttTest {
 
     @Test
     fun `send cannot fire twice for one sentence`() = runTest(dispatcher) {
-        val ptt = Ptt(mic(), FakeStt("yes"), scope)
-        ptt.press(augment)
+        val ptt = newPtt(mic(), FakeStt("yes"), scope)
+        ptt.hold(augment)
         ptt.release()
         advanceUntilIdle()
 
@@ -218,9 +265,9 @@ class PttTest {
     fun `silence is never sent to whisper at all`() = runTest(dispatcher) {
         val rec = mic().also { it.willCapture(FakeRecorder.silence()) }
         val stt = FakeStt("Smart home commands.")
-        val ptt = Ptt(rec, stt, scope)
+        val ptt = newPtt(rec, stt, scope)
 
-        ptt.press(augment)
+        ptt.hold(augment)
         ptt.release()
         advanceUntilIdle()
 
@@ -244,9 +291,9 @@ class PttTest {
             var now = 1_000L
             val rec = mic().also { it.willCapture(FakeRecorder.speech(ms = 240)) }
             val stt = FakeStt()
-            val ptt = Ptt(rec, stt, scope) { now }
+            val ptt = newPtt(rec, stt, scope) { now }
 
-            ptt.press(augment)
+            ptt.hold(augment)
             now += 5_000L          // a five-second hold
             ptt.release()
             advanceUntilIdle()
@@ -279,9 +326,9 @@ class PttTest {
             // 120 ms of zeroes: exactly what a 3449 ms press returned on the device.
             val rec = mic().also { it.willCapture(Recording(ByteArray(3_840))) }
             val stt = FakeStt()
-            val ptt = Ptt(rec, stt, scope) { now }
+            val ptt = newPtt(rec, stt, scope) { now }
 
-            ptt.press(augment)
+            ptt.hold(augment)
             now += 3_449L
             ptt.release()
             advanceUntilIdle()
@@ -305,9 +352,9 @@ class PttTest {
         runTest(dispatcher) {
             var now = 1_000L
             val rec = mic().also { it.willCapture(FakeRecorder.speech(ms = 240)) }
-            val ptt = Ptt(rec, FakeStt(), scope) { now }
+            val ptt = newPtt(rec, FakeStt(), scope) { now }
 
-            ptt.press(augment)
+            ptt.hold(augment)
             now += 5_000L
             ptt.release()
             advanceUntilIdle()
@@ -322,9 +369,9 @@ class PttTest {
     fun `a genuinely short press is still reported as a short press`() = runTest(dispatcher) {
         var now = 1_000L
         val rec = mic().also { it.willCapture(FakeRecorder.speech(ms = 120)) }
-        val ptt = Ptt(rec, FakeStt(), scope) { now }
+        val ptt = newPtt(rec, FakeStt(), scope) { now }
 
-        ptt.press(augment)
+        ptt.hold(augment)
         now += 130L            // he really did just brush it
         ptt.release()
         advanceUntilIdle()
@@ -336,9 +383,9 @@ class PttTest {
     fun `a fumbled tap is rejected on duration before anything is transcribed`() = runTest(dispatcher) {
         val rec = mic().also { it.willCapture(FakeRecorder.speech(ms = 100)) }
         val stt = FakeStt()
-        val ptt = Ptt(rec, stt, scope)
+        val ptt = newPtt(rec, stt, scope)
 
-        ptt.press(augment)
+        ptt.hold(augment)
         ptt.release()
         advanceUntilIdle()
 
@@ -348,8 +395,8 @@ class PttTest {
 
     @Test
     fun `an empty transcript is a failure, not an empty confirmation`() = runTest(dispatcher) {
-        val ptt = Ptt(mic(), FakeStt(reply = "   "), scope)
-        ptt.press(augment)
+        val ptt = newPtt(mic(), FakeStt(reply = "   "), scope)
+        ptt.hold(augment)
         ptt.release()
         advanceUntilIdle()
         assertEquals(PttState.Failed(Ptt.NOTHING_HEARD), ptt.state.value)
@@ -360,13 +407,13 @@ class PttTest {
     @Test
     fun `an unreachable whisper is distinguishable from a refused one`() = runTest(dispatcher) {
         val unreachable = FakeStt().also { it.fail = IOException("connect timed out") }
-        val ptt = Ptt(mic(), unreachable, scope)
-        ptt.press(augment); ptt.release(); advanceUntilIdle()
+        val ptt = newPtt(mic(), unreachable, scope)
+        ptt.hold(augment); ptt.release(); advanceUntilIdle()
         assertEquals(PttState.Failed(Ptt.WHISPER_UNREACHABLE), ptt.state.value)
 
         val refused = FakeStt().also { it.fail = SttException("model not loaded") }
-        val ptt2 = Ptt(mic(), refused, scope)
-        ptt2.press(augment); ptt2.release(); advanceUntilIdle()
+        val ptt2 = newPtt(mic(), refused, scope)
+        ptt2.hold(augment); ptt2.release(); advanceUntilIdle()
         assertEquals(PttState.Failed("model not loaded"), ptt2.state.value)
     }
 
@@ -374,8 +421,8 @@ class PttTest {
     fun `a microphone that will not open says so instead of silently doing nothing`() =
         runTest(dispatcher) {
             val rec = mic().also { it.refuse = true }
-            val ptt = Ptt(rec, FakeStt(), scope)
-            ptt.press(augment)
+            val ptt = newPtt(rec, FakeStt(), scope)
+            ptt.hold(augment)
             assertEquals(PttState.Failed(Ptt.NO_MIC), ptt.state.value)
             ptt.release()
             assertEquals("release on a mic that never opened is a no-op",
@@ -385,8 +432,8 @@ class PttTest {
     @Test
     fun `a failure clears without starting anything`() = runTest(dispatcher) {
         val rec = mic().also { it.refuse = true }
-        val ptt = Ptt(rec, FakeStt(), scope)
-        ptt.press(augment)
+        val ptt = newPtt(rec, FakeStt(), scope)
+        ptt.hold(augment)
         ptt.clear()
         assertEquals(PttState.Idle, ptt.state.value)
         assertEquals("clearing a message must not open a mic", 0, rec.starts)
@@ -403,12 +450,12 @@ class PttTest {
     fun `a fumbled redo returns the original transcript with the reason attached`() =
         runTest(dispatcher) {
             val rec = mic()
-            val ptt = Ptt(rec, FakeStt("run the test suite"), scope)
-            ptt.press(augment); ptt.release(); advanceUntilIdle()
+            val ptt = newPtt(rec, FakeStt("run the test suite"), scope)
+            ptt.hold(augment); ptt.release(); advanceUntilIdle()
             assertEquals(PttState.Confirming(augment, "run the test suite"), ptt.state.value)
 
             rec.willCapture(FakeRecorder.speech(ms = 80))
-            ptt.press(augment); ptt.release(); advanceUntilIdle()
+            ptt.hold(augment); ptt.release(); advanceUntilIdle()
 
             assertEquals(
                 PttState.Confirming(augment, "run the test suite", error = Ptt.TOO_SHORT),
@@ -420,11 +467,11 @@ class PttTest {
     fun `a redo that works replaces the transcript outright`() = runTest(dispatcher) {
         val rec = mic()
         val stt = FakeStt("run the tests")
-        val ptt = Ptt(rec, stt, scope)
-        ptt.press(augment); ptt.release(); advanceUntilIdle()
+        val ptt = newPtt(rec, stt, scope)
+        ptt.hold(augment); ptt.release(); advanceUntilIdle()
 
         stt.reply = "run the tests and deploy"
-        ptt.press(augment); ptt.release(); advanceUntilIdle()
+        ptt.hold(augment); ptt.release(); advanceUntilIdle()
         assertEquals(
             PttState.Confirming(augment, "run the tests and deploy"),
             ptt.state.value,
@@ -437,8 +484,8 @@ class PttTest {
      */
     @Test
     fun `a refused send returns the transcript to the confirm step`() = runTest(dispatcher) {
-        val ptt = Ptt(mic(), FakeStt("continue"), scope)
-        ptt.press(augment); ptt.release(); advanceUntilIdle()
+        val ptt = newPtt(mic(), FakeStt("continue"), scope)
+        ptt.hold(augment); ptt.release(); advanceUntilIdle()
         ptt.confirm()
 
         ptt.sendFailed("pane is gone")
@@ -455,8 +502,8 @@ class PttTest {
     @Test
     fun `cancel from listening closes the mic and keeps nothing`() = runTest(dispatcher) {
         val rec = mic()
-        val ptt = Ptt(rec, FakeStt(), scope)
-        ptt.press(augment)
+        val ptt = newPtt(rec, FakeStt(), scope)
+        ptt.hold(augment)
         ptt.cancel()
         assertEquals(1, rec.discards)
         assertTrue(!rec.recording)
@@ -465,8 +512,8 @@ class PttTest {
 
     @Test
     fun `cancel from a pending confirmation drops the transcript`() = runTest(dispatcher) {
-        val ptt = Ptt(mic(), FakeStt("delete everything"), scope)
-        ptt.press(augment); ptt.release(); advanceUntilIdle()
+        val ptt = newPtt(mic(), FakeStt("delete everything"), scope)
+        ptt.hold(augment); ptt.release(); advanceUntilIdle()
         ptt.cancel()
         assertEquals(PttState.Idle, ptt.state.value)
         assertNull("nothing is left to send", ptt.confirm())
@@ -474,8 +521,8 @@ class PttTest {
 
     @Test
     fun `cancel while transcribing abandons the result`() = runTest(dispatcher) {
-        val ptt = Ptt(mic(), FakeStt("something"), scope)
-        ptt.press(augment)
+        val ptt = newPtt(mic(), FakeStt("something"), scope)
+        ptt.hold(augment)
         ptt.release()
         assertEquals(PttState.Transcribing(augment), ptt.state.value)
         ptt.cancel()
@@ -490,8 +537,8 @@ class PttTest {
     @Test
     fun `a press that is never released still ends, and keeps what it heard`() = runTest(dispatcher) {
         val rec = mic()
-        val ptt = Ptt(rec, FakeStt("a long dictation"), scope) { 0L }
-        ptt.press(augment)
+        val ptt = newPtt(rec, FakeStt("a long dictation"), scope) { 0L }
+        ptt.hold(augment)
 
         advanceTimeBy(Ptt.MAX_MS - 1_000)
         assertTrue("still listening before the cap", ptt.state.value is PttState.Listening)
@@ -506,9 +553,9 @@ class PttTest {
     @Test
     fun `a second press while listening does not open a second mic`() = runTest(dispatcher) {
         val rec = mic()
-        val ptt = Ptt(rec, FakeStt(), scope)
-        ptt.press(augment)
-        ptt.press(roam)
+        val ptt = newPtt(rec, FakeStt(), scope)
+        ptt.hold(augment)
+        ptt.hold(roam)
         assertEquals(1, rec.starts)
         rec.assertNoOverlap()
         assertEquals(augment, (ptt.state.value as PttState.Listening).target)
@@ -522,9 +569,9 @@ class PttTest {
     @Test
     fun `a press repeated during a hold never reopens the mic`() = runTest(dispatcher) {
         val rec = mic()
-        val ptt = Ptt(rec, FakeStt("still here"), scope)
-        ptt.press(augment)
-        repeat(40) { ptt.press(augment) }
+        val ptt = newPtt(rec, FakeStt("still here"), scope)
+        ptt.hold(augment)
+        repeat(40) { ptt.hold(augment) }
 
         assertEquals("one press, one recorder", 1, rec.starts)
         rec.assertNoOverlap()
@@ -539,22 +586,22 @@ class PttTest {
     @Test
     fun `a press while transcribing or sending is ignored`() = runTest(dispatcher) {
         val rec = mic()
-        val ptt = Ptt(rec, FakeStt("hello"), scope)
-        ptt.press(augment)
+        val ptt = newPtt(rec, FakeStt("hello"), scope)
+        ptt.hold(augment)
         ptt.release()
-        ptt.press(roam)
+        ptt.hold(roam)
         assertEquals("no mic during transcription", 1, rec.starts)
 
         advanceUntilIdle()
         ptt.confirm()
-        ptt.press(roam)
+        ptt.hold(roam)
         assertEquals("no mic during a send", 1, rec.starts)
     }
 
     @Test
     fun `release without a press does nothing at all`() = runTest(dispatcher) {
         val rec = mic()
-        val ptt = Ptt(rec, FakeStt(), scope)
+        val ptt = newPtt(rec, FakeStt(), scope)
         ptt.release()
         assertEquals(PttState.Idle, ptt.state.value)
         assertEquals(0, rec.stops)
@@ -569,12 +616,12 @@ class PttTest {
      */
     @Test
     fun `the level is carried beside the state, never inside it`() = runTest(dispatcher) {
-        val ptt = Ptt(mic(), FakeStt(), scope) { 5L }
+        val ptt = newPtt(mic(), FakeStt(), scope) { 5L }
         ptt.onLevel(-22.0)
         assertEquals("no level outside listening", Pcm.FLOOR_DBFS, ptt.level.value, 0.001)
         assertEquals(PttState.Idle, ptt.state.value)
 
-        ptt.press(augment)
+        ptt.hold(augment)
         val listening = ptt.state.value
         ptt.onLevel(-22.0)
         assertEquals(-22.0, ptt.level.value, 0.001)
@@ -596,8 +643,8 @@ class PttTest {
         val captured = FakeRecorder.speech(ms = 1_500)
         val rec = mic().also { it.willCapture(captured) }
         val stt = FakeStt()
-        val ptt = Ptt(rec, stt, scope)
-        ptt.press(augment); ptt.release(); advanceUntilIdle()
+        val ptt = newPtt(rec, stt, scope)
+        ptt.hold(augment); ptt.release(); advanceUntilIdle()
 
         assertEquals(Pcm.RATE, stt.lastAudio!!.rate)
         assertEquals(1_500L, stt.lastAudio!!.durationMs)

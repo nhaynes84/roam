@@ -55,13 +55,14 @@ fun ChannelListScreen(
     onOpen: (Channel) -> Unit,
     onOpenApps: () -> Unit,
     onOpenHomeAssistant: () -> Unit,
+    onOpenControls: () -> Unit,
 ) {
     Column(
         Modifier
             .fillMaxSize()
             .background(RoamColors.Background)
     ) {
-        ListTopBar(state, battery, onOpenApps, onOpenHomeAssistant)
+        ListTopBar(state, battery, onOpenApps, onOpenHomeAssistant, onOpenControls)
         LinkBanner(link, nowMs)
 
         val ordered = Queue.order(state, nowMs)
@@ -104,6 +105,7 @@ private fun ListTopBar(
     battery: BatteryState,
     onOpenApps: () -> Unit,
     onOpenHomeAssistant: () -> Unit,
+    onOpenControls: () -> Unit,
 ) {
     Row(
         Modifier
@@ -126,6 +128,9 @@ private fun ListTopBar(
         Spacer(Modifier.weight(1f))
         ActionChip("HA", RoamColors.Attention, onClick = onOpenHomeAssistant)
         ActionChip("APPS", RoamColors.TextSecondary, onClick = onOpenApps)
+        // ⚠️ Reachable without a headset connected, on purpose: he will want to change a
+        // binding sitting down, not while putting earbuds in.
+        ActionChip("BUDS", RoamColors.TextSecondary, onClick = onOpenControls)
         // No voice-mode control here. The app never speaks unless he taps play on a
         // specific message, so there is no mode to be in.
         BatteryChip(battery)

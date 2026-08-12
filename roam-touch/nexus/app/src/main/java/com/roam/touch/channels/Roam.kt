@@ -4,7 +4,10 @@ import android.content.Context
 import com.roam.touch.BuildConfig
 import com.roam.touch.channels.net.HubApi
 import com.roam.touch.channels.net.HubConfig
+import com.roam.touch.channels.controls.ControlStore
+import com.roam.touch.channels.controls.HeadsetControls
 import com.roam.touch.channels.net.HubSocket
+import com.roam.touch.channels.stt.BluetoothHeadsetLink
 import com.roam.touch.channels.stt.MicRecorder
 import com.roam.touch.channels.stt.Ptt
 import com.roam.touch.channels.stt.WyomingStt
@@ -47,6 +50,16 @@ object Roam {
         private set
 
     /**
+     * ★★ The headset's own buttons, wired to this app.
+     *
+     * ⚠️ Owned here rather than by the Activity because it must keep working while the
+     * panel is backgrounded — the phone is strapped to an arm, and a control surface that
+     * only works when he is looking at the screen defeats the point of it.
+     */
+    lateinit var controls: HeadsetControls
+        private set
+
+    /**
      * App #2. Shares nothing with the hub but the process — different server, different
      * token, different failure modes — so it gets its own repository and its own client.
      */
@@ -86,7 +99,14 @@ object Roam {
             recorder = MicRecorder(onLevel = { level -> ptt.onLevel(level) }),
             stt = WyomingStt(BuildConfig.STT_HOST, BuildConfig.STT_PORT, BuildConfig.STT_LANG),
             scope = scope,
+            // ⚠️ Not an accessory path. This handset's own microphone is dead at the
+            // HAL, so the headset link IS the microphone — see HeadsetLink.
+            headset = BluetoothHeadsetLink(app),
         )
+
+        // ⚠️ Inert until a gesture he bound arrives: the router passes every unbound key
+        // straight back to the system, so this claims nothing it was not given.
+        controls = HeadsetControls(app, ControlStore(app), scope).also { it.start() }
 
         val haConfig = HaConfig(
             baseUrl = BuildConfig.HA_URL,

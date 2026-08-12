@@ -20,6 +20,17 @@
       com.roam.touch.channels.stt.Ptt and MicPolicyTest, which fail if that changes.
     -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!--
+      ⚠️⚠️ Push to talk records from a BLUETOOTH HEADSET, not from this handset. Its own
+      analog capture is dead at the HAL (measured: every source, rate and buffer size
+      fails pcm_prepare and returns zero-filled buffers), and a headset mic is a separate
+      microphone, codec and link on the far side of that. MODIFY_AUDIO_SETTINGS is what
+      lets BluetoothHeadsetLink set MODE_IN_COMMUNICATION and bring SCO up; BLUETOOTH is
+      what lets it see whether a headset is connected at all. Without these the app can
+      only open a microphone that is known to deliver nothing.
+    -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.BLUETOOTH" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
 
     <application

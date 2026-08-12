@@ -29,6 +29,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
@@ -88,7 +89,16 @@ fun PttButton(
 ) {
     val haptics = LocalHapticFeedback.current
     val listening = state is PttState.Listening
+    val connecting = state is PttState.Connecting
     val busy = state is PttState.Transcribing || state is PttState.Sending
+
+    // ★★ The "go" buzz. The headset link costs ~600 ms, so the thumb goes down well
+    // before capture starts; without this he has to watch the screen to know when to
+    // start talking, on a device whose entire point is not having to look at it.
+    // One pulse the instant LISTENING begins — press, feel it, talk.
+    LaunchedEffect(listening) {
+        if (listening) haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+    }
 
     // ⚠️⚠️ The gesture is keyed on Unit and reads its callbacks through
     // rememberUpdatedState, so no recomposition can ever restart it mid-hold. A press
@@ -103,6 +113,9 @@ fun PttButton(
     val tint = when {
         !enabled -> RoamColors.Dead
         listening -> RoamColors.Alarm
+        // ⚠️ Connecting is deliberately NOT the listening colour. The one thing this
+        // control must never do is look like it is recording when it is not.
+        connecting -> RoamColors.Working
         busy -> RoamColors.Quiet
         state is PttState.Failed -> RoamColors.Alarm
         else -> RoamColors.Attention
@@ -123,12 +136,16 @@ fun PttButton(
         modifier = modifier
             .size(52.dp)
             .graphicsLayer {
-                val s = if (listening) pulse.value else 1f
+                val s = if (listening || connecting) pulse.value else 1f
                 scaleX = s
                 scaleY = s
             }
             .background(
-                if (listening) RoamColors.Alarm.copy(alpha = 0.22f) else RoamColors.SurfaceRaised,
+                when {
+                    listening -> RoamColors.Alarm.copy(alpha = 0.22f)
+                    connecting -> RoamColors.Working.copy(alpha = 0.18f)
+                    else -> RoamColors.SurfaceRaised
+                },
                 CircleShape,
             )
             .border(if (listening) 2.dp else 1.dp, tint.copy(alpha = 0.75f), CircleShape)
@@ -148,6 +165,7 @@ fun PttButton(
                 contentDescription = when {
                     !enabled -> "push to talk unavailable, the pane is dead"
                     listening -> "listening, release to send to transcription"
+                    connecting -> "connecting to your headset, keep holding"
                     busy -> "transcribing"
                     else -> "push to talk, hold to record"
                 }
@@ -188,6 +206,7 @@ fun PttPanel(
     if (state is PttState.Idle) return
 
     val accent = when (state) {
+        is PttState.Connecting -> RoamColors.Working
         is PttState.Listening -> RoamColors.Alarm
         is PttState.Transcribing, is PttState.Sending -> RoamColors.Quiet
         is PttState.Confirming -> if (state.error != null) RoamColors.Alarm else RoamColors.Attention
@@ -205,6 +224,31 @@ fun PttPanel(
         verticalArrangement = Arrangement.spacedBy(9.dp),
     ) {
         when (state) {
+            // ★★ The half-second the headset link takes, made visible instead of eaten.
+            //
+            // ⚠️ It says KEEP HOLDING, not "connecting…", because the only thing he can
+            // get wrong here is letting go — and letting go is exactly what a person
+            // does when a button appears not to have worked. There is no level meter:
+            // nothing is being captured yet, and a meter would say otherwise.
+            is PttState.Connecting -> {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TypingEllipsis(RoamColors.Working)
+                    Spacer(Modifier.width(9.dp))
+                    Text(
+                        "KEEP HOLDING · headset",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = RoamColors.Working,
+                    )
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        "wait for LISTENING",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = RoamColors.TextSecondary,
+                    )
+                }
+                Destination(channelLabel, targetLive)
+            }
+
             is PttState.Listening -> {
                 val seconds = ((nowMs - state.startedAtMs) / 1_000).coerceAtLeast(0)
                 Row(verticalAlignment = Alignment.CenterVertically) {

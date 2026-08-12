@@ -39,6 +39,20 @@ sealed interface PttState {
     data object Idle : PttState
 
     /**
+     * ★★ The thumb is down and the headset link is coming up. **Nothing is recorded yet.**
+     *
+     * ⚠️ This state exists because SCO costs about 600 ms to establish, and the
+     * alternative was to eat the first half-second of every sentence — the worst possible
+     * silent failure on a device whose entire input is speech. It is shown, it is
+     * distinct from [Listening] by colour and by word, and the transition out of it
+     * buzzes, so the wearer learns "press, feel it, talk" without watching the screen.
+     */
+    data class Connecting(
+        val target: PttTarget,
+        val startedAtMs: Long,
+    ) : PttState
+
+    /**
      * The mic is open. This is the only state in which audio is being captured.
      *
      * ⚠️ The input level is deliberately **not** here. It changes eight times a second
@@ -78,11 +92,18 @@ sealed interface PttState {
  *
  * ⚠️ **The mic opens in exactly one place: [press].** There is no wake word, no VAD, no
  * timer, no "listen while the thread is open". `MicPolicyTest` pins that.
+ *
+ * ⚠️⚠️ **The microphone is the headset's, and there is no other.** This handset's own
+ * capture is dead at the HAL — see [HeadsetLink] for the measurements — so a press with
+ * no headset connected does not open a microphone at all. It says so, specifically,
+ * because "nothing was recorded" with no reason attached is exactly the mystery failure
+ * this whole state machine exists to prevent.
  */
 class Ptt(
     private val recorder: Recorder,
     private val stt: SttClient,
     private val scope: CoroutineScope,
+    private val headset: HeadsetLink,
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
 
@@ -113,6 +134,35 @@ class Ptt(
     private var replacing: PttState.Confirming? = null
 
     /**
+     * ⚠️⚠️ **Every state transition happens under this, and it is not optional.**
+     *
+     * A press is asynchronous now — it brings the headset link up on a coroutine before it
+     * opens a microphone — so `press`, `release` and `cancel` arrive from the UI thread
+     * while the press's own coroutine is midway through starting the recorder. Without
+     * this lock there is a window between `recorder.start()` and the move to
+     * [PttState.Listening] in which a release sees `Connecting`, reports "let go too
+     * early", **and leaves the microphone running**. That is not theoretical: it made
+     * `PttPolicyTest` fail one run in three before it was closed.
+     *
+     * ⚠️ Nothing suspending may be called while holding it.
+     */
+    private val lock = Any()
+
+    /**
+     * Which press is the current one — or [NO_PRESS] when none is.
+     *
+     * ★ The coroutine a press launches outlives the press when he lets go early, so it
+     * needs to know whether it is still the one in charge. Asking the *state* would work
+     * most of the time and be wrong exactly when it matters.
+     *
+     * ⚠️ A counter, **not** the press time: [clock] is fixed in tests and can be the same
+     * millisecond twice on a device, and two presses sharing an identity is precisely the
+     * bug this exists to rule out.
+     */
+    private var currentPress: Long = NO_PRESS
+    private var pressSeq: Long = 0
+
+    /**
      * Thumb down on the PTT control, while looking at [target].
      *
      * Accepted from idle, from a failure, and from a pending confirmation — the mic
@@ -121,39 +171,102 @@ class Ptt(
      * flight and a second recording would race it.
      */
     fun press(target: PttTarget) {
-        when (val current = _state.value) {
-            is PttState.Listening, is PttState.Transcribing, is PttState.Sending -> {
-                Log.w(TAG, "PRESS ignored, already ${current.javaClass.simpleName}")
+        val press = synchronized(lock) {
+            when (val current = _state.value) {
+                is PttState.Connecting, is PttState.Listening,
+                is PttState.Transcribing, is PttState.Sending -> {
+                    Log.w(TAG, "PRESS ignored, already ${current.javaClass.simpleName}")
+                    return
+                }
+                else -> Unit
+            }
+            Log.i(TAG, "PRESS ${target.paneId}")
+            work?.cancel()
+            work = null
+            replacing = _state.value as? PttState.Confirming
+
+            // ⚠️⚠️ Asked *before* anything opens, so a headset-less press costs him
+            // nothing and tells him the one thing he can act on. Opening the handset mic
+            // here would capture 3 % of real time in zeroes and then blame the capture —
+            // true, useless, and one more evening spent looking at the wrong layer.
+            if (!headset.connected) {
+                Log.e(TAG, "PRESS with no headset — this handset has no working microphone")
+                fail(NO_HEADSET)
                 return
             }
-            else -> Unit
-        }
-        Log.i(TAG, "PRESS ${target.paneId}")
-        work?.cancel()
-        work = null
-        replacing = _state.value as? PttState.Confirming
-        if (!recorder.start()) {
-            fail(NO_MIC)
-            return
-        }
-        val startedAt = clock()
-        _level.value = Pcm.FLOOR_DBFS
-        _state.value = PttState.Listening(target, startedAt)
 
-        // ⚠️ A thumb that never comes up — a snagged sleeve, a stuck pointer event —
-        // must not hold the mic open indefinitely. The cap ends the recording and
-        // transcribes it, so a long dictation is kept rather than thrown away.
-        work = scope.launch {
-            delay(MAX_MS)
-            if (isActive && (_state.value as? PttState.Listening)?.startedAtMs == startedAt) {
-                Log.i(TAG, "hit the ${MAX_MS} ms cap")
-                finish(target)
+            _level.value = Pcm.FLOOR_DBFS
+            _state.value = PttState.Connecting(target, clock())
+            currentPress = ++pressSeq
+            currentPress
+        }
+
+        val job = scope.launch {
+            // ★ The ~600 ms of SCO setup is spent *here*, in a state that says so, and
+            // not inside a recording that would have swallowed the first word of it.
+            // ⚠️ Suspending, so it is deliberately outside the lock.
+            val up = headset.open()
+
+            val startedAt = synchronized(lock) {
+                // He let go, cancelled, or pressed elsewhere while the link was coming
+                // up. Whoever replaced this press owns the state; this one only cleans up.
+                if (currentPress != press) {
+                    headset.close()
+                    return@launch
+                }
+                if (!up) {
+                    headset.close()
+                    fail(HEADSET_NO_LINK)
+                    return@launch
+                }
+                if (!recorder.start()) {
+                    headset.close()
+                    fail(NO_MIC)
+                    return@launch
+                }
+                // ⚠️⚠️ Starting the recorder and announcing LISTENING are one atomic step.
+                // Split, a release landing between them reports "let go too early" and
+                // walks away from an open microphone.
+                val at = clock()
+                _state.value = PttState.Listening(target, at)
+                at
             }
+
+            // ⚠️ A thumb that never comes up — a snagged sleeve, a stuck pointer event —
+            // must not hold the mic open indefinitely. The cap ends the recording and
+            // transcribes it, so a long dictation is kept rather than thrown away.
+            // ★ It is measured from the moment capture actually begins, not from the
+            // press: the link setup is not part of his sentence.
+            delay(MAX_MS)
+            synchronized(lock) {
+                if (isActive && (_state.value as? PttState.Listening)?.startedAtMs == startedAt) {
+                    Log.i(TAG, "hit the ${MAX_MS} ms cap")
+                    finish(target)
+                }
+            }
+        }
+        // ⚠️ Only adopt this job if the press it belongs to is still the current one. A
+        // cancel that landed while the coroutine was being created has already set
+        // `work = null`, and undoing that here would leave the cap timer running for a
+        // press that no longer exists.
+        synchronized(lock) {
+            if (currentPress == press) work = job else job.cancel()
         }
     }
 
-    /** Thumb up. Ignored unless the mic is actually open. */
-    fun release() {
+    /** Thumb up. Ignored unless a press is actually live. */
+    fun release() = synchronized(lock) {
+        (_state.value as? PttState.Connecting)?.let { connecting ->
+            // ★ Let go before the link came up. Nothing was recorded, and saying "too
+            // short" here would blame the press for a wait the app imposed on him.
+            Log.w(TAG, "RELEASE after ${clock() - connecting.startedAtMs} ms, still connecting")
+            work?.cancel()
+            work = null
+            currentPress = NO_PRESS
+            headset.close()
+            fail(RELEASED_WHILE_CONNECTING)
+            return
+        }
         val listening = _state.value as? PttState.Listening
         if (listening == null) {
             Log.w(TAG, "RELEASE ignored, not listening")
@@ -175,11 +288,15 @@ class Ptt(
      * Throws the audio away, drops the pending transcript and closes the mic. This is
      * the "say nothing after all" button and it must never be more than one press away.
      */
-    fun cancel() {
+    fun cancel() = synchronized(lock) {
         work?.cancel()
         work = null
+        currentPress = NO_PRESS
         replacing = null
         recorder.discard()
+        // ⚠️ The link goes down with the mic, always. A press abandoned mid-connect has
+        // already asked for SCO, and leaving it standing pins the headset in call mode.
+        headset.close()
         _state.value = PttState.Idle
     }
 
@@ -219,10 +336,17 @@ class Ptt(
 
     // -----------------------------------------------------------------------
 
+    /** ⚠️ Always called with [lock] held — it moves the state machine. */
     private fun finish(target: PttTarget) {
+        currentPress = NO_PRESS
         val heldMs = (clock() - (_state.value as? PttState.Listening)?.startedAtMs.orZero())
             .coerceAtLeast(0)
         val recording = recorder.stop()
+        // ★ The link comes down the instant the mic does. SCO holds the headset in
+        // mono narrowband call mode for as long as it is up, so anything he was
+        // listening to gets it back straight away — and there is never an open link
+        // outside a press.
+        headset.close()
         _level.value = Pcm.FLOOR_DBFS
 
         // ⚠️⚠️ The two gates below exist because of a measured fact, not a hunch:
@@ -326,6 +450,9 @@ class Ptt(
     companion object {
         private const val TAG = "RoamStt"
 
+        /** No press is live. See [currentPress]. */
+        private const val NO_PRESS = -1L
+
         /** Anything shorter than this is a fumbled press, not a sentence. */
         const val MIN_MS = 350L
 
@@ -341,6 +468,29 @@ class Ptt(
 
         const val NO_MIC = "no microphone — check the mic permission"
         const val TOO_SHORT = "too short — hold the button while you talk"
+
+        /**
+         * ★★ There is no headset, and this phone has no other microphone that works.
+         *
+         * ⚠️ It names the handset mic as dead rather than saying "no headset", because
+         * "no headset" reads as *an option is unavailable* and sends him looking for the
+         * other option. There isn't one — [HeadsetLink] has the measurements. This is
+         * the whole of the fix for the failure he actually hits: a press that used to
+         * open the dead built-in mic and report a capture fault now says, before
+         * recording anything, the one thing he can do about it.
+         */
+        const val NO_HEADSET =
+            "no headset connected — this phone's own mic is dead, so put an earbud in"
+
+        /** The headset is there, but the audio link would not come up. */
+        const val HEADSET_NO_LINK =
+            "the headset's mic link never opened — nothing was recorded"
+
+        /**
+         * ★ He let go during the connect. Not "too short": the wait was ours, not his.
+         */
+        const val RELEASED_WHILE_CONNECTING =
+            "let go too early — hold until it says LISTENING, then talk"
 
         /**
          * ★ A long press that produced almost no audio. Names both numbers, because
@@ -360,9 +510,16 @@ class Ptt(
          * was working, which sends him to the app and to the way he pressed it. This is
          * the one failure here he cannot fix by doing anything differently, so it says
          * so, and it points at the layer that is actually broken.
+         *
+         * ⚠️ **Still load-bearing now that the audio comes from a headset**, and it means
+         * something narrower than it used to: the link reported CONNECTED and the capture
+         * still came back all-zero. That is a muted headset, or an HFP link that
+         * connected without streaming — not [NO_HEADSET], which is checked before
+         * anything opens. A real microphone in a silent room has a noise floor around
+         * −60 dBFS; pure zeroes are manufactured, and that is the discriminator.
          */
         const val MIC_NOT_DELIVERING =
-            "the phone's microphone never started — no audio at all, not your press"
+            "the microphone never started — no audio at all, not your press"
         const val TOO_QUIET = "nothing heard — is the mic covered?"
         const val NOTHING_HEARD = "whisper heard nothing"
         const val WHISPER_UNREACHABLE = "whisper unreachable"

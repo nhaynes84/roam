@@ -1,8 +1,10 @@
 package com.roam.touch.channels.ui
 
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import com.roam.touch.channels.stt.Ptt
@@ -131,6 +133,44 @@ class PttPanelTest {
         compose.onNodeWithText("◑ Roam Touch rebuild").assertIsDisplayed()
     }
 
+    /**
+     * ★★ The half-second the headset link costs, made visible instead of eaten.
+     *
+     * ⚠️ The only thing he can get wrong during the connect is **letting go** — which is
+     * exactly what a person does when a button seems not to have worked. So the panel
+     * says KEEP HOLDING and names what to wait for, and it must not look like recording:
+     * no level meter, and the word LISTENING must not be on screen while nothing is being
+     * captured.
+     */
+    @Test
+    fun `connecting tells him to keep holding and never claims to be listening`() {
+        render(PttState.Connecting(target, startedAtMs = 9_000L))
+
+        compose.onNode(hasText("KEEP HOLDING", substring = true)).assertIsDisplayed()
+        compose.onNode(hasText("wait for LISTENING")).assertIsDisplayed()
+        // Where it is going is already on screen, as it is in every other state.
+        compose.onNodeWithText("◑ Roam Touch rebuild").assertIsDisplayed()
+        // ⚠️ Nothing is being recorded yet, so nothing may say otherwise.
+        compose.onAllNodesWithText("LISTENING · 0s").assertCountEquals(0)
+        compose.onAllNodesWithText("release to send").assertCountEquals(0)
+    }
+
+    /**
+     * ⚠️ Having no headset is not a capture fault, and must not read like one. This
+     * handset's own microphone is dead at the HAL, so the panel names that and names the
+     * fix — it is the message he will see if he presses the button with his earbuds in
+     * their case, which is the commonest way this feature can fail.
+     */
+    @Test
+    fun `no headset says the handset mic is dead and what to do about it`() {
+        render(PttState.Failed(Ptt.NO_HEADSET))
+
+        compose.onNode(hasText("mic is dead", substring = true)).assertIsDisplayed()
+        compose.onNode(hasText("earbud", substring = true)).assertIsDisplayed()
+        compose.onNodeWithText("OK").performClick()
+        assertEquals(1, dismisses)
+    }
+
     @Test
     fun `transcribing is its own state, and is cancellable`() {
         render(PttState.Transcribing(target))
@@ -165,7 +205,8 @@ class PttPanelTest {
         val reasons = listOf(
             Ptt.NO_MIC, Ptt.TOO_SHORT, Ptt.TOO_QUIET, Ptt.NOTHING_HEARD,
             Ptt.WHISPER_UNREACHABLE, Ptt.WHISPER_FAILED, Ptt.micDropout(240, 5_000),
-            Ptt.MIC_NOT_DELIVERING,
+            Ptt.MIC_NOT_DELIVERING, Ptt.NO_HEADSET, Ptt.HEADSET_NO_LINK,
+            Ptt.RELEASED_WHILE_CONNECTING,
         )
         assertEquals("no two failures may read alike", reasons.size, reasons.toSet().size)
     }

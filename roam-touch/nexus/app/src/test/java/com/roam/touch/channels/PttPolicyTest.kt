@@ -4,6 +4,7 @@ import com.roam.touch.channels.model.Event
 import com.roam.touch.channels.net.HubApi
 import com.roam.touch.channels.net.HubConfig
 import com.roam.touch.channels.net.HubSocket
+import com.roam.touch.channels.stt.FakeHeadset
 import com.roam.touch.channels.stt.FakeRecorder
 import com.roam.touch.channels.stt.Ptt
 import com.roam.touch.channels.stt.PttState
@@ -46,6 +47,7 @@ private class MuteSpeaker : Speaker {
 }
 
 private class CannedStt(private val text: String) : SttClient {
+    @Volatile
     var calls = 0
         private set
 
@@ -76,6 +78,7 @@ class PttPolicyTest {
     private lateinit var repo: HubRepository
     private lateinit var recorder: FakeRecorder
     private lateinit var stt: CannedStt
+    private lateinit var headset: FakeHeadset
     private lateinit var ptt: Ptt
     private lateinit var vm: ChannelsViewModel
     private lateinit var scope: CoroutineScope
@@ -96,7 +99,12 @@ class PttPolicyTest {
         scope = CoroutineScope(SupervisorJob())
         recorder = FakeRecorder()
         stt = CannedStt("run the test suite")
-        ptt = Ptt(recorder, stt, scope)
+        // ⚠️ A headset that is present and instant. The device's own microphone is
+        // dead at the HAL, so PTT records from a Bluetooth headset — the link's real
+        // ~600 ms and its absence are pinned in HeadsetPttTest; this file is about the
+        // policy the app enforces around whatever microphone there is.
+        headset = FakeHeadset().also { it.setupMs = 0 }
+        ptt = Ptt(recorder, stt, scope, headset)
         vm = ChannelsViewModel(repo, MuteSpeaker(), pttProvider = { ptt })
     }
 
@@ -167,7 +175,11 @@ class PttPolicyTest {
     @Test
     fun `only a press opens it, and a release closes it again`() = runBlocking {
         vm.pttPress(target)
-        assertEquals(1, recorder.starts)
+        // ⚠️ A press is asynchronous now: it brings a Bluetooth headset link up before
+        // it opens anything, and the wearer sees a Connecting state while it does. The
+        // policy is unchanged — only a press opens a microphone — but the assertion has
+        // to wait for the link rather than assume the mic opened on the calling thread.
+        await { recorder.starts == 1 }
         assertTrue(recorder.recording)
 
         vm.pttRelease()
@@ -179,6 +191,7 @@ class PttPolicyTest {
     @Test
     fun `cancelling — as leaving the thread does — closes the mic`() = runBlocking {
         vm.pttPress(target)
+        await { recorder.starts == 1 }
         vm.pttCancel()
         assertTrue(!recorder.recording)
         assertEquals(1, recorder.discards)
@@ -195,6 +208,7 @@ class PttPolicyTest {
     fun `speaking sends nothing to the hub until Send is pressed`() = runBlocking {
         connect()
         vm.pttPress(target)
+        await { recorder.starts == 1 }
         vm.pttRelease()
         await { vm.pttState.value is PttState.Confirming }
         delay(200)
@@ -215,6 +229,7 @@ class PttPolicyTest {
         server.enqueue(sendAccepted())
 
         vm.pttPress(target)
+        await { recorder.starts == 1 }
         vm.pttRelease()
         await { vm.pttState.value is PttState.Confirming }
         vm.pttConfirm()
@@ -237,6 +252,7 @@ class PttPolicyTest {
     fun `Cancel reaches the hub as nothing at all`() = runBlocking {
         connect()
         vm.pttPress(target)
+        await { recorder.starts == 1 }
         vm.pttRelease()
         await { vm.pttState.value is PttState.Confirming }
         vm.pttCancel()
@@ -259,6 +275,7 @@ class PttPolicyTest {
         )
 
         vm.pttPress(target)
+        await { recorder.starts == 1 }
         vm.pttRelease()
         await { vm.pttState.value is PttState.Confirming }
         vm.pttConfirm()

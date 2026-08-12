@@ -22,6 +22,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -30,6 +31,9 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.roam.touch.channels.Roam
+import com.roam.touch.channels.controls.ControlAction
+import com.roam.touch.channels.controls.ControlSurface
+import com.roam.touch.channels.stt.PttState
 import com.roam.touch.channels.stt.PttTarget
 import kotlinx.coroutines.delay
 
@@ -57,7 +61,7 @@ fun installChannelsUi(activity: ComponentActivity) {
  * [BackToChannelsBar]. There is no nav stack and no navigation library, because there
  * are three destinations and a wearer who must never be lost in one of them.
  */
-enum class Screen { Channels, Apps, HomeAssistant }
+enum class Screen { Channels, Apps, HomeAssistant, Controls }
 
 @Composable
 fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
@@ -73,6 +77,22 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
     var screen by remember { mutableStateOf(Screen.Channels) }
     var openPane by remember { mutableStateOf<String?>(null) }
     var toast by remember { mutableStateOf<Toast?>(null) }
+
+    // --- the headset as a control surface ---------------------------------
+    val controls = Roam.controls
+    val headset by controls.active.collectAsStateWithLifecycle()
+    val headsetIntro by controls.intro.collectAsStateWithLifecycle()
+    val seenKeys by controls.seen.collectAsStateWithLifecycle()
+    var learningFor by remember { mutableStateOf<ControlAction?>(null) }
+
+    // ★ A captured gesture binds the action he asked for, and nothing else. The router
+    // has already stopped learning by the time this lands.
+    LaunchedEffect(Unit) {
+        controls.learned.collect { gesture ->
+            learningFor?.let { controls.bind(gesture, it) }
+            learningFor = null
+        }
+    }
 
     LaunchedEffect(Unit) {
         vm.messages.collect { toast = it }
@@ -116,6 +136,62 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
         }
     }
 
+    // ⚠️⚠️ Installed once, keyed on Unit, and reads everything it needs through
+    // rememberUpdatedState. Re-installing it on every state change would drop a gesture
+    // that arrived mid-recomposition — the same class of bug as re-keying the PTT
+    // gesture detector, which is how a five-second hold became 240 ms.
+    val currentPane by rememberUpdatedState(openPane)
+    val currentState by rememberUpdatedState(state)
+    val currentPtt by rememberUpdatedState(pttState)
+    DisposableEffect(Unit) {
+        controls.surface = object : ControlSurface {
+
+            /**
+             * ⚠️⚠️ A toggle, because a headset tap has no hold — and it only ever records
+             * into a channel he has actually opened. The list reorders itself live, so
+             * "the top one" is not a destination; a gesture with nowhere to send takes
+             * him to the top live channel and says so rather than guessing.
+             */
+            override fun pushToTalkToggle() {
+                val pane = currentPane
+                if (pane == null) {
+                    val top = currentState.channels.firstOrNull { it.live }
+                        ?: currentState.channels.firstOrNull()
+                    if (top == null) {
+                        vm.notify("no channels to talk to")
+                        return
+                    }
+                    openPane = top.paneId
+                    vm.openThread(top.paneId)
+                    vm.notify("opened ${top.displayLabel} — press again to talk", bad = false)
+                    return
+                }
+                when (currentPtt) {
+                    is PttState.Connecting, is PttState.Listening -> vm.pttRelease()
+                    else -> {
+                        val label = currentState.channel(pane)?.displayLabel.orEmpty()
+                        vm.pttPress(PttTarget(pane, label))
+                    }
+                }
+            }
+
+            override fun nextChannel() = step(+1)
+            override fun previousChannel() = step(-1)
+
+            override fun cancel() = vm.pttCancel()
+
+            private fun step(by: Int) {
+                val ordered = currentState.channels
+                if (ordered.isEmpty()) return
+                val at = ordered.indexOfFirst { it.paneId == currentPane }
+                val next = ordered[((if (at < 0) 0 else at) + by).mod(ordered.size)]
+                openPane = next.paneId
+                vm.openThread(next.paneId)
+            }
+        }
+        onDispose { controls.surface = null }
+    }
+
     Box(Modifier.fillMaxSize()) {
         if (channel != null) {
             ThreadScreen(
@@ -155,6 +231,7 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
                 onOpen = { openPane = it.paneId; vm.openThread(it.paneId) },
                 onOpenApps = { screen = Screen.Apps },
                 onOpenHomeAssistant = { screen = Screen.HomeAssistant },
+                onOpenControls = { screen = Screen.Controls },
             )
 
             Screen.Apps -> AppsScreen(
@@ -169,6 +246,29 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
                 onRefresh = vm::refreshHa,
                 onTap = vm::tapHa,
             )
+
+            Screen.Controls -> ControlsScreen(
+                profile = headset,
+                seen = seenKeys,
+                learningFor = learningFor,
+                onBack = { screen = Screen.Channels },
+                onLearn = { action -> learningFor = action; controls.learnNext() },
+                onCancelLearn = { learningFor = null; controls.cancelLearning() },
+                onUnbind = controls::unbind,
+            )
+        }
+
+        // ★ An unfamiliar headset, once. It sits over the panel rather than replacing
+        // it, and NOT NOW leaves everything working — the mic button is still the mic
+        // button. Nothing waits on this.
+        headsetIntro?.let { profile ->
+            Box(Modifier.align(Alignment.TopCenter)) {
+                HeadsetIntroCard(
+                    profile = profile,
+                    onMap = { controls.dismissIntro(); screen = Screen.Controls; openPane = null },
+                    onDismiss = controls::dismissIntro,
+                )
+            }
         }
 
         toast?.let { t ->
