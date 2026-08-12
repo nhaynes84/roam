@@ -29,10 +29,24 @@ worn pulls at the wrist rather than across the elbow.
 
 Form: the phone housing (pocket, screen aperture, sensor holes, print-in-place
 buttons, jack notch) is a frozen tray. Around and under it sits a FACETED OUTER
-HULL that encloses the tilt wedge -- one low-poly prism running the length of
-the arm, flush with the tray sides at the belt line and flaring out below it,
-hollowed to a 2 mm skin with the arm saddle cut through its underside. V1 left
-that wedge open on two ribs and read as a tray on stilts.
+HULL -- one low-poly prism running the length of the arm, flush with the tray
+sides at the belt line and flaring out below it, hollowed to a 2 mm skin with
+the arm saddle cut through its underside. V1 left the tilt wedge open on two
+ribs and read as a tray on stilts.
+
+★★ THE HULL FOLLOWS ITS CONTENTS, NOT THE WEDGE (2026-08-12). It used to run
+the deep flank down to where the tilt plane met it and close it with a keel,
+which wrapped 26 mm of curtain and a corner around a volume that holds nothing:
+the pack stops at Z -15.6 and the arm cut has left the section by X -30. The
+owner read it straight off the model -- "you added a corner and a bunch of
+material at the bottom where nothing sits", "cantilevered over the edge for no
+reason" -- and it was 30 cm3 of enclosed air inside a 2 mm skin, which is the
+same wrong silhouette as a solid one. Now the deep flank stops one wall below
+the payload and ONE CHINE facet closes it onto the arm at DEEP_WRAP. The tilt
+wedge is a CONSEQUENCE of angling a flat tray on a round arm; it is not a
+volume that has to be filled OR enclosed. 72.1 mm tall -> 58.0, 83 wide -> 80,
+147 g -> 130. verify_bracer.py measures it now (dead-structure pass) so the
+next one cannot come back in unnoticed.
 
 The END CAP is part of the same body, not a collar bolted to it: the hull's
 nose steps in by the cap's wall thickness below the belt line, so the cap's
@@ -42,10 +56,11 @@ The hollow under the tray carries TWO ID-1 CARDS (a bank card and a licence),
 in a channel formed by two C-rails hung from the tray floor. They load from
 the USB end and the cap is what retains them.
 
-The screen sits in a WELL with a raised hood around it -- deep brow at the
-USB end, shallower one at the jack end, plain walls down the sides, notch
-through the jack brow. Taken from the Pip-Boy 3000 in ref/. The deep flank carries
-two PROUD RIBS; the cut louvres that used to be there are gone.
+The screen sits in a WELL with a raised hood around it -- a 15 mm wall on the
+deep flank, a matched pair of ramped brows at the two ends, nothing on the
+shallow flank where his eye is. Taken from the Pip-Boy 3000 in ref/. The CHINE
+carries two PROUD RIBS; the cut louvres that used to be there are gone, and so
+is the blank keel they moved off.
 
 WORN ON THE RIGHT FOREARM, ON TOP. TILT is positive for that and the reasoning
 is written out at the parameter -- do not flip it back.
@@ -66,9 +81,9 @@ were labelled backwards until 2026-08-12; -pi/2 about X is the HAND end.)
 
 Geometry note -- the constraint that drives the shape:
 a ~75 mm wide flat tray on a 90 mm diameter forearm has ~20 mm of sagitta, and
-the 20 deg tilt adds its own. That wedge is unavoidable for a rigid slab. What
-is optional is whether it is solid: as a 2 mm shell it costs about what the two
-open ribs did, and the void inside is the duct the floor vents exhaust into.
+the 25 deg tilt adds its own. That wedge is unavoidable for a rigid slab. What
+is optional is whether it is enclosed -- and outboard of the payload and the
+arm, it is not.
 
 ARM_R is nominal, NOT critical, and that is deliberate. Every arm face is cut
 FOAM (4 mm) proud of where skin would be, for closed-cell foam or stick-on TPU.
@@ -124,6 +139,42 @@ BEZEL_CHAM = 1.5     # how far the aperture opens out at the top face
 TILT = -25.0         # degrees
 
 ARM_R = 45.0         # nominal forearm radius, mm (90 mm dia)
+# ------------------------------------------------------------ the payload
+# ★★ DECLARED BEFORE THE HULL, ON PURPOSE. The outer body is derived from this
+# stack, not the other way round: whatever is actually carried under the tray
+# sets how deep the body goes, and nothing else does. Written the other way
+# round -- hull first, contents fitted into it afterwards -- is what produced
+# the blank corner the owner spotted on 2026-08-12 ("you added a corner and a
+# bunch of material at the bottom where nothing sits").
+CARD_L, CARD_W, CARD_T = 85.60, 53.98, 0.76   # ISO/IEC 7810 ID-1
+CARD_N = 2                 # cards carried
+CARD_CLR = 0.35            # per side around the card
+CARD_RAIL = 5.0            # web outboard of the card edge
+CARD_ENG = 2.5             # how far the ledge reaches under the card
+CARD_LEDGE = 1.4           # ledge thickness -- this is what carries the card
+CARD_STOP = 2.0            # back stop so a card cannot vanish up the cavity
+# ⚠️ The channel height is NOT free. Over each strap band the floor of this
+# channel is also the roof of the strap channel, and the crown of the arm cut
+# sits 3.09 mm below the tray floor there -- so every mm of card channel comes
+# straight off that membrane. 0.30 of slack leaves it 1.27 mm; more slack and
+# the wall check fails. Two flat ID-1 cards fit; an EMBOSSED bank card is
+# thicker than 0.76 at the digits and will only go in on its own.
+CARD_SLACK = 0.30          # total, over the whole stack
+# ★ A COMMERCIAL card-format bank, not a cell: 85.6 x 54 x 10, the ID-1
+# footprint the card channel already uses, just far thicker.
+PACK_L, PACK_W, PACK_T = 85.6, 54.0, 10.0
+PACK_CLR = 0.6
+PACK_RAIL, PACK_ENG, PACK_LEDGE = 3.0, 3.0, 1.6
+# ⚠️ 1.8 mm of divider between the card channel and the pack, not 0.6. The
+# rails are where the two channels share a floor and 0.6 read as 0.60 mm of
+# wall. That 1.2 mm is what took GAP from 20 to 21.
+CARD_SH = CARD_N * CARD_T + CARD_SLACK
+PACK_Z1 = -CARD_SH - 1.8                 # just clear of the cards above
+PACK_Z0 = PACK_Z1 - (PACK_T + 0.4)
+# ★ THE ONE NUMBER THE HULL IS DERIVED FROM: the underside of the deepest
+# thing carried under the tray. Below this line the body houses nothing.
+PAYLOAD_Z = PACK_Z0 - PACK_LEDGE
+
 # ★★ GAP IS THE VOLUME KNOB, TILT IS THE ERGONOMIC ONE. They were conflated
 # for a round and the arithmetic settles it. The cavity's ceiling is the tray
 # floor and its floor is the arm cut offset by WALL_ARM, so the deepest thing
@@ -139,6 +190,10 @@ ARM_R = 45.0         # nominal forearm radius, mm (90 mm dia)
 # = 14.0 mm, plus margin. 23.0 gives it 1.8 mm of air and puts the whole
 # assembly 51 mm off the arm's skin. That is the price of the pack, and it is
 # a GAP price, not a TILT one. See the report.
+# ⚠️ AND IT IS NOT WHAT MADE THE BODY BLOCKY. Cutting the section back to the
+# payload took the part from 72.1 mm tall to 58.0 with GAP untouched, because
+# the extra 14 mm was never the pack -- it was the wedge being enclosed out to
+# the flank. Standoff is still 51 mm and that IS the pack; height is not.
 GAP = 23.0           # air gap between arm and tray underside, at the crown
 FOAM = 4.0           # compliant pad thickness on EVERY arm face -- see below
 STRAP_Y = (34.0, 112.0)  # strap channel centres, from the USB (open) end
@@ -153,10 +208,24 @@ STRAP_Y = (34.0, 112.0)  # strap channel centres, from the USB (open) end
 # axis, so the whole skin is vertical in the print orientation below -- no
 # overhang anywhere on the outer body, and nothing to tessellate.
 #
-# The section is HANDED, like TILT: the arm falls away from the +X (button)
-# side, so that flank is deep and mostly dead volume, while the -X flank
-# meets the arm within ~13 mm. All of it is derived from arm_z() so TILT
-# stays a real knob -- change it and the section follows.
+# The section is HANDED, like TILT: the arm falls away from the deep flank,
+# while the shallow one meets the arm within ~13 mm. All of it is derived from
+# arm_z() so TILT stays a real knob -- change it and the section follows.
+#
+# ★★ 2026-08-12 -- THE SECTION FOLLOWS THE CONTENTS, NOT THE WEDGE.
+# It used to run the deep flank all the way down to where the tilt plane met
+# it (Z -43.9) and close it with a keel. That put a 26 mm tall curtain and a
+# corner around a volume with NOTHING in it: the pack stops at Z -15.6 and the
+# arm cut has left the section entirely by X -30. The owner read it straight
+# off the model -- "a corner and a bunch of material at the bottom where
+# nothing sits", "cantilevered over the edge for no reason" -- and he is right;
+# it was 30 cm3 of enclosed air in a 2 mm skin, which is the same wrong
+# silhouette as a solid one. So now:
+#   * the deep flank stops one wall below the payload (PAYLOAD_Z), and
+#   * a single CHINE facet runs from there down to the arm, meeting it where
+#     the arm's own surface has turned through DEEP_WRAP.
+# The tilt wedge is a CONSEQUENCE of angling a flat tray on a round arm. It is
+# not a volume that has to be enclosed.
 HULL_HW = 40.0       # hull half width at the widest -- 2.4 mm proud of the tray
 # ⚠️ Two hard ceilings meet at HULL_SHOULDER, and neither is a style choice:
 #   * the button bore runs Z 4.6..8.6 out to the tray wall, so hull material
@@ -170,14 +239,24 @@ HULL_SHOULDER = 2.0  # Z where the flank leaves the tray wall and rakes out
 # enough to carry a 3 mm bevel at its lower end: bevel() caps each set-back at
 # 45% of its edge, so sqrt(2.45^2 + (HULL_SHOULDER-HULL_BELT)^2) > 6.7.
 HULL_BELT = -5.0     # Z of the widest crease -- also the end cap's top edge
-HULL_KEEL = 24.0     # |X| where the keel facet turns up into the deep chine
-HULL_CHINE = 3.0     # how far up the deep flank that chine lands
-# ★ Raised ribs on the deep flank, replacing the cut louvres. The reference
-# object builds its side panels out of PROUD ribs, not slots, and a rib is
-# also the honest feature here: it is prismatic along the arm, so it prints
-# support-free, and it stiffens the one big blank face on the part.
+# ★★ How far round the arm the shell stays with it on the deep side, measured
+# from the arm's own crown. Past 45 deg the shell is hanging off the SIDE of
+# the arm rather than sitting on top of it: it carries no payload out there,
+# it bears no load out there, and every mm of it is the cantilever the owner
+# objected to. So the shell leaves the arm at 45 deg and closes back up to the
+# flank on one straight chine. The shallow flank needs no equivalent -- the arm
+# is only ~21 mm below the belt on that side and the flank reaches it directly.
+DEEP_WRAP = 40.0     # degrees from the arm crown, deep side
+# ★ Raised ribs, replacing the cut louvres. The reference object builds its
+# side panels out of PROUD ribs, not slots, and a rib is also the honest
+# feature here: it is prismatic along the arm, so it prints support-free, and
+# it stiffens the biggest blank face on the part.
+# ⚠️ They sit on the CHINE now, not on the deep flank. The flank is 12.6 mm
+# tall since the section was cut back and cannot carry them; the chine is the
+# 29 mm facet that replaced the blank keel, and it is what the underside note
+# ("32 mm across, full length, lazy") was about.
 FIN_N = 2
-FIN_H = 3.5          # rib height, Z
+FIN_H = 3.5          # rib height, along the facet
 FIN_GAP = 3.0        # between ribs
 FIN_PROUD = 1.5      # how far it stands off the flank
 FIN_CH = 1.0         # 45 deg chamfer on the rib's own outer corners
@@ -225,7 +304,12 @@ CAV_Y1 = 3.0         # cavity stops this far short of the jack end
 #      standing on the jack end that face points down and needs support; ours
 #      is held to 45 deg by construction (see SCOOP_R_BROW).
 GUARD_H = 15.0       # crest height above the tray face -- his 28.4 - 13.4
-GUARD_HW = 41.5      # outer half width, flush with the ribs
+# ⚠️ 40.0, not 41.5. At 41.5 the guard stood 1.5 mm outboard of the hull's own
+# belt line and 4 mm outboard of the tray wall it sits on -- a 15 mm tall wall
+# cantilevered past the body, which is the same fault as the keel corner and
+# it is the widest thing on the part. Flush with the belt, the guard's outer
+# face and the hull flank are ONE plane from the crest to the chine.
+GUARD_HW = HULL_HW   # outer half width -- the hull's belt line, not past it
 GUARD_BEV_H = 6.0    # his outer bevel: starts this far below the crest...
 GUARD_BEV_X = 2.5    # ...and takes this much off the width
 GUARD_BASE_CH = 1.0  # bevel where the guard overhangs the tray's side wall
@@ -242,8 +326,20 @@ CREST_W = 1.2        # flat left at the crest
 BROW_Y0 = 11.0       # USB-end scoop's base, on the well floor
 BROW_Y1 = 141.0      # hand scoop's base -- clear of the camera at 140.5
 USB_BROW_OUT = 0.59  # USB-end brow's outer face rakes back at his slope
-RAMP_Y0 = 11.0       # crest starts ramping down here, toward the USB end...
-RAMP_Y1 = 134.0      # ...and here toward the jack end. His numbers.
+# ★★ ONE RULE FOR BOTH ENDS, and it was only being applied at one of them.
+# The crest starts dropping BROW_RAMP before it reaches a brow's base, so each
+# brow is already part way down its ramp by the time its wall begins. His file
+# does that at the jack end (ramp 134, brow base 141) and NOT at the USB end
+# (ramp 11, brow base 11) -- so the wrist-end brow kept the full crest and came
+# out 8.4 mm above the tray face and 11 mm deep, against 5.0 mm and 6 mm at the
+# elbow end. Owner, 2026-08-12: "the side guards aren't even the same height,
+# the top side is better, the bottom is massive." The top of the SCREEN is the
+# elbow end, so the massive one is the wrist brow. Measured, then equalised
+# here rather than by eye: both brows now peak at the same 5.0 mm.
+# ⚠️ Derive both from it. Hard-coding 11 and 134 is how they drifted apart.
+BROW_RAMP = 7.0      # crest starts dropping this far INSIDE each brow's base
+RAMP_Y0 = BROW_Y0 + BROW_RAMP    # ...toward the USB (wrist) end
+RAMP_Y1 = BROW_Y1 - BROW_RAMP    # ...and toward the jack (elbow) end = his 134
 # 1.1, not his 1.0. The ramp faces point downward when the part stands on its
 # jack end, and at 1.0 they land at exactly 45 deg -- on the threshold, not
 # under it. 1.1 puts them at 48 deg and is indistinguishable by eye.
@@ -253,7 +349,15 @@ RAMP_SLOPE = 1.1     # run per unit rise; >1 is shallower than 45 deg
 # plate is deep enough for a right-angle head to sit in a pocket, turn, and run
 # out sideways into the cavity past the card rails.
 CABLE_W, CABLE_H = 14.0, 4.5    # pocket in the plate, for the head + turn
-CABLE_X = 35.0             # drops into the cavity here, outboard of the rails
+# ⚠️⚠️ THE OUTBOARD END OF THE CABLE RUN IS A HARD LIMIT, not a width about a
+# centre, and getting that wrong is what put a square hole in the end cap.
+# It was written `CABLE_X + CABLE_W/2` = X 42 on a cap whose own half width is
+# 37.55, so the channel ran straight out through the shallow flank and left a
+# 5.5 x 10.7 mm square window in the nose -- open sideways, open at the back.
+# Owner, 2026-08-12: "the cap has a square hole in it for no reason there."
+# There was no reason: it was a boolean over-run, not a feature. The channel
+# now stops where the floor slot it feeds stops, and the flank stays closed.
+# CABLE_X1 -- the run's outboard limit -- is derived below, off the floor slot.
 CABLE_SLOT_W = 4.4         # ⚠️ the drop slot is narrow because the pack and
                            # the cards already use the full 54 mm width. The
                            # flat lead runs through it ON EDGE, not flat.
@@ -277,7 +381,13 @@ STRAP_D = 2.2        # channel depth into the rib's arm face
 # whose angle is the local slope of the arm face -- and at 25 deg of tilt a
 # bar 39 mm from the crown came out at 31 deg, under the crest limit. Closer
 # in, the face is flatter and the tip is blunt.
-BAR_X = 14.0         # retaining bars, either side of centre
+# ⚠️ Measured from the ARM'S CROWN, not from the tray's centre line. The strap
+# groove is coaxial with the arm and the crown sits at X = ARM_CX (19 mm off
+# centre at 25 deg of tilt), so bars placed symmetrically about X=0 are 5 mm
+# and 33 mm from the crown -- one blunt, one out on the steep part of the face
+# and, once the section was cut back to the payload, one of them hanging past
+# the chine entirely. Symmetric about the crown, both tips are blunt.
+BAR_X = 14.0         # retaining bars, either side of the arm's crown
 BAR_W = 6.0
 
 # 3.5 mm jack: on the TOP edge and NOT centred -- it sits in the right-hand
@@ -335,6 +445,12 @@ OUT_W = POCK_W + 2 * WALL          # tray outer width
 OUT_L = POCK_L + WALL              # closed at the jack end, open at the USB end
 OUT_H = FLOOR + POCK_D + LIP_H
 
+# The floor slot the internal lead drops through, and therefore the outboard
+# limit of the run across the cap's inner face. ⚠️ It runs 0.5 mm INTO the
+# pocket wall on purpose -- stopping short leaves a 0.75 mm rib of floor
+# between slot and wall, which is a rib you could snap with a fingernail.
+CABLE_X1 = POCK_W / 2 + 0.5
+
 # The rib faces are carved by a cylinder FOAM larger than the arm, about an
 # axis dropped by the same amount -- so every rib face stands FOAM proud of
 # where skin would be, uniformly, while the crown still clears by GAP.
@@ -360,14 +476,23 @@ def arm_z(x, r=None):
     return ARM_CZ + math.sqrt(d) if d > 0 else None
 
 
-# Deep (+X) flank: the arm has fallen away entirely by the time it gets out
-# there, so the depth is set by the tilt, not by the cylinder.
-HULL_Z_DEEP = -(GAP + FOAM) - HULL_HW * math.sin(abs(_T))
-# Shallow (-X) flank: run it just past where the arm cut will form the edge,
-# so the cylinder makes that chine rather than a stray sliver of blank.
-_shallow = arm_z(-HULL_HW if TILT >= 0 else HULL_HW)
-HULL_Z_SHAL = (_shallow - 1.5) if _shallow is not None else HULL_Z_DEEP
-SAG = -HULL_Z_DEEP    # how far the hull hangs below the tray
+# SD is the sign of the DEEP side in model X. Needed here, before the section.
+SD = 1.0 if TILT >= 0 else -1.0
+
+# ★ Deep flank: it stops one wall below the payload. Nothing is carried below
+# PAYLOAD_Z, so nothing is enclosed below it either.
+HULL_Z_DEEP = PAYLOAD_Z - WALL_OUT
+# ★ ...and the chine runs from the flank's bottom to the point where the arm's
+# own surface has turned through DEEP_WRAP. Beyond that toe the shell is off
+# the arm and holds nothing, so the shell simply stops there.
+_W = math.radians(DEEP_WRAP)
+TOE_X = ARM_CX + SD * ARM_CUT_R * math.sin(_W)
+TOE_Z = ARM_CZ + ARM_CUT_R * math.cos(_W)
+# Shallow flank: run it just past where the arm cut will form the edge, so the
+# cylinder makes that chine rather than a stray sliver of blank.
+_shallow = arm_z(-SD * HULL_HW)
+HULL_Z_SHAL = (_shallow - 1.5) if _shallow is not None else TOE_Z
+SAG = -min(HULL_Z_DEEP, HULL_Z_SHAL, TOE_Z)   # how far the hull hangs below
 
 
 # --------------------------------------- SVG face coords -> model coords
@@ -516,15 +641,20 @@ part = bbox(-OUT_W / 2, OUT_W / 2, 0, OUT_L, 0, OUT_H)
 # ------------------------------------------------------------------- hull
 # The faceted outer body. SD is the deep side -- the flank the arm falls away
 # from, which is +X for a positive TILT and swaps with it.
-SD = 1.0 if TILT >= 0 else -1.0
+# ⚠️ The edge from the shallow flank's foot to the deep TOE is a CHORD lying
+# inside the arm cylinder, so none of it survives: the arm cut carves the whole
+# underside between the two feet and the saddle IS the outer surface there.
+# That is deliberate -- the shell has no keel of its own over the arm, because
+# a keel there would be a second skin around a surface that is already the
+# outside of the part. It only reappears as the chine, outboard of the toe,
+# where the cylinder has left the section.
 HULL_SEC = [
     (-SD * OUT_W / 2,  HULL_SHOULDER),   # leaves the tray wall here
     (-SD * HULL_HW,    HULL_BELT),       # shallow shoulder crease
-    (-SD * HULL_HW,    HULL_Z_SHAL),     # shallow flank, ends at the arm
-    (-SD * 8.0,        HULL_Z_DEEP),     # underbody rake
-    ( SD * HULL_KEEL,  HULL_Z_DEEP),     # keel
-    ( SD * HULL_HW,    HULL_Z_DEEP + HULL_CHINE),  # deep lower chine
-    ( SD * HULL_HW,    HULL_BELT),       # deep flank
+    (-SD * HULL_HW,    HULL_Z_SHAL),     # shallow flank's foot, inside the arm
+    ( TOE_X,           TOE_Z),           # toe: the arm saddle ends here
+    ( SD * HULL_HW,    HULL_Z_DEEP),     # chine: back up to the deep flank
+    ( SD * HULL_HW,    HULL_BELT),       # deep flank -- 12.6 mm, not 36
     ( SD * OUT_W / 2,  HULL_SHOULDER),
 ]
 
@@ -573,11 +703,18 @@ for y in STRAP_Y:
 
 # Retaining bars across the channel so the strap cannot fall out when it is
 # off your arm. Trimmed back to the arm surface by re-cutting the arm after.
+# ⚠️ AND CLIPPED TO THE HULL. A raw box only ever got trimmed from below by the
+# arm, which was invisible while the body ran to Z -44 -- the box was buried.
+# With the section cut back to the payload the deep bar's tail stuck 1.6 mm out
+# through the chine: a spur of material hanging in fresh air off the underside,
+# exactly the fault being fixed. `& hull` is a structural guarantee, the same
+# trick as the final rounded-prism intersection in the print tenets.
 for y in STRAP_Y:
     for sx in (-1, 1):
-        part += bbox(sx * BAR_X - BAR_W / 2, sx * BAR_X + BAR_W / 2,
-                     y - STRAP_W / 2, y + STRAP_W / 2,
-                     -SAG - 1, 0)
+        _bx = ARM_CX + sx * BAR_X
+        part += hull & bbox(_bx - BAR_W / 2, _bx + BAR_W / 2,
+                            y - STRAP_W / 2, y + STRAP_W / 2,
+                            -SAG - 1, 0)
 part -= arm
 
 # ------------------------------------------------------------------- shell
@@ -615,22 +752,9 @@ for y in STRAP_Y:
 # 5 cm3 of PETG for no structural return; the rails only need to catch the
 # card's two long edges. They are prismatic along Y, so they cost nothing in
 # the print orientation.
-CARD_L, CARD_W, CARD_T = 85.60, 53.98, 0.76
-CARD_N = 2                 # cards carried
-CARD_CLR = 0.35            # per side around the card
-CARD_RAIL = 5.0            # web outboard of the card edge
-CARD_ENG = 2.5             # how far the ledge reaches under the card
-CARD_LEDGE = 1.4           # ledge thickness -- this is what carries the card
-CARD_STOP = 2.0            # back stop so a card cannot vanish up the cavity
-# ⚠️ The channel height is NOT free. Over each strap band the floor of this
-# channel is also the roof of the strap channel, and the crown of the arm cut
-# sits 3.09 mm below the tray floor there -- so every mm of card channel comes
-# straight off that membrane. 0.30 of slack leaves it 1.27 mm; more slack and
-# the wall check fails. Two flat ID-1 cards fit; an EMBOSSED bank card is
-# thicker than 0.76 at the digits and will only go in on its own.
-CARD_SLACK = 0.30          # total, over the whole stack
+# (dimensions are declared up with the payload block -- the hull is derived
+#  from them, so they cannot live down here any more.)
 CARD_SW = CARD_W + 2 * CARD_CLR
-CARD_SH = CARD_N * CARD_T + CARD_SLACK
 CARD_X0, CARD_X1 = -CARD_SW / 2, CARD_SW / 2
 CARD_Y1 = CARD_L + 1.0
 _card_z0 = -(CARD_SH + CARD_LEDGE)
@@ -658,16 +782,10 @@ part -= bbox(CARD_X0, CARD_X1, -10.0, CARD_Y1, -CARD_SH, 0.0)
 # cap retains it -- so nothing can fall out onto the floor when it is off.
 # ⚠️ This is what GAP=20 buys. At GAP=8 there were 0 mm under the cards; the
 # arm's crown was right up against the tray floor. See the note on GAP.
-PACK_L, PACK_W, PACK_T = 85.6, 54.0, 10.0
-PACK_CLR = 0.6
-PACK_RAIL, PACK_ENG, PACK_LEDGE = 3.0, 3.0, 1.6
+# (dimensions up with the payload block; PAYLOAD_Z is derived from them and
+#  is what the hull's deep flank is cut to.)
 PACK_SW = PACK_W + 2 * PACK_CLR
 PACK_X0, PACK_X1 = -PACK_SW / 2, PACK_SW / 2
-# ⚠️ 1.8 mm of divider between the card channel and the pack, not 0.6. The
-# rails are where the two channels share a floor and 0.6 read as 0.60 mm of
-# wall. That 1.2 mm is what took GAP from 20 to 21.
-PACK_Z1 = -CARD_SH - 1.8                 # just clear of the cards above
-PACK_Z0 = PACK_Z1 - (PACK_T + 0.4)
 PACK_Y1 = PACK_L + 1.5
 for _xa, _xb in ((PACK_X0 - PACK_RAIL, PACK_X0 + PACK_ENG),
                  (PACK_X1 - PACK_ENG, PACK_X1 + PACK_RAIL)):
@@ -690,7 +808,7 @@ part -= bbox(PACK_X0, PACK_X1, -10.0, PACK_Y1, PACK_Z0, PACK_Z1)
 # ⚠️ Its inner edge lands exactly on the card rail's outer face. Anywhere else
 # leaves a sliver of rail between the two, and at 1.00 mm the wall check calls
 # it -- correctly, it would be a rib you could snap with a fingernail.
-part -= bbox(CARD_X1 + CARD_RAIL, POCK_W / 2 + 0.5,
+part -= bbox(CARD_X1 + CARD_RAIL, CABLE_X1,
              -1.0, 17.0, PACK_Z1 - 2.0, FLOOR + 4.0)   # runs out to the mouth,
              # or a 1 mm rib of floor is left standing between slot and face
 
@@ -707,29 +825,50 @@ part -= bbox(CARD_X1 + CARD_RAIL, POCK_W / 2 + 0.5,
 # The ribs run the full length, so they have no ends to overhang, and they are
 # added to the CAP as well as the hull -- same X/Z profile, so they read as one
 # continuous rib from the nose to the tail.
-_fl_z0 = HULL_Z_DEEP + HULL_CHINE + CHAMFER      # flat part of the deep flank
-_fl_z1 = HULL_BELT - CHAMFER
-_fin_c = (_fl_z0 + _fl_z1) / 2
-FIN_Z = [_fin_c + (i - (FIN_N - 1) / 2) * (FIN_H + FIN_GAP) for i in range(FIN_N)]
-assert FIN_Z[0] - FIN_H / 2 > _fl_z0 + 0.5 and FIN_Z[-1] + FIN_H / 2 < _fl_z1 - 0.5, \
-    "ribs do not fit inside the flat part of the deep flank"
+# ★ ON THE CHINE, not the flank. The chine is the facet that replaced the blank
+# keel and it is now the biggest unbroken face on the body -- 29 mm across the
+# section, the full 147 mm long. That is exactly the surface the owner called
+# out as lazy, and a rib stack is the same answer the reference object gives.
+# The deep flank is 12.6 mm tall now and cannot carry them.
+_CH_P0, _CH_P1 = (TOE_X, TOE_Z), (SD * HULL_HW, HULL_Z_DEEP)
+_ch_ex, _ch_ez = _CH_P1[0] - _CH_P0[0], _CH_P1[1] - _CH_P0[1]
+CHINE_L = math.hypot(_ch_ex, _ch_ez)
+_ch_ux, _ch_uz = _ch_ex / CHINE_L, _ch_ez / CHINE_L
+_ch_nx, _ch_nz = _ch_uz, -_ch_ux                  # one of the two normals...
+_sec_cx = sum(p[0] for p in HULL_SEC) / len(HULL_SEC)
+_sec_cz = sum(p[1] for p in HULL_SEC) / len(HULL_SEC)
+if ((_CH_P0[0] + _ch_ex / 2 - _sec_cx) * _ch_nx
+        + (_CH_P0[1] + _ch_ez / 2 - _sec_cz) * _ch_nz) < 0:
+    _ch_nx, _ch_nz = -_ch_nx, -_ch_nz             # ...make it the OUTWARD one
 
 
-_fin_in = SD * (HULL_HW - 1.0)      # rooted inside the flank
-_fin_out = SD * (HULL_HW + FIN_PROUD)
+def _on_chine(v, u):
+    """Facet-local (proud, along-facet) -> model (X, Z)."""
+    return (_CH_P0[0] + u * _ch_ux + v * _ch_nx,
+            _CH_P0[1] + u * _ch_uz + v * _ch_nz)
+
+
+# Keep clear of the bevel at each end of the facet, plus a land.
+_fl_u0, _fl_u1 = CHAMFER + 1.0, CHINE_L - CHAMFER - 1.0
+_fin_c = (_fl_u0 + _fl_u1) / 2
+FIN_U = [_fin_c + (i - (FIN_N - 1) / 2) * (FIN_H + FIN_GAP) for i in range(FIN_N)]
+assert FIN_U[0] - FIN_H / 2 > _fl_u0 and FIN_U[-1] + FIN_H / 2 < _fl_u1, \
+    "ribs do not fit inside the flat part of the chine"
 
 
 def fins(y0, y1):
-    """The deep-flank rib stack, as a solid, over a Y range. Each rib carries
-    its own bevel in section, so the ribs are printable, chamfered and on the
-    cap without a single OCCT chamfer."""
+    """The chine rib stack, as a solid, over a Y range. Each rib carries its own
+    bevel in section, so the ribs are printable, chamfered and on the cap
+    without a single OCCT chamfer."""
     out = None
-    for zc in FIN_Z:
-        z0, z1 = zc - FIN_H / 2, zc + FIN_H / 2
-        d = FIN_CH * (1 if _fin_out > _fin_in else -1)
-        b = prism([(_fin_in, z0), (_fin_out - d, z0),
-                   (_fin_out, z0 + FIN_CH), (_fin_out, z1 - FIN_CH),
-                   (_fin_out - d, z1), (_fin_in, z1)], y0, y1)
+    for uc in FIN_U:
+        u0, u1 = uc - FIN_H / 2, uc + FIN_H / 2
+        b = prism([_on_chine(-1.0, u0),                    # rooted inside
+                   _on_chine(FIN_PROUD - FIN_CH, u0),
+                   _on_chine(FIN_PROUD, u0 + FIN_CH),
+                   _on_chine(FIN_PROUD, u1 - FIN_CH),
+                   _on_chine(FIN_PROUD - FIN_CH, u1),
+                   _on_chine(-1.0, u1)], y0, y1)
         out = b if out is None else out + b
     return out
 
@@ -955,7 +1094,8 @@ SPK_X = 17.0               # centre offset either side of the port
 # ★ The face instead gets a recessed panel: a flat sunken rectangle with the
 # two vent slots in it, bevelled at CHAMFER like everything else. Chunky and
 # flat, which is the language the body speaks.
-FACE_INSET = 5.0           # margin from the face outline to the panel
+FACE_INSET = 5.0           # margin from the face outline to the panel, X
+FACE_INSET_Z = 2.2         # ...and Z, where there are only 13.4 mm to play with
 FACE_DEPTH = 2.5           # how far the panel sinks
 
 
@@ -987,8 +1127,12 @@ if _sh_bot is None:
 # ⚠️ Midpoint of the FLAT flank, not of the whole flank: the belt's 3 mm bevel
 # eats the top of it, and a dome centred on the raw midpoint would sit half in
 # the bevel face.
+# ⚠️ ...and on the deep side, of the flank ABOVE the relief slot, because the
+# slot is what turns that flank into a cantilever. Below it the collar is stiff.
+DEEP_SLOT_Z0 = HULL_Z_DEEP + CHAMFER      # bottom of the flat deep flank
+DEEP_SLOT_Z1 = DEEP_SLOT_Z0 + CAP_SLOT_W
 FLANKS = ((-SD, (HULL_BELT - CHAMFER + _sh_bot) / 2),
-          (SD, (HULL_BELT - CHAMFER + HULL_Z_DEEP + HULL_CHINE + CHAMFER) / 2))
+          (SD, (HULL_BELT - CHAMFER + DEEP_SLOT_Z1) / 2))
 
 # Dimples in the TENON's flanks now, not the tray's. TRUNCATED CONES, not
 # cylinders and not spheres: a cylinder presents a sharp edge square to the
@@ -1022,10 +1166,14 @@ cap -= arm
 # through the hull's section, so the nose is a wedge and not a slab. Kept below
 # Z=0 so it never touches the USB trough or the speaker mouths, and its normal
 # points toward the USB end -- up, in this print orientation -- so it is free.
+# ⚠️ -SAG, not HULL_Z_DEEP. The rake has to run out BELOW the deepest point of
+# the section or it stops half way down and the face steps back out under it --
+# which is a ledge, an overhang, and (measured) a 0.87 mm wall where the chine
+# is thin. HULL_Z_DEEP was the deepest point until the section was cut back.
 cap -= yz_prism([
     (-CAP_T,                  0.0),
-    (-CAP_T + CAP_CHIN,       HULL_Z_DEEP - 10),
-    (-CAP_T - 40,             HULL_Z_DEEP - 10),
+    (-CAP_T + CAP_CHIN,       -SAG - 10),
+    (-CAP_T - 40,             -SAG - 10),
     (-CAP_T - 40,             0.0),
 ], -90, 90)
 
@@ -1036,8 +1184,8 @@ cap -= yz_prism([
 # skin the corner off a 2 mm wall.
 for _sx in (-1, 1):
     _n = Vector(_sx * CAP_T, -CAP_RAKE, 0).normalized()
-    # ⚠️ Off GUARD_HW, not HULL_HW. The hood and the ribs both reach 41.5;
-    # raking to 40 by Y=0 cut their corners off and put a step at the joint.
+    # ⚠️ Off GUARD_HW. The hood used to reach 41.5 and raking to 40 by Y=0 cut
+    # its corners off; GUARD_HW is now the belt line itself, so they agree.
     _p0 = Vector(_sx * (GUARD_HW - CAP_RAKE), -CAP_T, 0)
     cap -= Pos(_p0 + _n * 100.0) \
         * Rot(0, 0, math.degrees(math.atan2(_n.Y, _n.X))) * Box(200, 200, 200)
@@ -1046,7 +1194,10 @@ for _sx in (-1, 1):
 # ★ Replaces the trough. Flat, bevelled at CHAMFER, and it belongs to the same
 # family as the belt and the guard crest rather than being the one curved,
 # funnel-shaped thing on an otherwise faceted object.
-_fz0, _fz1 = FACE_INSET, OUT_H - FACE_INSET
+# ⚠️ Two margins, not one. The face is 75 wide and only 13.4 tall above Z=0,
+# so a single 5 mm inset left a 3.4 mm letterbox slot rather than a panel --
+# the feature the comment above describes did not actually exist on the part.
+_fz0, _fz1 = FACE_INSET_Z, OUT_H - FACE_INSET_Z
 _fx = OUT_W / 2 - FACE_INSET
 cap -= yz_prism([
     (-CAP_T - EPS, _fz0),
@@ -1070,21 +1221,25 @@ for _sx in (-1, 1):
 # outer face, so the cap still closes the end completely.
 cap -= bbox(-CABLE_W / 2, CABLE_W / 2, -PLUG_D, EPS,
             USB_Z - CABLE_H / 2 - 1.0, USB_Z + CABLE_H / 2 + 1.0)
-cap -= bbox(-CABLE_W / 2, CABLE_X + CABLE_W / 2, -CABLE_H - 1.0, EPS,
+# ⚠️⚠️ CABLE_X1, not "a centre plus half a width". This is the cut that put a
+# square hole in the nose -- see the note at CABLE_W. It now stops exactly where
+# the floor slot it feeds stops, which leaves OUT_W/2 - CABLE_X1 = 1.9 mm of
+# flank standing. The wall check polices that number and the cap-closure check
+# below it polices the hole.
+cap -= bbox(-CABLE_W / 2, CABLE_X1, -CABLE_H - 1.0, EPS,
             -1.0, USB_Z + CABLE_H / 2 + 1.0)
 
 # ★ No relief slots on the shallow side, and no tongues. The collar is a C, so
 # each flank is ALREADY a cantilever: bounded by the belt above, by the saddle
 # below, free at the open end, and rooted only in the end plate. V1 needed
 # tongues because its collar was a closed rectangle braced on four sides.
-# The deep side does need one slot -- there the collar wraps flank, chine and
-# keel into a folded section stiff enough to resist the 0.3 mm the dome has to
-# ride, so this frees the flank from the fold.
+# The deep side does need one slot -- there the collar wraps the flank into the
+# chine, and that fold is stiff enough to resist the 0.3 mm the dome has to
+# ride, so this frees the flank from it. It sits at the foot of the flat flank.
 cap -= bbox(SD * (HULL_HW - CAP_W) - 0.2 if SD > 0 else SD * HULL_HW - 0.2,
             SD * HULL_HW + 0.2 if SD > 0 else SD * (HULL_HW - CAP_W) + 0.2,
             CAP_SLOT_ROOT, CAP_D + EPS,
-            HULL_Z_DEEP + HULL_CHINE + 1.28,
-            HULL_Z_DEEP + HULL_CHINE + 1.28 + CAP_SLOT_W)
+            DEEP_SLOT_Z0, DEEP_SLOT_Z1)
 
 # Snap noses: cones rooted inside the wall (never coplanar with a face) and
 # protruding 0.6 mm past the inner surface, so they stand 0.3 mm proud of the

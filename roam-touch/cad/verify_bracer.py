@@ -28,10 +28,21 @@ cap.fix_normals()
 FLOOR, POCK_D, LIP_H = 2.2, 8.8, 2.4
 OUT_W, OUT_L, OUT_H = 75.1, 147.0, 13.4
 POCK_W = 70.3
-HULL_HW, TEN_D, HULL_BELT = 40.0, 2.3, -2.0
-GUARD_H, GUARD_HW = 15.0, 41.5
+HULL_HW, TEN_D, HULL_BELT = 40.0, 2.3, -5.0
+GUARD_H, GUARD_HW = 15.0, 40.0
 PACK_T, PACK_W, PACK_L = 10.0, 54.0, 85.6
 PACK_Z1, PACK_Z0 = -3.62, -14.02
+PACK_LEDGE, PACK_RAIL, PACK_CLR = 1.6, 3.0, 0.6
+# ★ The payload envelope and the arm, which between them are the WHOLE reason
+# any material exists below the belt. The dead-structure check below measures
+# the body against exactly these two things.
+PAYLOAD_Z = PACK_Z0 - PACK_LEDGE                       # -15.62
+PAYLOAD_HW = PACK_W / 2 + PACK_CLR + PACK_RAIL         # 30.6
+ARM_R, GAP, FOAM, TILT = 45.0, 23.0, 4.0, -25.0
+ARM_CUT_R = ARM_R + FOAM
+ARM_CX = -ARM_R * math.sin(math.radians(TILT))
+ARM_CZ = -(GAP + FOAM) - ARM_R * math.cos(math.radians(TILT))
+HULL_Z_DEEP = PAYLOAD_Z - 2.0                          # -17.62
 GZ1 = OUT_H + GUARD_H
 WIN_X, BEZEL_CHAM, LIP_H = 32.03, 1.5, 2.4
 SIGHT = BEZEL_CHAM / LIP_H
@@ -85,11 +96,21 @@ probes = [
     ("no hull above the belt line",  (39.0, 60.0, 6.0), False),
 
     # ------------------------------------------------------------ outer hull
-    # ⚠️ Depths are asymmetric: TILT drops the +X side, so the same feature
-    # sits at very different Z on each side. Probed, not assumed.
-    ("hull skin, deep flank",        (-39.0, 60.0, -20.0), True),
-    ("outside the deep flank",       (-44.0, 60.0, -20.0), False),
-    ("hull cavity, deep side",       (-34.0, 60.0, -25.0), False),
+    # ⚠️ Depths are asymmetric: TILT drops one side, so the same feature sits at
+    # very different Z on each flank. Probed, not assumed.
+    # ★★ The section was cut back to the payload on 2026-08-12. The deep flank
+    # now STOPS one wall under the pack and a single chine closes it onto the
+    # arm, so most of these moved. The one that matters most is the third: it
+    # stands where 26 mm of curtain and a corner used to be, and it must stay
+    # empty. That is the whole of the owner's "material at the bottom where
+    # nothing sits" defect, expressed as a point.
+    ("hull skin, deep flank",        (-39.0, 60.0, -10.0), True),
+    ("outside the deep flank",       (-42.0, 60.0, -10.0), False),
+    ("★ old dead corner stays gone", (-38.0, 60.0, -30.0), False),
+    ("chine skin",                   (-35.5, 60.0, -19.2), True),
+    ("outside the chine",            (-34.5, 60.0, -22.5), False),
+    ("nothing below the toe",        (-12.5, 60.0, -33.0), False),
+    ("hull cavity behind the flank", (-33.0, 60.0, -10.0), False),
     ("hull cavity, over the arm",    (0.0, 60.0, -18.0), False),
     ("arm-face skin under cavity",   (0.0, 60.0, -21.5), True),
     ("arm void below the skin",      (0.0, 60.0, -25.0), False),
@@ -108,8 +129,8 @@ probes = [
     ("pack rail web",                (-30.0, 45.0, -7.5), True),
     ("pack opens at the USB end",    (0.0, -5.0, -7.5), False),
     ("pack stop at the far end",     (0.0, 89.0, -7.5), True),
-    ("cable slot through the floor", (35.0, 8.0, 1.0), False),
-    ("floor beside the cable slot",  (35.0, 25.0, 1.0), True),
+    ("cable slot through the floor", (34.0, 8.0, 1.0), False),
+    ("floor beside the cable slot",  (34.0, 25.0, 1.0), True),
 
     # ------------------------------------------------------- cap tenon
     # The nose steps IN by TEN_D below the belt so the cap's collar lands
@@ -117,7 +138,7 @@ probes = [
     # deep the collar rattles. Probed either side of the tenon's flank face.
     ("tenon flank, deep side",       (-37.2, 3.0, -8.0), True),
     ("collar space outside tenon",   (-39.0, 3.0, -8.0), False),
-    ("snap dimple in tenon flank",   (-37.4, 7.0, -22.95), False),
+    ("snap dimple in tenon flank",   (-37.4, 7.0, -10.61), False),
     ("full section above the belt",  (-38.5, 3.0, -1.0), True),
 
     # ------------------------------------------------------- card slots
@@ -126,32 +147,59 @@ probes = [
     ("card rail web, deep side",     (29.5, 40.0, -1.0), True),
     ("card rail web, shallow side",  (-29.5, 40.0, -1.0), True),
     ("floor above the card channel", (0.0, 40.0, 1.0), True),
-    ("thick arm band under strap",   (0.0, 34.0, -20.0), True),
+    ("thick arm band under strap",   (0.0, 34.0, -19.0), True),
     # ------------------------------------------------- ribs and visor
     # The canted louvres are gone; these are the proud ribs that replaced them.
-    ("deep-flank rib",               (-41.0, 60.0, -19.7), True),
-    ("gap between the ribs",         (-41.0, 60.0, -22.95), False),
-    ("nothing beyond the ribs",      (-44.0, 60.0, -19.7), False),
+    # ⚠️ They live on the CHINE now, not the deep flank -- so they are neither
+    # vertical nor at |X| = HULL_HW, and the probes have to be taken on the
+    # facet. Points computed off TOE + u*(along) + v*(outward).
+    ("chine rib",                    (-23.6, 60.0, -26.0), True),
+    ("gap between the ribs",         (-26.6, 60.0, -24.6), False),
+    ("nothing beyond the ribs",      (-24.3, 60.0, -27.6), False),
     # The high guard: three-sided, screen sunk deep inside it.
     ("guard wall, deep/outboard",    (-39.0, 73.0, OUT_H + 6.0), True),
-    ("guard wall near the crest",    (-38.5, 73.0, OUT_H + 13.0), True),
+    ("guard wall near the crest",    (-37.5, 73.0, OUT_H + 12.6), True),
     ("screen well is open",          (0.0, 73.0, OUT_H + 6.0), False),
     # ★ THREE-sided. If this reads solid a guard has appeared on the deep
     # flank and the whole point of the section is gone.
     ("shallow flank has NO guard",   (39.0, 73.0, OUT_H + 6.0), False),
     ("scoop has cut the wall back",  (-34.5, 73.0, OUT_H + 6.0), False),
     ("...but not at its base",       (-34.5, 73.0, OUT_H + 0.4), True),
-    ("USB-end brow",                 (0.0, 8.0, OUT_H + 3.0), True),
-    ("jack brow",                    (0.0, 145.0, OUT_H + 3.0), True),
-    ("crest ramps down at the jack", (39.0, 144.0, OUT_H + 13.0), False),
-    ("crest ramps down at the USB",  (39.0, 4.0, OUT_H + 13.0), False),
-    ("nothing above the crest",      (-39.0, 73.0, GZ1 + 1.0), False),
+    # ★★ THE TWO BROWS MUST MATCH. The crest ramp starts BROW_RAMP inside each
+    # brow's base, and it was only doing that at the elbow end -- so the wrist
+    # brow stood 8.4 mm above the tray face against the elbow's 5.0 and read,
+    # correctly, as massive. Four probes rather than two: each brow has to be
+    # there at 4.5 mm AND absent at 5.5, which pins the height from both sides.
+    # If either pair goes one-sided the brows have drifted apart again.
+    ("USB brow present at 4.5 mm",   (0.0, 8.0, OUT_H + 4.5), True),
+    ("USB brow stops by 5.5 mm",     (0.0, 8.0, OUT_H + 5.5), False),
+    ("jack brow present at 4.5 mm",  (0.0, 145.0, OUT_H + 4.5), True),
+    ("jack brow stops by 5.5 mm",    (0.0, 145.0, OUT_H + 5.5), False),
+    ("crest ramps down at the jack", (-37.0, 144.0, OUT_H + 13.0), False),
+    ("crest ramps down at the USB",  (-37.0, 4.0, OUT_H + 13.0), False),
+    ("nothing above the crest",      (-37.0, 73.0, GZ1 + 1.0), False),
     # Strap runs in a channel under the hull instead of through side flanges,
-    # so the device is tray-width. The bars bridge that channel.
-    ("strap channel is open, deep",  (-20.0, 34, -36.0), False),
-    ("retaining bar fills it, deep", (-14.0, 34, -30.0), True),
-    ("strap channel is open, shal",  (20.0, 34, -17.7), False),
-    ("retaining bar fills it, shal", (14.0, 34, -18.0), True),
+    # so the device is tray-width. The bars bridge that channel, and they are
+    # spaced about the ARM'S crown (X = ARM_CX), not the tray's centre line.
+    ("strap channel is open, deep",  (-8.0, 34, -25.5), False),
+    ("retaining bar fills it, deep", (5.0, 34, -19.5), True),
+    ("strap channel is open, shal",  (25.0, 34, -18.0), False),
+    ("retaining bar fills it, shal", (33.0, 34, -19.5), True),
+]
+
+# ★ The cap gets its own pass now. The defect that prompted it -- a 5.5 x 10.7
+# square window straight through the nose's shallow flank, where the internal
+# cable channel over-ran the cap's own half width -- was invisible to every
+# probe here, because every probe here is on the other solid.
+cap_probes = [
+    ("cap flank closed beside the run", (36.5, -1.0, 5.0), True),
+    ("cap flank closed, low",           (36.5, -4.0, 1.0), True),
+    ("cap flank closed, high",          (36.5, -3.0, 11.0), True),
+    ("cable run open inside the cap",   (30.0, -3.0, 3.0), False),
+    ("plug pocket in the inner face",   (0.0, -3.0, 6.45), False),
+    ("plate behind the plug pocket",    (0.0, -8.0, 6.45), True),
+    ("sunken face panel",               (25.0, -10.5, 6.0), False),
+    ("panel rim stands proud of it",    (25.0, -11.5, 12.0), True),
 ]
 
 pts = np.array([p for _, p, _ in probes])
@@ -159,6 +207,14 @@ got = m.contains(pts)
 print("=== solid/empty probes ===")
 bad = 0
 for (label, _, want), g in zip(probes, got):
+    ok = bool(g) == want
+    bad += not ok
+    print(f"  {'ok  ' if ok else 'FAIL'}  {label:<30} "
+          f"expect {'solid' if want else 'empty':<5} got {'solid' if g else 'empty'}")
+
+print("\n=== end cap solid/empty probes ===")
+for (label, p, want), g in zip(cap_probes,
+                               cap.contains(np.array([p for _, p, _ in cap_probes]))):
     ok = bool(g) == want
     bad += not ok
     print(f"  {'ok  ' if ok else 'FAIL'}  {label:<30} "
@@ -272,6 +328,62 @@ for name, mesh, limit in _checks:
           f"(min {limit}){where}")
 
 
+# -------------------------------------------------- dead structure below
+# ★★ THE CHECK THIS PART DID NOT HAVE, and the one that would have caught the
+# defect the owner found by eye on 2026-08-12: "you added a corner and a bunch
+# of material at the bottom where nothing sits", "cantilevered over the edge
+# for no reason". Both are the same measurement -- how far the outer surface
+# sits from the nearest thing it is there to contain.
+#
+# Below the belt there are exactly two of those things: the PAYLOAD (pack,
+# cards, rails -- one box) and the ARM. So sample the surface, and for every
+# sample below the belt take the distance to whichever is nearer. A shell that
+# follows its contents scores its own wall thickness plus the local taper; a
+# curtain hung out past both scores the length of the curtain.
+#
+# ⚠️ Feature-agnostic on purpose. It does not know what a keel or a chine is,
+# so it catches the next one of these wherever it appears -- which is the whole
+# argument for the harness (see feedback-verify-before-sending).
+DEAD_BUDGET = 13.0      # mm of body standing off everything it could hold
+
+
+def dead_standoff(mesh, n=20000):
+    """(worst distance, point) from the surface below the belt to the nearer of
+    the payload box and the arm cylinder."""
+    pts, _ = trimesh.sample.sample_surface_even(mesh, n)
+    pts = pts[pts[:, 2] < HULL_BELT]
+    if not len(pts):
+        return 0.0, None
+    # payload: an X/Z box, full length -- distance in the section plane
+    dx = np.maximum(np.abs(pts[:, 0]) - PAYLOAD_HW, 0.0)
+    dz = np.maximum(np.maximum(PAYLOAD_Z - pts[:, 2], pts[:, 2] - 0.0), 0.0)
+    d_pay = np.hypot(dx, dz)
+    # arm: radial distance out from the cut cylinder's surface
+    d_arm = np.abs(np.hypot(pts[:, 0] - ARM_CX, pts[:, 2] - ARM_CZ) - ARM_CUT_R)
+    d = np.minimum(d_pay, d_arm)
+    k = int(np.argmax(d))
+    return float(d[k]), pts[k]
+
+
+print("\n=== dead structure below the belt ===")
+# Negative test: hang a slab exactly where the deleted corner used to be and
+# confirm the check calls it. A checker that only ever agrees with me is
+# worthless -- and this one is new, so it has never disagreed with anything.
+_bogus = trimesh.creation.box(
+    (10.0, 100.0, 20.0),
+    trimesh.transformations.translation_matrix([-35.0, 70.0, -30.0]))
+_bd, _ = dead_standoff(_bogus, n=3000)
+_neg_ok = _bd > DEAD_BUDGET
+bad += not _neg_ok
+print(f"  {'ok  ' if _neg_ok else 'FAIL'}  self-test: the old corner   "
+      f"{_bd:5.1f} mm  (must exceed {DEAD_BUDGET})")
+_d, _p = dead_standoff(_parts[0])
+_dead_ok = _d <= DEAD_BUDGET
+bad += not _dead_ok
+_where = "" if _p is None else f"  at ({_p[0]:6.1f},{_p[1]:6.1f},{_p[2]:6.1f})"
+print(f"  {'ok  ' if _dead_ok else 'FAIL'}  bracer shell                "
+      f"{_d:5.1f} mm  (max {DEAD_BUDGET}){_where}")
+
 # ------------------------------------------------------- chamfer audit
 # ★ "Find the edges that got missed" -- systematically, off the mesh, rather
 # than by eye off a render. Every exterior CONVEX crease sharper than
@@ -317,7 +429,11 @@ def classify(mid, part_name):
             return "jack end = the print bed"
         if 2.0 < z < OUT_H - 0.5 and abs(x) > 30.0:
             return "button bay + jack (FROZEN)"
-        if z < -0.5 and abs(x) < 30.0:
+        # ⚠️ 34, not 30. The retaining bars moved out to straddle the ARM's
+        # crown rather than the tray's centre line, so their tips run out onto
+        # the arm face at |X| ~ 30 -- 26 mm of crease each, and they were the
+        # whole UNCLASSIFIED total until this bound was widened.
+        if z < -0.5 and abs(x) < 34.0:
             return "strap channel / arm face"
         if abs(z + 0.4) < 0.35:
             return "card channel mouth + rails"
