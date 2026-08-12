@@ -4,11 +4,13 @@ and the no-hard-delete rule, not just "a row went in"."""
 
 from __future__ import annotations
 
+import sqlite3
 import threading
 
 import pytest
 
 from store import Event, EventKind, Store
+from transcript import MAX_BODY_CHARS
 
 
 def test_append_returns_event_with_monotonic_ids(store: Store):
@@ -74,6 +76,60 @@ def test_body_with_control_words_is_stored_verbatim(store: Store):
     body = "run C-c then press Enter twice -- and 'quote' \"me\""
     store.append("%0", EventKind.SENT, body)
     assert store.history("%0")[-1].body == body
+
+
+def test_every_event_carries_a_speakable_summary(store: Store):
+    """The panel shows and Piper speaks `summary`; `body` keeps everything."""
+    body = "## Result\n\nAll **green**.\n\n```bash\nnpm test\n```\n"
+    event = store.append("%0", EventKind.OUTCOME, body)
+    assert event.body == body, "the full answer is never lost"
+    assert event.summary == "Result All green. [code, 1 line]"
+    assert store.history("%0")[-1].summary == event.summary
+
+
+def test_an_explicit_summary_is_kept(store: Store):
+    event = store.append("%0", EventKind.OUTCOME, "long thing", summary="short thing")
+    assert event.summary == "short thing"
+
+
+def test_a_giant_answer_is_capped_and_the_original_size_recorded(store: Store):
+    huge = "z" * (MAX_BODY_CHARS + 5000)
+    event = store.append("%0", EventKind.OUTCOME, huge)
+    assert len(event.body) == MAX_BODY_CHARS
+    assert event.body.endswith("… [truncated]")
+    assert event.meta["truncated_from"] == MAX_BODY_CHARS + 5000
+    assert store.history("%0")[-1].body == event.body
+
+
+def test_capping_preserves_other_meta(store: Store):
+    event = store.append(
+        "%0", EventKind.OUTCOME, "z" * (MAX_BODY_CHARS + 1), meta={"source": "hook"}
+    )
+    assert event.meta["source"] == "hook"
+    assert "truncated_from" in event.meta
+
+
+def test_a_v1_database_gains_summaries_on_open(tmp_path):
+    """The live DB predates `summary`; opening it must migrate, not explode."""
+    path = tmp_path / "old.sqlite"
+    db = sqlite3.connect(path)
+    db.executescript(
+        """
+        CREATE TABLE events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, pane_id TEXT NOT NULL,
+            kind TEXT NOT NULL, body TEXT NOT NULL DEFAULT '', meta TEXT,
+            ts REAL NOT NULL, archived INTEGER NOT NULL DEFAULT 0);
+        INSERT INTO events(pane_id, kind, body, ts)
+            VALUES('%0', 'outcome', '**done** at last', 1.0);
+        """
+    )
+    db.commit()
+    db.close()
+    with Store(path) as st:
+        event = st.history("%0")[-1]
+        assert event.body == "**done** at last"
+        assert event.summary == "done at last", "existing rows are backfilled"
+        st.append("%0", EventKind.NOTE, "after the migration")
 
 
 def test_last_event_and_count(store: Store):

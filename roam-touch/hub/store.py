@@ -30,9 +30,11 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
+from transcript import MAX_BODY_CHARS, cap_body, summarise
+
 DEFAULT_DB_PATH = Path(__file__).with_name("hub.sqlite")
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 class EventKind(str, Enum):
@@ -59,6 +61,9 @@ class Event:
     pane_id: str
     kind: str
     body: str
+    #: Short, speakable, glanceable form of `body`. Always present; the client
+    #: shows this on the strip and speaks it, and shows `body` in the thread.
+    summary: str = ""
     meta: dict[str, Any] = field(default_factory=dict)
     ts: float = 0.0
     archived: bool = False
@@ -69,6 +74,7 @@ class Event:
             "pane_id": self.pane_id,
             "kind": self.kind,
             "body": self.body,
+            "summary": self.summary,
             "meta": self.meta,
             "ts": self.ts,
             "archived": self.archived,
@@ -104,6 +110,7 @@ def _row_to_event(row: sqlite3.Row) -> Event:
         pane_id=row["pane_id"],
         kind=row["kind"],
         body=row["body"],
+        summary=row["summary"] or "",
         meta=json.loads(raw_meta) if raw_meta else {},
         ts=row["ts"],
         archived=bool(row["archived"]),
@@ -147,6 +154,7 @@ class Store:
                 pane_id  TEXT    NOT NULL,
                 kind     TEXT    NOT NULL,
                 body     TEXT    NOT NULL DEFAULT '',
+                summary  TEXT    NOT NULL DEFAULT '',
                 meta     TEXT,
                 ts       REAL    NOT NULL,
                 archived INTEGER NOT NULL DEFAULT 0
@@ -168,6 +176,20 @@ class Store:
             );
             """
         )
+        # v1 -> v2: events gained `summary`. Existing rows are backfilled so a
+        # client never meets an event without one.
+        columns = {r["name"] for r in self._db.execute("PRAGMA table_info(events)")}
+        if "summary" not in columns:
+            self._db.execute(
+                "ALTER TABLE events ADD COLUMN summary TEXT NOT NULL DEFAULT ''"
+            )
+            rows = self._db.execute(
+                "SELECT id, body FROM events WHERE body != ''"
+            ).fetchall()
+            self._db.executemany(
+                "UPDATE events SET summary = ? WHERE id = ?",
+                [(summarise(r["body"]), r["id"]) for r in rows],
+            )
         self._db.execute(
             "INSERT INTO schema_meta(key, value) VALUES('version', ?) "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -194,20 +216,32 @@ class Store:
         body: str = "",
         meta: dict[str, Any] | None = None,
         ts: float | None = None,
+        summary: str | None = None,
     ) -> Event:
-        """Write one event and return it, with its assigned id."""
+        """Write one event and return it, with its assigned id.
+
+        The size rail and the summary live here rather than in the callers, so
+        nothing -- hook, client or poller -- can put an unbounded blob or an
+        unsummarised body into the log. `meta.truncated_from` records the
+        original length whenever the body was cut.
+        """
         if not pane_id:
             raise ValueError("pane_id is required")
         kind_value = kind.value if isinstance(kind, EventKind) else str(kind)
         if not kind_value:
             raise ValueError("kind is required")
         stamp = time.time() if ts is None else float(ts)
+        body, original_length = cap_body(body or "", MAX_BODY_CHARS)
+        if original_length is not None:
+            meta = {**(meta or {}), "truncated_from": original_length}
+        if summary is None:
+            summary = summarise(body)
         payload = json.dumps(meta) if meta else None
         with self._lock:
             cur = self._db.execute(
-                "INSERT INTO events(pane_id, kind, body, meta, ts) "
-                "VALUES(?, ?, ?, ?, ?)",
-                (pane_id, kind_value, body or "", payload, stamp),
+                "INSERT INTO events(pane_id, kind, body, summary, meta, ts) "
+                "VALUES(?, ?, ?, ?, ?, ?)",
+                (pane_id, kind_value, body, summary, payload, stamp),
             )
             self._db.commit()
             event_id = int(cur.lastrowid)
@@ -215,7 +249,8 @@ class Store:
             id=event_id,
             pane_id=pane_id,
             kind=kind_value,
-            body=body or "",
+            body=body,
+            summary=summary,
             meta=meta or {},
             ts=stamp,
             archived=False,

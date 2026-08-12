@@ -60,8 +60,9 @@ building a URL and you never have to think about encoding.
   "id": 412,
   "pane_id": "%0",
   "kind": "outcome",
-  "body": "build finished, 0 failures",
-  "meta": {"source": "tmux-hook"},
+  "body": "Tailscale beats the BLE permission wall — it just worked from here with\nno pairing.\n\nOne thing worth knowing: `roam-msg` returned nothing at all…",
+  "summary": "Tailscale beats the BLE permission wall — it just worked from here with no pairing. One thing worth knowing: roam-msg returned nothing at all…",
+  "meta": {"source": "claude-hook", "session_id": "44c6d5f1"},
   "ts": 1786511500.066308,
   "archived": false
 }
@@ -69,8 +70,19 @@ building a URL and you never have to think about encoding.
 
 * `id` — monotonically increasing, never reused, unique across all channels. This
   is the client's catch-up cursor.
+* `body` — the full text. For an `outcome` this is **the assistant's actual
+  answer**, pulled out of the session transcript; markdown intact.
+* `summary` — always present, always safe to speak and to glance at: markdown
+  scaffolding removed, code blocks and tables reduced to `[code, 12 lines]` /
+  `[table, 4 rows]`, decorative symbols and emoji dropped (Piper says nothing for
+  them), cut at a sentence boundary within **280 characters**. **Show `summary` on
+  the strip and hand it to Piper; show `body` in the thread.** Never re-derive it
+  client-side — one implementation, one behaviour.
 * `ts` — epoch seconds, UTC, float.
 * `meta` — free-form JSON object; may be `{}`. Never `null`.
+  `meta.truncated_from` appears when the body exceeded the **16 KiB** storage cap
+  and holds the original character count; the body then ends with `… [truncated]`
+  and the untruncated text is still available from `/capture` and the transcript.
 * `archived` — soft-deleted. Only ever `true` in responses you explicitly asked
   for with `include_archived=true`.
 
@@ -80,8 +92,8 @@ rather than dropping it.
 | kind | meaning |
 |---|---|
 | `sent` | the wearer sent this text to the channel (`body` = the text) |
-| `receipt` | the agent acknowledged a prompt was submitted |
-| `outcome` | the agent finished a response |
+| `receipt` | a prompt was submitted (`body` = the prompt, when the hook knows it) |
+| `outcome` | the agent finished (`body` = **what it said**, not "finished") |
 | `opened` | the hub first saw this pane (`body` = its label) |
 | `closed` | the pane went away; the channel is dead |
 | `note` | free-form note |
@@ -220,12 +232,15 @@ Where the tmux/Claude hooks POST. Also usable by any tool that wants to drop
 something into a channel thread.
 
 ```json
-{"pane": "%3", "kind": "outcome", "body": "done", "meta": {"source": "tmux-hook"}}
+{"pane": "%3", "kind": "outcome", "body": "The suite is green — 122 tests.",
+ "meta": {"source": "claude-hook", "session_id": "44c6d5f1"}}
 ```
 
 * `pane` and `pane_id` are accepted interchangeably (`$TMUX_PANE` is called
   `pane` in the shell).
 * `kind` — required. Any string; use the table above.
+* `body` — for an `outcome`, send the assistant's answer text. The hub computes
+  `summary` and applies the 16 KiB cap itself; do not send a `summary`.
 * Returns `201` with `{"event": Event}` and pushes it to every WebSocket client.
 * If the pane is unknown to the hub, the channel is created first.
 

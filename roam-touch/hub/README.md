@@ -13,11 +13,19 @@ was asleep catches up by event id.
 Client contract: **[API.md](API.md)**. Read that before writing any client.
 
 ```
-channels.py   tmux: discover panes, send keys, capture output
-store.py      SQLite event log, per channel, never hard-deleted
-hub.py        FastAPI service + WebSocket + the tmux poller
-tests/        pytest; tmux is faked at channels._run, the one shell-out
+channels.py    tmux: discover panes, send keys, capture output
+store.py       SQLite event log, per channel, never hard-deleted
+transcript.py  pull the assistant's answer out of a session transcript;
+               summarise it for Piper and for a glance
+hub.py         FastAPI service + WebSocket + the tmux poller
+roam-hub-hook  the Claude Code hook that posts receipts and outcomes
+tests/         pytest; tmux faked at channels._run, network at urlopen
 ```
+
+Every event carries the full `body` and a short, speakable `summary` (≤280 chars,
+markdown and emoji stripped, code blocks and tables noted rather than read out).
+Bodies are capped at 16 KiB, with `meta.truncated_from` recording the original
+length — so one enormous reply can never bloat the database.
 
 ## Running it
 
@@ -110,10 +118,20 @@ entry, not replacing it):
 }
 ```
 
-`roam-hub-hook` is in this directory: it reads `$TMUX_PANE`, and POSTs
-`{"pane": "$TMUX_PANE", "kind": "receipt|outcome"}` with the bearer token. It exits
-0 and silently does nothing when `$TMUX_PANE` is unset or the hub is unreachable —
-a hook must never be able to break the session it is reporting on.
+`roam-hub-hook` is in this directory. It reads Claude Code's hook JSON on stdin and
+POSTs to `/events` tagged with `$TMUX_PANE`:
+
+* **outcome** — pulls the assistant's **actual answer** out of `transcript_path`
+  (`transcript.py`) and sends it as the body. "The response finished" on its own is
+  useless; the point of the device is not walking back to the computer to read the
+  answer. Thinking blocks are never included, a turn that was only tool calls walks
+  back to the last one that spoke, and the hub adds the speakable `summary`.
+* **receipt** — sends the submitted prompt, so a channel shows real activity even
+  when the wearer typed at the desk.
+
+It exits 0 and posts nothing when `$TMUX_PANE` is unset, the token is missing, the
+transcript is unreadable or the hub is unreachable — a hook must never be able to
+break the session it is reporting on.
 
 Verify by hand before installing it:
 

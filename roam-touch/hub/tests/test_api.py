@@ -286,6 +286,44 @@ def test_hook_for_an_unknown_pane_creates_the_channel(client, auth, fake_tmux, s
     assert "%7" in {c["pane_id"] for c in listed}
 
 
+def test_an_outcome_carries_the_answer_and_a_speakable_summary(client, auth):
+    """What the wearer actually needs: the answer, not "it finished"."""
+    answer = (
+        "## Done\n\nThe suite is **green** — 122 tests.\n\n"
+        "```bash\nnpm test -- --watchAll=false\n```\n\nNothing else to do."
+    )
+    resp = client.post(
+        "/events",
+        json={"pane": "%0", "kind": "outcome", "body": answer},
+        headers=auth,
+    )
+    event = resp.json()["event"]
+    assert event["body"] == answer, "the full text is kept"
+    assert event["summary"] == (
+        "Done The suite is green — 122 tests. [code, 1 line] Nothing else to do."
+    ), "punctuation stays; only markdown and unspeakable symbols go"
+    assert "```" not in event["summary"]
+
+
+def test_a_giant_outcome_is_capped_before_it_hits_the_database(client, auth):
+    resp = client.post(
+        "/events",
+        json={"pane": "%0", "kind": "outcome", "body": "q" * 40000},
+        headers=auth,
+    )
+    event = resp.json()["event"]
+    assert len(event["body"]) == 16384
+    assert event["meta"]["truncated_from"] == 40000
+
+
+def test_every_event_shape_has_a_summary_field(client, auth):
+    client.post("/channels/0/send", json={"text": "**do** the thing"}, headers=auth)
+    events = client.get("/channels/0/history", headers=auth).json()["events"]
+    assert all("summary" in e for e in events)
+    sent = [e for e in events if e["kind"] == "sent"][-1]
+    assert sent["summary"] == "do the thing"
+
+
 def test_hook_rejects_a_bad_pane_id(client, auth):
     resp = client.post("/events", json={"pane": "", "kind": "receipt"}, headers=auth)
     assert resp.status_code == 400

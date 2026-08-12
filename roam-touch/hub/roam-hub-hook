@@ -1,45 +1,117 @@
-#!/bin/bash
-# roam-hub-hook -- report a receipt or an outcome to the ROAM Touch hub.
-#
-# Usage: roam-hub-hook receipt|outcome|note [body]
-#
-# Meant to be run as a Claude Code hook (UserPromptSubmit -> receipt,
-# Stop -> outcome). It tags the event with $TMUX_PANE, so the receipt lands on
-# exactly the channel that was prompted -- pane ids are stable and never reused,
-# unlike session:window.pane indices.
-#
-# It NEVER fails loudly: a hook that can break the session it reports on is
-# worse than a missing notification. No tmux, no token, no hub -> exit 0.
-#
-# Env: ROAM_HUB_URL (default the tailnet address), ROAM_HUB_TOKEN_FILE.
+#!/Users/talos/Projects/roam/roam-touch/hub/.venv/bin/python
+"""roam-hub-hook -- report a receipt or an outcome to the ROAM Touch hub.
 
-set -uo pipefail
+Usage:  roam-hub-hook receipt|outcome|note [body]
 
-KIND="${1:-}"
-BODY="${2:-}"
-[ -z "$KIND" ] && exit 0
-[ -z "${TMUX_PANE:-}" ] && exit 0          # not inside tmux; nothing to report
+Meant to run as a Claude Code hook: `UserPromptSubmit` -> receipt,
+`Stop` -> outcome. Claude Code passes the hook payload as JSON on stdin
+(`session_id`, `transcript_path`, `cwd`, and `prompt` for UserPromptSubmit).
 
-HUB_URL="${ROAM_HUB_URL:-http://100.67.237.109:8787}"
-TOKEN_FILE="${ROAM_HUB_TOKEN_FILE:-$(dirname "$0")/hub-token.txt}"
-[ -r "$TOKEN_FILE" ] || exit 0
-TOKEN="$(tr -d '[:space:]' < "$TOKEN_FILE")"
-[ -z "$TOKEN" ] && exit 0
+* **outcome** carries the assistant's actual answer, pulled out of
+  `transcript_path`. A notification that only says "finished" would be
+  useless -- the point of the device is not walking back to the computer to
+  find out what was said.
+* **receipt** carries the prompt that was submitted, so a channel shows real
+  activity even when the wearer typed at the desk.
 
-# JSON-escape with python (the body can contain quotes, newlines, anything).
-payload=$(TMUX_PANE="$TMUX_PANE" KIND="$KIND" BODY="$BODY" python3 -c '
-import json, os, socket
-print(json.dumps({
-    "pane": os.environ["TMUX_PANE"],
-    "kind": os.environ["KIND"],
-    "body": os.environ["BODY"],
-    "meta": {"source": "claude-hook", "host": socket.gethostname().split(".")[0]},
-}))') || exit 0
+The event is tagged with `$TMUX_PANE`, so it lands on exactly the channel that
+was prompted -- pane ids are stable and never reused, unlike session:window.pane.
 
-curl -sS --max-time 3 -o /dev/null \
-     -X POST "$HUB_URL/events" \
-     -H "Authorization: Bearer $TOKEN" \
-     -H "content-type: application/json" \
-     -d "$payload" 2>/dev/null
+It NEVER fails loudly: a hook that can break the session it reports on is worse
+than a missing notification. No tmux, no token, no hub, no transcript -> exit 0.
 
-exit 0
+Env: ROAM_HUB_URL (default the tailnet address), ROAM_HUB_TOKEN_FILE.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import socket
+import sys
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+
+DEFAULT_URL = "http://100.67.237.109:8787"
+TIMEOUT_S = 3.0
+
+
+def read_hook_payload() -> dict:
+    """Claude Code's JSON on stdin. A terminal or junk means "nothing"."""
+    if sys.stdin is None or sys.stdin.isatty():
+        return {}
+    try:
+        raw = sys.stdin.read()
+    except (OSError, ValueError):
+        return {}
+    try:
+        payload = json.loads(raw) if raw.strip() else {}
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def main() -> int:
+    kind = sys.argv[1] if len(sys.argv) > 1 else ""
+    override = sys.argv[2] if len(sys.argv) > 2 else ""
+    pane = os.environ.get("TMUX_PANE", "")
+    if not kind or not pane:
+        return 0  # nothing to report, or not inside tmux
+
+    token_file = Path(
+        os.environ.get("ROAM_HUB_TOKEN_FILE", HERE / "hub-token.txt")
+    )
+    try:
+        token = token_file.read_text(encoding="utf-8").strip()
+    except OSError:
+        return 0
+    if not token:
+        return 0
+
+    payload = read_hook_payload()
+    transcript_path = payload.get("transcript_path") or ""
+    body = override
+
+    if not body and kind == "outcome" and transcript_path:
+        try:
+            from transcript import last_assistant_text
+
+            body = last_assistant_text(transcript_path)
+        except Exception:
+            body = ""
+    if not body and kind == "receipt":
+        body = str(payload.get("prompt") or "")
+
+    event = {
+        "pane": pane,
+        "kind": kind,
+        "body": body,
+        "meta": {
+            "source": "claude-hook",
+            "host": socket.gethostname().split(".")[0],
+            "session_id": payload.get("session_id", ""),
+            "transcript_path": transcript_path,
+        },
+    }
+    request = urllib.request.Request(
+        os.environ.get("ROAM_HUB_URL", DEFAULT_URL).rstrip("/") + "/events",
+        data=json.dumps(event).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        urllib.request.urlopen(request, timeout=TIMEOUT_S).read()
+    except (urllib.error.URLError, OSError, ValueError):
+        pass  # the hub being down must never disturb the session
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
