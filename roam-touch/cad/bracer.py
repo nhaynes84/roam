@@ -276,12 +276,16 @@ CAP_BUMP_Y = 5.0     # dome centre. ⚠️ Must sit clear of the slot ends (7.5)
 # go on -- which is exactly what the first version got wrong.
 CAP_TONGUE_H = 7.0   # tongue height, Z
 CAP_SLOT_W = 1.4     # relief slot around it
-USB_W, USB_H = 13.0, 6.5   # clears a plug's overmould, not just the shell
+# USB-C plug shell is 8.34 x 2.56 mm with fully rounded ends. Cut that SHAPE
+# with ~1 mm of clearance, not a generic rectangle -- the taper does the work
+# of accommodating fat overmoulds, so the opening itself can be tight.
+USB_W, USB_H = 9.4, 3.6
+USB_Z = FLOOR + PH_T / 2   # port sits mid phone thickness, NOT near the floor
 # ★ Flare the cable aperture out on the OUTER face and taper it down to size.
 # The end plate is only CAP_T thick, so a plain rectangular hole means only a
 # slim cable head ever reaches the port -- a funnel lets fat overmoulds seat,
 # and it reads as a designed feature instead of a punched hole.
-USB_FLARE = 4.0
+USB_FLARE = 5.0            # per side, so a ~10 mm spread down to the opening
 
 # Dimples in the tray's outer side walls. TRUNCATED CONES, not cylinders and
 # not spheres: a cylinder presents a sharp edge square to the travel direction
@@ -300,13 +304,22 @@ cap = bbox(-(OUT_W / 2 + CAP_CLR + CAP_W), OUT_W / 2 + CAP_CLR + CAP_W,
 # hollow it out to a U that slides over the tray
 cap -= bbox(-(OUT_W / 2 + CAP_CLR), OUT_W / 2 + CAP_CLR,
             -EPS, CAP_D + EPS, -CAP_CLR - EPS, OUT_H + CAP_CLR)
-# cable aperture through the end plate, plus the outer flare
-cap -= bbox(-USB_W / 2, USB_W / 2, -CAP_T - EPS, CAP_D + EPS,
-            FLOOR - 1.0, FLOOR - 1.0 + USB_H)
-_taper = math.degrees(math.atan(USB_FLARE / CAP_T))
-cap -= Pos(0, -CAP_T - EPS, FLOOR - 1.0 + USB_H / 2) * Rot(-90, 0, 0) * extrude(
-    Rectangle(USB_W + 2 * USB_FLARE, USB_H + 2 * USB_FLARE),
-    amount=CAP_T + 2 * EPS, taper=_taper)
+# Cable aperture: a USB-C-shaped slot through the plate, flared on the outside
+# and tapered down to it so any head can find the port behind a 2.4 mm plate.
+cap -= Pos(0, -CAP_T - EPS, USB_Z) * Rot(-90, 0, 0) * extrude(
+    RectangleRounded(USB_W, USB_H, USB_H / 2 - 0.01),
+    amount=CAP_T + CAP_D + 2 * EPS)
+# ⚠️ x_dir is pinned. Without it the plane picks its own axes and the flare
+# comes out rotated 90 deg -- wide where the cap is thin, and it eats the plate.
+# ⚠️ Built as a LOFT, not extrude(taper=). OCCT's extrude_taper throws
+# Standard_TypeMismatch on a rounded profile at this angle (~64 deg).
+_big_h = USB_H + 2 * USB_FLARE
+cap -= loft([
+    Plane(origin=(0, -CAP_T - EPS, USB_Z), x_dir=(1, 0, 0), z_dir=(0, 1, 0))
+    * RectangleRounded(USB_W + 2 * USB_FLARE, _big_h, _big_h / 2 - 0.01),
+    Plane(origin=(0, EPS, USB_Z), x_dir=(1, 0, 0), z_dir=(0, 1, 0))
+    * RectangleRounded(USB_W, USB_H, USB_H / 2 - 0.01),
+])
 # No finger notches. The first attempt put them at the open end on the centre
 # line, which is exactly where the tongues root -- they cut the tongues clean
 # off and the cap came out as five loose pieces. They are not needed either:
