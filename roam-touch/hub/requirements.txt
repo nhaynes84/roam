@@ -1,0 +1,12 @@
+# ROAM Touch hub. Install into hub/.venv:
+#   python3 -m venv .venv && ./.venv/bin/pip install -r requirements.txt
+# Versions are the ones the suite is green against on talos (Python 3.14).
+fastapi==0.141.1
+uvicorn[standard]==0.52.1
+pydantic==2.13.4
+pydantic-settings==2.15.0
+
+# tests
+pytest==9.1.1
+httpx==0.28.1          # fastapi.testclient
+websockets==17.0.1     # ws client for smoke tests; also uvicorn's ws impl

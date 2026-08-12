@@ -10,3 +10,11 @@ __pycache__/
 *.kicad_prl
 housing/.venv/
 housing/step/
+
+# ROAM Touch hub: shared bearer token and the event database. The token is a
+# secret; the database is machine state (and can contain transcripts).
+roam-touch/hub/hub-token.txt
+roam-touch/hub/*.sqlite
+roam-touch/hub/*.sqlite-wal
+roam-touch/hub/*.sqlite-shm
+.pytest_cache/

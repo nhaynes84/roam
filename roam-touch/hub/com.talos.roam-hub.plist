@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- ROAM Touch hub. Install: see README.md.
+     Bound to the Tailscale address on purpose - the LAN cannot reach it at all.
+     If Tailscale is down at boot the bind fails and launchd retries every 10s,
+     which is the correct behaviour: no tailnet, no clients. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.talos.roam-hub</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/talos/Projects/roam/roam-touch/hub/.venv/bin/python</string>
+    <string>/Users/talos/Projects/roam/roam-touch/hub/hub.py</string>
+  </array>
+  <key>WorkingDirectory</key><string>/Users/talos/Projects/roam/roam-touch/hub</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>ROAM_HUB_HOST</key><string>100.67.237.109</string>
+    <key>ROAM_HUB_PORT</key><string>8787</string>
+    <key>ROAM_HUB_DB_PATH</key><string>/Users/talos/Projects/roam/roam-touch/hub/hub.sqlite</string>
+    <key>ROAM_HUB_TOKEN_FILE</key><string>/Users/talos/Projects/roam/roam-touch/hub/hub-token.txt</string>
+    <key>ROAM_HUB_LOG_LEVEL</key><string>info</string>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>ProcessType</key><string>Background</string>
+  <key>StandardOutPath</key><string>/Users/talos/Library/Logs/roam-hub.log</string>
+  <key>StandardErrorPath</key><string>/Users/talos/Library/Logs/roam-hub.err</string>
+</dict>
+</plist>

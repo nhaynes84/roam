@@ -1,0 +1,45 @@
+#!/bin/bash
+# roam-hub-hook -- report a receipt or an outcome to the ROAM Touch hub.
+#
+# Usage: roam-hub-hook receipt|outcome|note [body]
+#
+# Meant to be run as a Claude Code hook (UserPromptSubmit -> receipt,
+# Stop -> outcome). It tags the event with $TMUX_PANE, so the receipt lands on
+# exactly the channel that was prompted -- pane ids are stable and never reused,
+# unlike session:window.pane indices.
+#
+# It NEVER fails loudly: a hook that can break the session it reports on is
+# worse than a missing notification. No tmux, no token, no hub -> exit 0.
+#
+# Env: ROAM_HUB_URL (default the tailnet address), ROAM_HUB_TOKEN_FILE.
+
+set -uo pipefail
+
+KIND="${1:-}"
+BODY="${2:-}"
+[ -z "$KIND" ] && exit 0
+[ -z "${TMUX_PANE:-}" ] && exit 0          # not inside tmux; nothing to report
+
+HUB_URL="${ROAM_HUB_URL:-http://100.67.237.109:8787}"
+TOKEN_FILE="${ROAM_HUB_TOKEN_FILE:-$(dirname "$0")/hub-token.txt}"
+[ -r "$TOKEN_FILE" ] || exit 0
+TOKEN="$(tr -d '[:space:]' < "$TOKEN_FILE")"
+[ -z "$TOKEN" ] && exit 0
+
+# JSON-escape with python (the body can contain quotes, newlines, anything).
+payload=$(TMUX_PANE="$TMUX_PANE" KIND="$KIND" BODY="$BODY" python3 -c '
+import json, os, socket
+print(json.dumps({
+    "pane": os.environ["TMUX_PANE"],
+    "kind": os.environ["KIND"],
+    "body": os.environ["BODY"],
+    "meta": {"source": "claude-hook", "host": socket.gethostname().split(".")[0]},
+}))') || exit 0
+
+curl -sS --max-time 3 -o /dev/null \
+     -X POST "$HUB_URL/events" \
+     -H "Authorization: Bearer $TOKEN" \
+     -H "content-type: application/json" \
+     -d "$payload" 2>/dev/null
+
+exit 0

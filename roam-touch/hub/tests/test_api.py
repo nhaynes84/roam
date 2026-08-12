@@ -1,0 +1,453 @@
+"""The HTTP + WebSocket contract in API.md, exercised end to end.
+
+tmux is faked at `channels._run`; the store is real SQLite in a tmp dir.
+"""
+
+from __future__ import annotations
+
+import time
+
+import pytest
+from fastapi.testclient import TestClient
+
+import hub as hub_mod
+from store import EventKind, Store
+from conftest import TOKEN
+
+
+def next_frame(ws, want: str, limit: int = 12) -> dict:
+    """Read frames until one of type `want` shows up.
+
+    The poller emits `channels` frames on its own schedule, so a test that
+    demands frame #1 be its event would be testing the scheduler.
+    """
+    for _ in range(limit):
+        frame = ws.receive_json()
+        if frame["type"] == want:
+            return frame
+    raise AssertionError(f"no {want!r} frame in {limit} frames")
+
+
+def wait_for(predicate, timeout: float = 3.0):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        result = predicate()
+        if result:
+            return result
+        time.sleep(0.02)
+    raise AssertionError("condition never became true")
+
+
+# --------------------------------------------------------------------- auth
+
+
+def test_health_needs_no_token(client):
+    body = client.get("/health").json()
+    assert body["ok"] is True
+    assert body["service"] == "roam-hub"
+    assert body["protocol"] == hub_mod.PROTOCOL_VERSION
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["/status", "/channels", "/channels/%250/history", "/channels/%250/capture", "/events"],
+)
+def test_every_data_endpoint_requires_a_token(client, path):
+    assert client.get(path).status_code == 401
+
+
+def test_wrong_token_is_rejected(client):
+    resp = client.get("/channels", headers={"Authorization": "Bearer nope"})
+    assert resp.status_code == 401
+    assert resp.headers["www-authenticate"] == "Bearer"
+
+
+def test_send_requires_a_token(client):
+    assert client.post("/channels/0/send", json={"text": "hi"}).status_code == 401
+
+
+def test_hook_endpoint_requires_a_token(client):
+    resp = client.post("/events", json={"pane": "%0", "kind": "receipt"})
+    assert resp.status_code == 401
+
+
+def test_token_file_is_created_private_when_absent(tmp_path):
+    settings = hub_mod.Settings(
+        token=None, token_file=tmp_path / "t.txt", db_path=tmp_path / "d.sqlite"
+    )
+    token = hub_mod.resolve_token(settings)
+    assert len(token) >= 32
+    assert (tmp_path / "t.txt").stat().st_mode & 0o777 == 0o600
+    assert hub_mod.resolve_token(settings) == token, "token must be stable"
+
+
+# ----------------------------------------------------------------- channels
+
+
+def test_list_channels_merges_live_panes(client, auth):
+    body = client.get("/channels", headers=auth).json()
+    by_id = {c["pane_id"]: c for c in body["channels"]}
+    assert set(by_id) == {"%0", "%1"}
+    assert by_id["%0"]["label"] == "◑ Roam Touch rebuild discussion"
+    assert by_id["%0"]["live"] is True
+    assert by_id["%0"]["status"] == "idle"
+
+
+def test_a_dead_pane_with_history_is_still_listed_and_marked_dead(
+    client, auth, fake_tmux, store
+):
+    client.post("/channels/1/send", json={"text": "before it died"}, headers=auth)
+    fake_tmux.kill_pane("%1")
+    body = client.get("/channels", headers=auth).json()
+    dead = next(c for c in body["channels"] if c["pane_id"] == "%1")
+    assert dead["live"] is False
+    assert dead["status"] == "dead"
+    assert dead["label"] == "✳ Augment things", "the name must survive the pane"
+    assert dead["event_count"] >= 1
+    history = client.get("/channels/1/history", headers=auth).json()
+    assert any(e["body"] == "before it died" for e in history["events"])
+
+
+def test_live_channels_sort_above_dead_ones(client, auth, fake_tmux):
+    client.get("/channels", headers=auth)
+    fake_tmux.kill_pane("%0")
+    channels = client.get("/channels", headers=auth).json()["channels"]
+    assert [c["live"] for c in channels] == sorted(
+        [c["live"] for c in channels], reverse=True
+    )
+
+
+def test_status_becomes_working_after_a_send_and_idle_after_the_outcome(client, auth):
+    client.post("/channels/0/send", json={"text": "do the thing"}, headers=auth)
+    working = client.get("/channels/0", headers=auth).json()["channel"]
+    assert working["status"] == "working"
+    client.post("/events", json={"pane": "%0", "kind": "outcome"}, headers=auth)
+    idle = client.get("/channels/0", headers=auth).json()["channel"]
+    assert idle["status"] == "idle"
+
+
+def test_unknown_channel_is_404(client, auth):
+    assert client.get("/channels/99", headers=auth).status_code == 404
+
+
+def test_pane_ids_accepted_bare_or_percent_encoded(client, auth):
+    bare = client.get("/channels/0", headers=auth).json()["channel"]
+    encoded = client.get("/channels/%250", headers=auth).json()["channel"]
+    assert bare["pane_id"] == encoded["pane_id"] == "%0"
+
+
+def test_a_nonsense_pane_id_is_rejected(client, auth):
+    resp = client.get("/channels/not-a-pane/history", headers=auth)
+    assert resp.status_code == 400
+    assert "pane id" in resp.json()["detail"]
+
+
+def test_archiving_a_channel_hides_it_without_losing_history(client, auth):
+    client.post("/channels/1/send", json={"text": "keep me"}, headers=auth)
+    client.post("/channels/1/archive", json={"archived": True}, headers=auth)
+    visible = client.get("/channels", headers=auth).json()["channels"]
+    assert "%1" not in {c["pane_id"] for c in visible}
+    everything = client.get(
+        "/channels", params={"include_archived": True}, headers=auth
+    ).json()["channels"]
+    assert "%1" in {c["pane_id"] for c in everything}
+    history = client.get("/channels/1/history", headers=auth).json()
+    assert [e["body"] for e in history["events"] if e["kind"] == "sent"] == ["keep me"]
+    client.post("/channels/1/archive", json={"archived": False}, headers=auth)
+    assert "%1" in {
+        c["pane_id"] for c in client.get("/channels", headers=auth).json()["channels"]
+    }
+
+
+# --------------------------------------------------------------------- send
+
+
+def test_send_types_into_the_pane_and_records_it(client, auth, fake_tmux):
+    resp = client.post(
+        "/channels/0/send", json={"text": "ship it", "origin": "watch"}, headers=auth
+    )
+    assert resp.status_code == 200
+    event = resp.json()["event"]
+    assert event["kind"] == "sent"
+    assert event["body"] == "ship it"
+    assert event["meta"] == {"origin": "watch", "enter": True}
+    assert resp.json()["channel"]["status"] == "working"
+    assert fake_tmux.argv_for("send-keys")[0] == (
+        "send-keys", "-t", "%0", "-l", "--", "ship it",
+    )
+
+
+def test_send_without_enter_is_honoured(client, auth, fake_tmux):
+    client.post(
+        "/channels/0/send", json={"text": "staged", "enter": False}, headers=auth
+    )
+    assert fake_tmux.argv_for("send-keys") == [
+        ("send-keys", "-t", "%0", "-l", "--", "staged")
+    ]
+
+
+def test_send_to_a_dead_pane_is_404_and_types_nothing(client, auth, fake_tmux):
+    fake_tmux.kill_pane("%0")
+    resp = client.post("/channels/0/send", json={"text": "hello?"}, headers=auth)
+    assert resp.status_code == 404
+    assert "not live" in resp.json()["detail"]
+    assert fake_tmux.argv_for("send-keys") == []
+
+
+def test_empty_text_is_rejected_by_validation(client, auth):
+    assert client.post("/channels/0/send", json={"text": ""}, headers=auth).status_code == 422
+
+
+def test_a_tmux_failure_is_502_and_leaves_an_error_event(client, auth, fake_tmux):
+    fake_tmux.fail_send_with = "pane is dead"
+    resp = client.post("/channels/0/send", json={"text": "boom"}, headers=auth)
+    assert resp.status_code == 502
+    history = client.get("/channels/0/history", headers=auth).json()["events"]
+    error = [e for e in history if e["kind"] == "error"][-1]
+    assert error["meta"]["attempted"] == "boom"
+
+
+# ------------------------------------------------------------------ history
+
+
+def test_history_orders_the_full_exchange(client, auth):
+    client.post("/channels/0/send", json={"text": "question"}, headers=auth)
+    client.post("/events", json={"pane": "%0", "kind": "receipt"}, headers=auth)
+    client.post(
+        "/events",
+        json={"pane": "%0", "kind": "outcome", "body": "answer", "meta": {"ms": 90}},
+        headers=auth,
+    )
+    events = client.get("/channels/0/history", headers=auth).json()["events"]
+    kinds = [e["kind"] for e in events if e["kind"] != "opened"]
+    assert kinds == ["sent", "receipt", "outcome"]
+    assert events[-1]["meta"] == {"ms": 90}
+
+
+def test_history_since_returns_only_what_the_client_missed(client, auth):
+    first = client.post("/channels/0/send", json={"text": "one"}, headers=auth).json()
+    client.post("/channels/0/send", json={"text": "two"}, headers=auth)
+    body = client.get(
+        "/channels/0/history", params={"since": first["event"]["id"]}, headers=auth
+    ).json()
+    assert [e["body"] for e in body["events"]] == ["two"]
+
+
+def test_history_limit(client, auth):
+    for i in range(5):
+        client.post("/channels/0/send", json={"text": f"m{i}"}, headers=auth)
+    body = client.get("/channels/0/history", params={"limit": 2}, headers=auth).json()
+    assert [e["body"] for e in body["events"]] == ["m3", "m4"]
+
+
+def test_clearing_history_is_a_soft_delete(client, auth):
+    client.post("/channels/0/send", json={"text": "sensitive"}, headers=auth)
+    resp = client.delete("/channels/0/history", headers=auth).json()
+    assert resp["archived"] >= 1 and resp["deleted"] == 0
+    assert client.get("/channels/0/history", headers=auth).json()["events"] == []
+    recovered = client.get(
+        "/channels/0/history", params={"include_archived": True}, headers=auth
+    ).json()["events"]
+    assert any(e["body"] == "sensitive" for e in recovered)
+
+
+def test_global_events_feed_for_wake_up_catchup(client, auth):
+    mark = client.get("/status", headers=auth).json()["latest_event_id"]
+    client.post("/channels/0/send", json={"text": "a"}, headers=auth)
+    client.post("/channels/1/send", json={"text": "b"}, headers=auth)
+    body = client.get("/events", params={"since": mark}, headers=auth).json()
+    assert [e["body"] for e in body["events"]] == ["a", "b"]
+
+
+# -------------------------------------------------------------- hook events
+
+
+def test_hook_posts_receipt_and_outcome_by_tmux_pane(client, auth):
+    receipt = client.post(
+        "/events",
+        json={"pane": "%1", "kind": "receipt", "meta": {"source": "tmux-hook"}},
+        headers=auth,
+    )
+    assert receipt.status_code == 201
+    assert receipt.json()["event"]["pane_id"] == "%1"
+    assert receipt.json()["event"]["meta"] == {"source": "tmux-hook"}
+    outcome = client.post(
+        "/events", json={"pane_id": "%1", "kind": "outcome", "body": "done"}, headers=auth
+    )
+    assert outcome.json()["event"]["kind"] == "outcome"
+
+
+def test_hook_for_an_unknown_pane_creates_the_channel(client, auth, fake_tmux, store):
+    fake_tmux.add_pane("%7", session="side", title="a new session")
+    resp = client.post("/events", json={"pane": "%7", "kind": "receipt"}, headers=auth)
+    assert resp.status_code == 201
+    assert store.get_channel("%7") is not None
+    listed = client.get("/channels", headers=auth).json()["channels"]
+    assert "%7" in {c["pane_id"] for c in listed}
+
+
+def test_hook_rejects_a_bad_pane_id(client, auth):
+    resp = client.post("/events", json={"pane": "", "kind": "receipt"}, headers=auth)
+    assert resp.status_code == 400
+
+
+# ------------------------------------------------------------------ capture
+
+
+def test_capture_returns_pane_output(client, auth, fake_tmux):
+    fake_tmux.pane_output["%0"] = "the tail of the pane\n"
+    body = client.get(
+        "/channels/0/capture", params={"lines": 10}, headers=auth
+    ).json()
+    assert body["text"] == "the tail of the pane\n"
+    assert body["lines"] == 10
+    assert fake_tmux.argv_for("capture-pane")[-1][-1] == "-10"
+
+
+def test_capture_of_a_dead_pane_is_404(client, auth, fake_tmux):
+    fake_tmux.kill_pane("%0")
+    assert client.get("/channels/0/capture", headers=auth).status_code == 404
+
+
+# ---------------------------------------------------------------- websocket
+
+
+def test_websocket_rejects_a_bad_token(client):
+    with client.websocket_connect("/ws?token=wrong") as ws:
+        assert ws.receive_json() == {"type": "error", "detail": "unauthorised"}
+
+
+def test_websocket_hello_carries_the_channel_list(client, auth):
+    with client.websocket_connect("/ws", headers=auth) as ws:
+        hello = ws.receive_json()
+        assert hello["type"] == "hello"
+        assert hello["protocol"] == hub_mod.PROTOCOL_VERSION
+        assert {c["pane_id"] for c in hello["channels"]} >= {"%0", "%1"}
+        assert isinstance(hello["latest_event_id"], int)
+
+
+def test_websocket_accepts_the_token_as_a_query_param(client):
+    with client.websocket_connect(f"/ws?token={TOKEN}") as ws:
+        assert ws.receive_json()["type"] == "hello"
+
+
+def test_websocket_pushes_events_without_polling(client, auth):
+    with client.websocket_connect("/ws", headers=auth) as ws:
+        ws.receive_json()  # hello
+        client.post("/channels/0/send", json={"text": "pushed"}, headers=auth)
+        frame = next_frame(ws, "event")
+        assert frame["event"]["kind"] == "sent"
+        assert frame["event"]["body"] == "pushed"
+
+
+def test_websocket_pushes_a_hook_outcome_that_lands_later(client, auth):
+    """The whole point: the outcome arrives while the wearer is elsewhere."""
+    with client.websocket_connect("/ws", headers=auth) as ws:
+        ws.receive_json()
+        client.post(
+            "/events",
+            json={"pane": "%1", "kind": "outcome", "body": "build finished"},
+            headers=auth,
+        )
+        frame = next_frame(ws, "event")
+        assert frame["event"]["pane_id"] == "%1"
+        assert frame["event"]["body"] == "build finished"
+
+
+def test_websocket_since_replays_what_was_missed(client, auth):
+    mark = client.get("/status", headers=auth).json()["latest_event_id"]
+    client.post("/channels/0/send", json={"text": "while you were asleep"}, headers=auth)
+    with client.websocket_connect(f"/ws?since={mark}", headers=auth) as ws:
+        ws.receive_json()  # hello
+        backlog = next_frame(ws, "backlog")
+        assert [e["body"] for e in backlog["events"]] == ["while you were asleep"]
+
+
+def test_websocket_does_not_repeat_backlog_as_a_live_event(client, auth):
+    mark = client.get("/status", headers=auth).json()["latest_event_id"]
+    sent = client.post("/channels/0/send", json={"text": "once"}, headers=auth).json()
+    with client.websocket_connect(f"/ws?since={mark}", headers=auth) as ws:
+        ws.receive_json()
+        backlog = next_frame(ws, "backlog")
+        assert [e["id"] for e in backlog["events"]] == [sent["event"]["id"]]
+        client.post("/channels/0/send", json={"text": "twice"}, headers=auth)
+        live = next_frame(ws, "event")
+        assert live["event"]["body"] == "twice"
+
+
+def test_websocket_ping_gets_a_pong(client, auth):
+    with client.websocket_connect("/ws", headers=auth) as ws:
+        ws.receive_json()
+        ws.send_json({"type": "ping"})
+        assert next_frame(ws, "pong")["t"] > 0
+
+
+def test_websocket_announces_a_pane_that_appears(client, auth, fake_tmux):
+    with client.websocket_connect("/ws", headers=auth) as ws:
+        ws.receive_json()
+        fake_tmux.add_pane("%5", session="new", title="a fresh claude")
+        frame = next_frame(ws, "channels", limit=30)
+        assert "%5" in {c["pane_id"] for c in frame["channels"]}
+
+
+def test_websocket_announces_a_pane_that_dies(client, auth, fake_tmux, store):
+    wait_for(lambda: store.get_channel("%1") is not None)
+    with client.websocket_connect("/ws", headers=auth) as ws:
+        ws.receive_json()
+        fake_tmux.kill_pane("%1")
+        frame = next_frame(ws, "channels", limit=30)
+        dead = next(c for c in frame["channels"] if c["pane_id"] == "%1")
+        assert dead["live"] is False and dead["status"] == "dead"
+    closed = wait_for(
+        lambda: [e for e in store.history("%1") if e.kind == EventKind.CLOSED.value]
+    )
+    assert "channel closed" in closed[-1].body
+
+
+def test_history_cleared_is_broadcast(client, auth):
+    with client.websocket_connect("/ws", headers=auth) as ws:
+        ws.receive_json()
+        client.post("/channels/0/send", json={"text": "x"}, headers=auth)
+        client.delete("/channels/0/history", headers=auth)
+        frame = next_frame(ws, "history_cleared")
+        assert frame["pane_id"] == "%0"
+
+
+# ------------------------------------------------------------------- poller
+
+
+def test_poller_records_channels_it_discovers(client, auth, store):
+    wait_for(lambda: store.get_channel("%0") is not None)
+    assert store.get_channel("%0").label == "◑ Roam Touch rebuild discussion"
+    opened = wait_for(
+        lambda: [e for e in store.history("%0") if e.kind == EventKind.OPENED.value]
+    )
+    assert opened[0].meta["session"] == "main"
+
+
+def test_poller_tracks_a_retitled_pane(client, auth, fake_tmux, store):
+    wait_for(lambda: store.get_channel("%0") is not None)
+    fake_tmux.retitle("%0", "◑ Now building the hub")
+    wait_for(lambda: store.get_channel("%0").label == "◑ Now building the hub")
+    listed = client.get("/channels", headers=auth).json()["channels"]
+    assert any(c["label"] == "◑ Now building the hub" for c in listed)
+
+
+def test_poller_does_not_re_announce_channels_after_a_restart(
+    settings, store, fake_tmux
+):
+    with TestClient(hub_mod.create_app(settings=settings, store=store)):
+        wait_for(lambda: store.get_channel("%0") is not None)
+    opened_before = store.event_count("%0")
+    with TestClient(hub_mod.create_app(settings=settings, store=store)):
+        time.sleep(0.3)
+    assert store.event_count("%0") == opened_before, "no duplicate opened events"
+
+
+def test_hub_survives_tmux_going_away(client, auth, fake_tmux):
+    fake_tmux.installed = False
+    resp = client.get("/channels", headers=auth)
+    assert resp.status_code == 503
+    fake_tmux.installed = True
+    assert client.get("/channels", headers=auth).status_code == 200
+    assert client.get("/status", headers=auth).json()["tmux_ok"] is True
