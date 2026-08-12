@@ -1,6 +1,32 @@
 """
 ROAM Touch -- forearm bracer cradle for a Google Pixel (sailfish, 2016).
 
+★★★ HOW IT IS WORN. Read this before touching any sign in this file. Three
+separate analyses have been wrong because this was assumed instead of stated.
+
+    RIGHT FOREARM, ON TOP OF THE ARM.
+    Y = 0  is the USB END: cap, USB-C, speakers, card slot mouth.  It points
+           at the WRIST.
+    Y = OUT_L is the JACK END: 3.5 mm notch, closed tray wall.  It points at
+           the ELBOW.
+    +Z is out of the screen, away from the arm.
+    +X is therefore Y x Z = toward the wearer's LEFT = TOWARD THE MIDLINE,
+           because the device is on the RIGHT arm.  -X is outboard.
+    The screen tilts TOWARD +X so it faces him at rest, which makes +X the
+           SHALLOW flank (the edge that rolls down toward the arm) and -X the
+           DEEP one.  His eye is over the shallow, inboard flank.
+    The GUARD therefore stands on the DEEP, OUTBOARD (-X) flank, away from
+           the eye: it shades instead of clipping.
+
+★ WHY the USB end is at the wrist, which is the part that gets re-derived and
+lost: it is where his free hand reaches. Cap off, card out, cable in -- all
+service happens at the end nearest the hand. Reaching across the forearm
+toward the elbow to wiggle a cap off and pull a card out one-handed is awkward
+before you even try it. It is an ergonomic decision, not an axis convention.
+Consequences that fall out of it and are checked in verify_bracer.py: the card
+channel loads from the USB end, so cards are reachable; and charging while
+worn pulls at the wrist rather than across the elbow.
+
 Form: the phone housing (pocket, screen aperture, sensor holes, print-in-place
 buttons, jack notch) is a frozen tray. Around and under it sits a FACETED OUTER
 HULL that encloses the tilt wedge -- one low-poly prism running the length of
@@ -14,11 +40,11 @@ outer surface IS the hull's section and the joint has no step in it.
 
 The hollow under the tray carries TWO ID-1 CARDS (a bank card and a licence),
 in a channel formed by two C-rails hung from the tray floor. They load from
-the elbow end and the cap is what retains them.
+the USB end and the cap is what retains them.
 
 The screen sits in a WELL with a raised hood around it -- deep brow at the
-elbow, shallower one at the hand, plain walls down the sides, notch through
-the hand brow. Taken from the Pip-Boy 3000 in ref/. The deep flank carries
+USB end, shallower one at the jack end, plain walls down the sides, notch
+through the jack brow. Taken from the Pip-Boy 3000 in ref/. The deep flank carries
 two PROUD RIBS; the cut louvres that used to be there are gone.
 
 WORN ON THE RIGHT FOREARM, ON TOP. TILT is positive for that and the reasoning
@@ -34,7 +60,7 @@ needs no support and there is nothing curved to tessellate.
 
 Print orientation: STANDING ON THE HAND END, on a brim. Measured, not guessed --
 verify_bracer.py scores five orientations by unsupported face area, and the
-hand end wins on both support and bed contact because the hull's closed end is
+jack end wins on both support and bed contact because the hull's closed end is
 down there and the cavity opens upward at the nose. (⚠️ the two end-on rotations
 were labelled backwards until 2026-08-12; -pi/2 about X is the HAND end.)
 
@@ -71,7 +97,7 @@ CLR = 0.4            # per-side clearance around the phone
 WALL = 2.4           # pocket side wall
 FLOOR = 2.2          # tray floor under the phone
 LIP_SIDE = 2.5       # front lip over the long bezels
-LIP_END = 4.0        # front lip at the hand end
+LIP_END = 4.0        # front lip at the jack end
 LIP_H = 2.4          # lip height above the phone face (also screen standoff)
 BEZEL_CHAM = 1.5     # how far the aperture opens out at the top face
 
@@ -81,25 +107,41 @@ BEZEL_CHAM = 1.5     # how far the aperture opens out at the top face
 # Implemented by tilting the ARM CUT rather than the tray: the tray, pocket
 # and every aperture stay in a clean axis-aligned frame, and only the rib
 # profile changes. Rotating the tray instead would drag every feature with it.
-# ★★ ARM: RIGHT FOREARM, WORN ON TOP. Decided 2026-08-12; this is no longer a
-# placeholder. The sign follows from that and should not be flipped back.
-#
-# Model frame: +Y runs toward the hand, +Z out of the screen. Right-handed, so
-# +X = Y x Z, and with the right arm held out in front, screen up, that puts
-#   +X to the WEARER'S RIGHT, away from the body -- and -X toward the midline.
-# Positive TILT moves the arm cut's axis to -X, which is the same as rolling
-# the device around the arm toward +X. Worn centred, that leaves the screen
-# facing up and toward -X: across the body, into the eyeline, which is exactly
-# where you look when you glance down at your right forearm.
-#
-# So: POSITIVE = right arm. Negative would be the left, and everything handed
-# in this file (the section, the deep flank, the fins) follows SD below.
-TILT = 20.0          # degrees
+# ★★ SIGN DERIVED, NOT CHOSEN. See the orientation block at the top of the file
+# for the frame; the chain is:
+#   * the arm cut is ROTATED by TILT, which is the same as rotating the tray by
+#     -TILT relative to the arm. So the screen's normal, in the arm's frame, is
+#     (-sin TILT, 0, cos TILT).
+#   * for the screen to face +X -- the midline, where his eye is -- that needs
+#     -sin TILT > 0, so TILT must be NEGATIVE.
+#   * negative TILT puts the arm cut's axis at +X, so the +X edge rolls down
+#     toward the arm (SHALLOW) and -X lifts away (DEEP). Screen faces the
+#     shallow flank; the eye is over the shallow flank; the deep flank is the
+#     far side. That is the invariant, and it holds for either sign.
+# ⚠️ It was +20 until 2026-08-12, which pointed the screen OUTBOARD, away from
+# him. The error was not the sign in isolation -- it was reading Y=0 as the
+# elbow. Getting the end right flips X, and flipping X flips this.
+TILT = -25.0         # degrees
 
 ARM_R = 45.0         # nominal forearm radius, mm (90 mm dia)
-GAP = 8.0            # air gap between arm and tray underside, at the crown
+# ★★ GAP IS THE VOLUME KNOB, TILT IS THE ERGONOMIC ONE. They were conflated
+# for a round and the arithmetic settles it. The cavity's ceiling is the tray
+# floor and its floor is the arm cut offset by WALL_ARM, so the deepest thing
+# that fits under the card channel is set by the CROWN of the arm:
+#     Z_crown  = ARM_R*(1 - cos TILT) + WALL_ARM - GAP
+#     standoff = OUT_H + GUARD_H + GAP + FOAM - ARM_R*(1 - cos TILT)
+# Put the first at the depth a payload needs and substitute into the second and
+# the ARM_R term cancels: STANDOFF IS 46.7 mm FOR EVERY TILT. Tilting further
+# buys exactly zero volume at constant thickness on the arm -- all it does is
+# force GAP up by the same amount it lowers the crown. So tilt for the eyeline
+# and nothing else, and buy volume with GAP.
+# The stack that has to clear the crown is cards 1.8 + divider 1.8 + pack 10.4
+# = 14.0 mm, plus margin. 23.0 gives it 1.8 mm of air and puts the whole
+# assembly 51 mm off the arm's skin. That is the price of the pack, and it is
+# a GAP price, not a TILT one. See the report.
+GAP = 23.0           # air gap between arm and tray underside, at the crown
 FOAM = 4.0           # compliant pad thickness on EVERY arm face -- see below
-STRAP_Y = (34.0, 112.0)  # strap channel centres, from the elbow (open) end
+STRAP_Y = (34.0, 112.0)  # strap channel centres, from the USB (open) end
 
 # ------------------------------------------------------------------- hull
 # ★ The outer body. V1 carried the tray on two open saddle ribs; the tilt
@@ -151,8 +193,8 @@ WALL_OUT = 2.0       # outer skin thickness
 WALL_ARM = 2.0       # arm-face skin over the open span
 WALL_ARM_STRAP = 4.4  # under the strap channels -- 2.2 of it is the channel
 STRAP_BAND = 3.0     # how far the thick band runs past the channel
-WALL_END = 3.0       # closing wall at the hand end
-CAV_Y1 = 3.0         # cavity stops this far short of the hand end
+WALL_END = 3.0       # closing wall at the jack end
+CAV_Y1 = 3.0         # cavity stops this far short of the jack end
 
 # ------------------------------------------------------------- high guard
 # ★★ A HIGH GUARD, not a brow: the screen sits down inside a deep three-sided
@@ -165,7 +207,7 @@ CAV_Y1 = 3.0         # cavity stops this far short of the hand end
 #   * THREE SIDES. The deep (+X) flank has no guard at all -- that is the
 #     3.11 cm3 "deep-flank cut": it is not a cut, it is a wall he never built;
 #   * the crest RAMPS DOWN at 45 deg into both ends, from Y 134 at the hand
-#     end and Y ~10.9 at the elbow. That ramp is what stops the guard reading
+#     end and Y ~10.9 at the USB end. That ramp is what stops the guard reading
 #     as an extrusion, and it is the answer to the blocky ends as well.
 #
 # ★ What he asked for on top of his file: the inner faces CONCAVE -- scooped
@@ -174,13 +216,13 @@ CAV_Y1 = 3.0         # cavity stops this far short of the hand end
 # in the STEP rather than a faceted approximation he has to clean up.
 #
 # What I did NOT take from his file, and why:
-#   ⚠️ his hand brow starts at Y 135.3, which puts 15 mm of material over the
+#   ⚠️ his jack brow starts at Y 135.3, which puts 15 mm of material over the
 #      front camera and the earpiece. Those are frozen apertures; punching them
 #      through a 15 mm brow would tube the camera. Ours starts at Y 141, clear
 #      of the camera's outer edge at 140.5, and the brow is correspondingly
 #      shorter. That is the one place his form and the housing disagree.
-#   ⚠️ his elbow brow's inner face rakes at 49 deg off vertical. Printed
-#      standing on the hand end that face points down and needs support; ours
+#   ⚠️ his USB-end brow's inner face rakes at 49 deg off vertical. Printed
+#      standing on the jack end that face points down and needs support; ours
 #      is held to 45 deg by construction (see SCOOP_R_BROW).
 GUARD_H = 15.0       # crest height above the tray face -- his 28.4 - 13.4
 GUARD_HW = 41.5      # outer half width, flush with the ribs
@@ -197,15 +239,25 @@ GUARD_LEDGE = 0.3    # well floor left outside the aperture mouth. ⚠️ NOT ze
 # (its filter keeps exactly this case). 1.2 mm is three extrusion lines and it
 # still reads as a point at 83 mm across.
 CREST_W = 1.2        # flat left at the crest
-BROW_Y0 = 11.0       # elbow scoop's base, on the well floor
+BROW_Y0 = 11.0       # USB-end scoop's base, on the well floor
 BROW_Y1 = 141.0      # hand scoop's base -- clear of the camera at 140.5
-ELBOW_OUT = 0.59     # elbow brow's outer face rakes back at his slope
-RAMP_Y0 = 11.0       # crest starts ramping down here, toward the elbow...
-RAMP_Y1 = 134.0      # ...and here toward the hand. His numbers.
+USB_BROW_OUT = 0.59  # USB-end brow's outer face rakes back at his slope
+RAMP_Y0 = 11.0       # crest starts ramping down here, toward the USB end...
+RAMP_Y1 = 134.0      # ...and here toward the jack end. His numbers.
 # 1.1, not his 1.0. The ramp faces point downward when the part stands on its
-# hand end, and at 1.0 they land at exactly 45 deg -- on the threshold, not
+# jack end, and at 1.0 they land at exactly 45 deg -- on the threshold, not
 # under it. 1.1 puts them at 48 deg and is indistinguishable by eye.
 RAMP_SLOPE = 1.1     # run per unit rise; >1 is shallower than 45 deg
+
+# ★ Internal cable: a flat USB-C lead from the phone's port to the pack. The
+# plate is deep enough for a right-angle head to sit in a pocket, turn, and run
+# out sideways into the cavity past the card rails.
+CABLE_W, CABLE_H = 14.0, 4.5    # pocket in the plate, for the head + turn
+CABLE_X = 35.0             # drops into the cavity here, outboard of the rails
+CABLE_SLOT_W = 4.4         # ⚠️ the drop slot is narrow because the pack and
+                           # the cards already use the full 54 mm width. The
+                           # flat lead runs through it ON EDGE, not flat.
+PLUG_D = 6.0               # depth the right-angle head needs off the phone
 
 CAP_D = 10.0         # end-cap slip depth
 CAP_W = 2.0          # cap side wall
@@ -214,14 +266,18 @@ CAP_W = 2.0          # cap side wall
 # The answer is material, not a slicer setting: a thicker plate gives the scoop
 # real depth, a proper rim, and a gentler taper that prints cleanly. It also
 # suits the chunky retro-futurist read.
-CAP_T = 6.0          # cap end plate
+CAP_T = 12.0         # cap end plate -- now houses the plug and the cable turn
 CAP_CLR = 0.30       # slip fit over the tenon
 # Strap runs in a channel on the UNDERSIDE of each rib, not on side flanges.
 # Flanges made the device 91 mm wide for no structural reason and were also
 # what the end cap collided with. This keeps the whole thing tray-width.
 STRAP_W = 26.0       # channel width along the arm, for 25 mm webbing
 STRAP_D = 2.2        # channel depth into the rib's arm face
-BAR_X = 20.0         # retaining bars, either side of centre
+# ⚠️ 14, not 20. The bar is trimmed by the arm cut, so its tip is a wedge
+# whose angle is the local slope of the arm face -- and at 25 deg of tilt a
+# bar 39 mm from the crown came out at 31 deg, under the crest limit. Closer
+# in, the face is flatter and the tip is blunt.
+BAR_X = 14.0         # retaining bars, either side of centre
 BAR_W = 6.0
 
 # 3.5 mm jack: on the TOP edge and NOT centred -- it sits in the right-hand
@@ -276,7 +332,7 @@ POCK_W = PH_W + 2 * CLR
 POCK_D = PH_T + 0.3
 
 OUT_W = POCK_W + 2 * WALL          # tray outer width
-OUT_L = POCK_L + WALL              # closed at the hand end, open at the elbow
+OUT_L = POCK_L + WALL              # closed at the jack end, open at the USB end
 OUT_H = FLOOR + POCK_D + LIP_H
 
 # The rib faces are carved by a cylinder FOAM larger than the arm, about an
@@ -315,10 +371,10 @@ SAG = -HULL_Z_DEEP    # how far the hull hangs below the tray
 
 
 # --------------------------------------- SVG face coords -> model coords
-# The phone sits with its TOP edge (headphone jack) at the hand end.
+# The phone sits with its TOP edge (headphone jack) at the JACK end, Y=OUT_L.
 PHONE_TOP_Y = POCK_L - CLR         # Y of the phone's top edge in the tray
 def fx(x):  return x - PH_W / 2    # SVG x -> model X (centred)
-def fy(y):  return PHONE_TOP_Y - y  # SVG y -> model Y (elbow = 0)
+def fy(y):  return PHONE_TOP_Y - y  # SVG y -> model Y (USB end = 0)
 
 # Screen aperture: the housing bezel closes down to the black display area,
 # opened by FEAT_TOL so a tracing error can never clip live pixels.
@@ -347,11 +403,11 @@ def scoop_r(run, rise):
 SCOOP_R_SIDE = scoop_r(GUARD_XC - GUARD_X0, GUARD_H)
 SCOOP_CX = GUARD_XC - SCOOP_R_SIDE              # axis, out in the well
 # ⚠️ The brow scoops' radius is a PRINTABILITY choice, not a styling one. The
-# elbow brow's inner face points down when the part stands on its hand end, so
+# USB-end brow's inner face points down when the part stands on its jack end, so
 # it must stay inside 45 deg; for this family of arcs the steepest point is at
 # the base and the condition is exactly R >= rise * sqrt(2).
 SCOOP_R_BROW = GUARD_H * math.sqrt(2) * 1.13
-SCOOP_CY0 = BROW_Y0 + math.sqrt(SCOOP_R_BROW ** 2 - GUARD_H ** 2)   # elbow axis
+SCOOP_CY0 = BROW_Y0 + math.sqrt(SCOOP_R_BROW ** 2 - GUARD_H ** 2)   # USB-end axis
 SCOOP_CY1 = BROW_Y1 - math.sqrt(SCOOP_R_BROW ** 2 - GUARD_H ** 2)   # hand axis
 
 
@@ -402,7 +458,7 @@ def bevel(pts, d, skip=()):
     ★ The hull's creases are bevelled HERE, in the section, not with OCCT's
     chamfer() afterwards. Three reasons, in order of how much they cost me:
       * OCCT refuses them. Every belt crease runs into the cap's tenon step at
-        one end and the hand-end face at the other, and it would not take a cut
+        one end and the jack-end face at the other, and it would not take a cut
         of any size there -- 1 of 4 creases landed.
       * A section bevel propagates for free to the cap, the tenon, the collar
         bore and the shell cavity, because they are all insets of this polygon.
@@ -429,7 +485,7 @@ def prism(pts, y0, y1):
     ⚠️ SELF-CORRECTING, and it has to be. Polygon takes its face normal from
     the winding and extrude() follows that normal, so a profile listed the
     other way round silently goes to -Y. That has now cost two separate bugs:
-    a 294 mm long part, and a lip bevel that cut the elbow brow off. Rather
+    a 294 mm long part, and a lip bevel that cut the USB-end brow off. Rather
     than ask every caller to get the winding right, build it, look at where it
     landed, and flip if it went backwards.
     """
@@ -452,7 +508,8 @@ def yz_prism(pts, x0, x1):
 
 
 # ------------------------------------------------------------------ build
-# Tray body: Y = 0 at the elbow (open) end, Y = OUT_L at the hand end.
+# Tray body: Y = 0 at the USB (open) end -- the WRIST -- and Y = OUT_L at the
+# jack end -- the ELBOW. See the orientation block at the top of the file.
 part = bbox(-OUT_W / 2, OUT_W / 2, 0, OUT_L, 0, OUT_H)
 
 
@@ -582,10 +639,60 @@ _card_z0 = -(CARD_SH + CARD_LEDGE)
 for _xa, _xb in ((CARD_X0 - CARD_RAIL, CARD_X0 + CARD_ENG),
                  (CARD_X1 - CARD_ENG, CARD_X1 + CARD_RAIL)):
     cav -= bbox(_xa, _xb, -1.0, CARD_Y1 + CARD_STOP, _card_z0, 0.0)
-cav -= bbox(CARD_X0, CARD_X1, CARD_Y1, CARD_Y1 + CARD_STOP, _card_z0, 0.0)
+# ⚠️ The stop's FAR face is raked 45 deg, not square. Square, it is a 3.7 cm2
+# flat ceiling in the middle of the print, inside a cavity no support can
+# reach. Raked, it is a bridge the slicer can walk up.
+cav -= yz_prism([
+    (CARD_Y1, _card_z0),
+    (CARD_Y1 + CARD_STOP, _card_z0),
+    (CARD_Y1 + CARD_STOP - _card_z0, 0.0),
+    (CARD_Y1, 0.0),
+], CARD_X0, CARD_X1)
 
-part -= cav
 part -= bbox(CARD_X0, CARD_X1, -10.0, CARD_Y1, -CARD_SH, 0.0)
+
+# ---------------------------------------------------------- power pack
+# ★ A COMMERCIAL card-format bank, not a cell: 85.6 x 54 x 10, the ID-1
+# footprint the card channel already uses, just far thicker. It sits directly
+# under the cards in the same C-rails pattern, loads from the USB end, and the
+# cap retains it -- so nothing can fall out onto the floor when it is off.
+# ⚠️ This is what GAP=20 buys. At GAP=8 there were 0 mm under the cards; the
+# arm's crown was right up against the tray floor. See the note on GAP.
+PACK_L, PACK_W, PACK_T = 85.6, 54.0, 10.0
+PACK_CLR = 0.6
+PACK_RAIL, PACK_ENG, PACK_LEDGE = 3.0, 3.0, 1.6
+PACK_SW = PACK_W + 2 * PACK_CLR
+PACK_X0, PACK_X1 = -PACK_SW / 2, PACK_SW / 2
+# ⚠️ 1.8 mm of divider between the card channel and the pack, not 0.6. The
+# rails are where the two channels share a floor and 0.6 read as 0.60 mm of
+# wall. That 1.2 mm is what took GAP from 20 to 21.
+PACK_Z1 = -CARD_SH - 1.8                 # just clear of the cards above
+PACK_Z0 = PACK_Z1 - (PACK_T + 0.4)
+PACK_Y1 = PACK_L + 1.5
+for _xa, _xb in ((PACK_X0 - PACK_RAIL, PACK_X0 + PACK_ENG),
+                 (PACK_X1 - PACK_ENG, PACK_X1 + PACK_RAIL)):
+    cav -= bbox(_xa, _xb, -1.0, PACK_Y1 + 2.0, PACK_Z0 - PACK_LEDGE, PACK_Z1)
+cav -= yz_prism([
+    (PACK_Y1, PACK_Z0 - PACK_LEDGE),
+    (PACK_Y1 + 2.0, PACK_Z0 - PACK_LEDGE),
+    (PACK_Y1 + 2.0 + (PACK_Z1 - PACK_Z0 + PACK_LEDGE), PACK_Z1),
+    (PACK_Y1, PACK_Z1),
+], PACK_X0, PACK_X1)
+part -= cav
+part -= bbox(PACK_X0, PACK_X1, -10.0, PACK_Y1, PACK_Z0, PACK_Z1)
+
+# ---- cable route: pocket in the cap, slot through the floor, then the cavity
+# ⚠️ Outboard of both the card rails and the pack rails, because those already
+# take the full 54 mm. The lead goes through on edge.
+# ⚠️ It runs OUT TO the pocket wall and 0.5 mm into it, rather than stopping
+# short. Stopping short leaves a 0.75 mm rib of floor between slot and wall,
+# which the wall check reads at 0.25 -- and it is a rib nobody wants anyway.
+# ⚠️ Its inner edge lands exactly on the card rail's outer face. Anywhere else
+# leaves a sliver of rail between the two, and at 1.00 mm the wall check calls
+# it -- correctly, it would be a rib you could snap with a fingernail.
+part -= bbox(CARD_X1 + CARD_RAIL, POCK_W / 2 + 0.5,
+             -1.0, 17.0, PACK_Z1 - 2.0, FLOOR + 4.0)   # runs out to the mouth,
+             # or a 1 mm rib of floor is left standing between slot and face
 
 # ★ Ribs, not louvres. The five canted slots that used to be here are gone.
 # They were doing a little real work -- the floor vents ducted into the cavity
@@ -638,7 +745,7 @@ part += fins(CAP_D, OUT_L)
 #
 # Three pieces of the reference worth taking: the display is SUNK (the well
 # floor is the old face, at OUT_H); the hood stands proud all round; and the
-# hood is not a uniform ring -- deep brow at the elbow, shallower at the hand,
+# hood is not a uniform ring -- deep brow at the USB end, shallower at the jack,
 # plain walls down the sides where there are only 6 mm to play with.
 # ---- the blank: a slab the full width, bevelled top and base like his ----
 GUARD_SEC = [
@@ -665,34 +772,35 @@ guard = prism(GUARD_SEC, 0.0, OUT_L)
 # and no guard is ever built there. That is the "deep-flank cut" in his file --
 # a wall he never built, reproduced here as a consequence of the geometry
 # rather than as a hole punched afterwards.
-# ★★ WHICH SIDE THE GUARD IS ON IS A LIVE QUESTION -- see the report. His file
-# puts it on the SHALLOW flank and this reproduces that. But the screen tilts
-# toward -X (the body's midline, for a right-arm fit), so the eye sits over the
-# shallow flank -- the same side as the guard. The harness measures what that
-# costs: 19 deg of viewing cone on the guard side against 37 deg on the open
-# deep side. Flipping this one sign puts the guard on the far side and gives
-# the eye the open one. One character, if he wants it.
-_SHL = -SD                      # the side the guard is on -- shallow flank
+# ★★ THE GUARD IS ON THE DEEP FLANK, and that is the answer to the question
+# this file carried for a round. The screen faces the shallow flank, so his eye
+# is over the shallow flank, so the guard must be on the other one. Measured by
+# the harness rather than argued: the viewing cone is wide open on the eye side
+# and only the far side is walled.
+# ⚠️ In the MODEL this is still -X, exactly where his demo put it. Nothing
+# moved. What changed is that -X is now correctly the deep, outboard side
+# instead of being mislabelled the shallow, inboard one.
+_SHL = SD                       # the side the guard is on -- deep flank
 _ax = _SHL * SCOOP_CX
 _zone_side = (Pos(_ax, OUT_L / 2, _GZ1) * Rot(90, 0, 0)
               * Cylinder(SCOOP_R_SIDE, OUT_L + 300)) \
     + bbox(min(_ax, -_SHL * 90), max(_ax, -_SHL * 90), -60, OUT_L + 60, -90, 200)
-_zone_elbow = (Pos(0, SCOOP_CY0, _GZ1) * Rot(0, 90, 0)
+_zone_usb = (Pos(0, SCOOP_CY0, _GZ1) * Rot(0, 90, 0)
                * Cylinder(SCOOP_R_BROW, 400)) \
     + bbox(-90, 90, SCOOP_CY0, OUT_L + 60, -90, 200)
 _zone_hand = (Pos(0, SCOOP_CY1, _GZ1) * Rot(0, 90, 0)
               * Cylinder(SCOOP_R_BROW, 400)) \
     + bbox(-90, 90, -60, SCOOP_CY1, -90, 200)
-guard -= (_zone_side & _zone_elbow & _zone_hand
+guard -= (_zone_side & _zone_usb & _zone_hand
           & bbox(-90, 90, -60, OUT_L + 60, _GZ0 - EPS, _GZ1 + 40))
 
-# ---- the elbow brow's outer face rakes back off the cap's top ----
+# ---- the USB-end brow's outer face rakes back off the cap's top ----
 # The guard grows out of the cap's face rather than butting against it. In this
-# print orientation that face's normal points toward the elbow, which is UP, so
+# print orientation that face's normal points toward the USB end, which is UP, so
 # the rake is free at any angle.
 guard -= yz_prism([
     (0.0,                          _GZ0 - EPS),
-    (ELBOW_OUT * (_GZ1 + 30 - _GZ0), _GZ1 + 30),
+    (USB_BROW_OUT * (_GZ1 + 30 - _GZ0), _GZ1 + 30),
     (-90.0,                        _GZ1 + 30),
     (-90.0,                        _GZ0 - EPS),
 ], -90, 90)
@@ -711,7 +819,7 @@ for _sy, _ry in ((-1, RAMP_Y0), (1, RAMP_Y1)):
 
 part += guard
 
-# Phone pocket -- runs out the elbow end so the phone slides in
+# Phone pocket -- runs out the USB end so the phone slides in
 part -= bbox(-POCK_W / 2, POCK_W / 2, -10, POCK_L, FLOOR, FLOOR + POCK_D)
 
 # Screen aperture. This is the bezel: the face closes down to the display
@@ -786,10 +894,10 @@ for (_b0, _b1) in (PWR_SVG, VOL_SVG):
                 Z_BTN - BTN_BORE_H / 2 + c, Z_BTN + BTN_BORE_H / 2 - c)
     part += flange + stem
 
-# 3.5 mm headphone jack notch, hand end
+# 3.5 mm headphone jack notch, jack end (Y = OUT_L)
 # ⚠️ Stops at OUT_H, not OUT_H+10. The notch through the frozen wall is
 # unchanged; the overshoot above the face used to cut air and now cuts a
-# 20 mm bite out of the hood's hand brow. The plug sits at Z 6.45 and is 6 mm
+# 20 mm bite out of the hood's jack brow. The plug sits at Z 6.45 and is 6 mm
 # across, so it never needed the height.
 part -= bbox(
     JACK_X - JACK_W / 2, JACK_X + JACK_W / 2,
@@ -811,8 +919,8 @@ for (yc, ln, vw) in ((24.0, 26.0, VENT_W), (73.0, 50.0, VENT_W),
     part -= Pos(0, yc, -0.4) * vent
 
 
-# ------------------------------------------------------- elbow end cap
-# The phone slides in at the elbow end, so without this it can slide out --
+# --------------------------------------------------------- USB end cap
+# The phone slides in at the USB end, so without this it can slide out --
 # the strap is otherwise the only thing stopping it. REMOVABLE, not glued:
 # it is the service access. A U-section that slips over the outside of the
 # tray and snaps into two dimples, so nothing intrudes into the pocket
@@ -831,35 +939,25 @@ CAP_SLOT_W = 1.4     # relief slot freeing the deep flank from the chine fold
 CAP_SLOT_ROOT = 2.5  # slot stops this far from the plate, leaving the root
 CAP_RAKE = 8.0       # plan-view rake across the plate's CAP_T of depth
 CAP_CHIN = 4.0       # elevation rake on the cap's face, below the tray
-# USB-C plug shell is 8.34 x 2.56 mm with fully rounded ends. Cut that SHAPE
-# with ~1 mm of clearance, not a generic rectangle -- the taper does the work
-# of accommodating fat overmoulds, so the opening itself can be tight.
-USB_W, USB_H = 9.4, 3.6
-USB_Z = FLOOR + PH_T / 2   # port sits mid phone thickness, NOT near the floor
-# ★ Flare the cable aperture out on the OUTER face and taper it down to size.
-# The end plate is only CAP_T thick, so a plain rectangular hole means only a
-# slim cable head ever reaches the port -- a funnel lets fat overmoulds seat,
-# and it reads as a designed feature instead of a punched hole.
-USB_FLARE = 5.0            # per side, so a ~10 mm spread down to the opening
-# ⚠️ The trough must stop SHORT of the plate's inner face, not run out to it.
-# Landing the taper exactly on the far face makes the scoop meet the slot
-# asymptotically -- a feather edge, measured at 0.01 mm by the wall check.
-# This leaves a straight land at the throat, so the taper ends on material.
-USB_LAND = 2.0             # straight throat before the plate breaks through
-# Speaker and mic sit either side of the USB port on the bottom edge. Blocking
-# them with a solid plate would muffle the one output the device has.
-SPK_W, SPK_H = 13.0, 2.6
+# ★★ NO CABLE APERTURE, and no trough. Charging is uncap-and-plug now, so the
+# port never has to be reached through the plate. The flared trough went with
+# it: it existed ONLY to funnel a fat cable head down to a port behind a thin
+# plate, and with no cable passing through it was a leftover speaking a
+# different language from the rest of the body. Deleted, not preserved.
+USB_Z = FLOOR + PH_T / 2   # port sits mid phone thickness -- still the datum
+                           # the internal cable and the speaker holes work off
+# ⚠️ The speaker and the primary mic sit either side of the port on the phone's
+# bottom edge, and both stay OPEN. The speaker is the TTS output and the mic is
+# the PTT input -- the entire input half of the device. Plain rectangular
+# holes, widened now there is no port between them.
+SPK_W, SPK_H = 16.0, 3.4
 SPK_X = 17.0               # centre offset either side of the port
-# ★ Retro-futurist: the flare is not an oval around the port, it is a trough
-# spanning the whole face with the port at its centre. The loft tapers to
-# nothing at the edges, so it never breaches the 2.4 mm plate -- it reads as a
-# machined scoop rather than a punched hole with a chamfer round it.
-# ⚠️ The mouth is centred on the FACE, the port is not: the cap face spans
-# Z -CAP_CLR..OUT_H+CAP_CLR+CAP_W (centre 7.7) while USB_Z is 6.45. Centring
-# the mouth on the port left 3.75 mm at the top and 1.25 at the bottom, which
-# reads as a mistake. Lofting a face-centred mouth to a port-centred throat
-# skews it slightly, which is the intent.
-TROUGH_INSET = 0.8         # margin left all round -- near edge to edge
+# ★ The face instead gets a recessed panel: a flat sunken rectangle with the
+# two vent slots in it, bevelled at CHAMFER like everything else. Chunky and
+# flat, which is the language the body speaks.
+FACE_INSET = 5.0           # margin from the face outline to the panel
+FACE_DEPTH = 2.5           # how far the panel sinks
+
 
 # ---------------------------------------------------- the cap's section
 # ★★ The cap's OUTER SURFACE IS THE HULL'S SECTION. V1's cap was a rectangular
@@ -910,20 +1008,20 @@ cap = (prism(HULL_SEC, 0.0, CAP_D) & _cap_below) \
 # End plate: the whole face -- hull section below, tray section above.
 cap += prism(HULL_SEC, -CAP_T, 0.0)
 cap += bbox(-OUT_W / 2, OUT_W / 2, -CAP_T, 0.0, 0.0, OUT_H)
-# ⚠️ NO guard band on the cap any more. The guard's elbow brow rakes back off
+# ⚠️ NO guard band on the cap any more. The guard's USB-end brow rakes back off
 # the cap's top face instead of running across it, so the cap tops out at the
 # tray face and the guard grows out from behind it. That also retires the
 # height mismatch at the joint that his demo file still has.
 # ...and the deep-flank ribs, same profile as the hull's so they line through.
 cap += fins(-CAP_T, CAP_D)
 # ⚠️ The saddle runs through the cap too. Without this the plate would close
-# off the elbow end of the arm channel and sit on the forearm.
+# off the USB end of the arm channel and sit on the forearm.
 cap -= arm
 
-# ★ The cap's CHIN rakes back: its face leans away from the elbow as it drops
+# ★ The cap's CHIN rakes back: its face leans away from the wrist as it drops
 # through the hull's section, so the nose is a wedge and not a slab. Kept below
 # Z=0 so it never touches the USB trough or the speaker mouths, and its normal
-# points toward the elbow -- up, in this print orientation -- so it is free.
+# points toward the USB end -- up, in this print orientation -- so it is free.
 cap -= yz_prism([
     (-CAP_T,                  0.0),
     (-CAP_T + CAP_CHIN,       HULL_Z_DEEP - 10),
@@ -944,32 +1042,36 @@ for _sx in (-1, 1):
     cap -= Pos(_p0 + _n * 100.0) \
         * Rot(0, 0, math.degrees(math.atan2(_n.Y, _n.X))) * Box(200, 200, 200)
 
-# Cable aperture: a USB-C-shaped slot through the plate, flared on the outside
-# and tapered down to it so any head can find the port behind the plate.
-cap -= Pos(0, -CAP_T - EPS, USB_Z) * Rot(-90, 0, 0) * extrude(
-    RectangleRounded(USB_W, USB_H, USB_H / 2 - 0.01),
-    amount=CAP_T + CAP_D + 2 * EPS)
-# ⚠️ x_dir is pinned. Without it the plane picks its own axes and the flare
-# comes out rotated 90 deg -- wide where the cap is thin, and it eats the plate.
-# ⚠️ Built as a LOFT, not extrude(taper=). OCCT's extrude_taper throws
-# Standard_TypeMismatch on a rounded profile at this angle (~64 deg).
-# The trough now spans the TRAY's part of the face rather than the whole of it:
-# the face is 39 mm tall in the new section and most of the lower half is hull
-# wedge that the saddle cuts away, so a full-face scoop would run off the edge.
-# Over the tray it is very nearly centred on the port, which also retires the
-# deliberate skew the old rectangular face needed.
-_trough_hw = OUT_W / 2 - TROUGH_INSET
-_trough_h = OUT_H - 2 * TROUGH_INSET
-cap -= loft([
-    Plane(origin=(0, -CAP_T - EPS, OUT_H / 2), x_dir=(1, 0, 0), z_dir=(0, 1, 0))
-    * RectangleRounded(2 * _trough_hw, _trough_h, 2.0),
-    Plane(origin=(0, -USB_LAND, USB_Z), x_dir=(1, 0, 0), z_dir=(0, 1, 0))
-    * RectangleRounded(USB_W, USB_H, USB_H / 2 - 0.01),
-])
-# Speaker / mic apertures either side of the port, through the plate.
+# ---- the face: a sunken panel with the two vent slots in it ----
+# ★ Replaces the trough. Flat, bevelled at CHAMFER, and it belongs to the same
+# family as the belt and the guard crest rather than being the one curved,
+# funnel-shaped thing on an otherwise faceted object.
+_fz0, _fz1 = FACE_INSET, OUT_H - FACE_INSET
+_fx = OUT_W / 2 - FACE_INSET
+cap -= yz_prism([
+    (-CAP_T - EPS, _fz0),
+    (-CAP_T + FACE_DEPTH, _fz0 - CHAMFER_SM),
+    (-CAP_T + FACE_DEPTH, _fz1 + CHAMFER_SM),
+    (-CAP_T - EPS, _fz1),
+], -_fx, _fx)
+
+# Speaker and primary mic, straight through the plate. No taper, no funnel --
+# they are holes, and both have to stay open: the speaker is TTS out, the mic
+# is PTT in.
 for _sx in (-1, 1):
     cap -= Pos(_sx * SPK_X, -CAP_T - EPS, USB_Z) * Rot(-90, 0, 0) * extrude(
         RectangleRounded(SPK_W, SPK_H, SPK_H / 2 - 0.01), amount=CAP_T + 2 * EPS)
+
+# ---- internal cable route ----
+# ⚠️ A pocket in the plate's INNER face, not a hole through it. The phone's
+# right-angle head sits in here, the lead turns, and it runs out sideways to
+# CABLE_X where a slot through the tray floor drops it into the cavity, past
+# the card rails rather than across the cards. Nothing passes through the
+# outer face, so the cap still closes the end completely.
+cap -= bbox(-CABLE_W / 2, CABLE_W / 2, -PLUG_D, EPS,
+            USB_Z - CABLE_H / 2 - 1.0, USB_Z + CABLE_H / 2 + 1.0)
+cap -= bbox(-CABLE_W / 2, CABLE_X + CABLE_W / 2, -CABLE_H - 1.0, EPS,
+            -1.0, USB_Z + CABLE_H / 2 + 1.0)
 
 # ★ No relief slots on the shallow side, and no tongues. The collar is a C, so
 # each flank is ALREADY a cantilever: bounded by the belt above, by the saddle
@@ -1010,7 +1112,7 @@ for _sd, _zc in FLANKS:
 #   * the visor's inner lip is the hood's own edge and a 3 mm cut there would
 #     eat the hood, so it takes 1.2.
 # Everything else -- every long hull crease, the visor's outer rim, the whole
-# hand-end perimeter -- takes the full 3 mm.
+# jack-end perimeter -- takes the full 3 mm.
 #
 # Feature edges (pocket, apertures, strap channel, plungers, card rails) are
 # deliberately left sharp: chamfering those would eat clearances. The audit in
@@ -1053,9 +1155,9 @@ def _visor_base(e):
     return _near(c.Z, OUT_H) and _near(abs(c.X), GUARD_HW)
 
 
-# ⚠️ The hand-end perimeter is DELIBERATELY LEFT SHARP, and this is the one
+# ⚠️ The jack-end perimeter is DELIBERATELY LEFT SHARP, and this is the one
 # place the 3 mm rule is not applied. Two reasons, both hard:
-#   * the tray's hand-end wall is 2.4 mm of frozen pocket, so a 3 mm chamfer on
+#   * the tray's jack-end wall is 2.4 mm of frozen pocket, so a 3 mm chamfer on
 #     its outer edge breaks straight through into the pocket -- it did, and the
 #     wall probes caught it;
 #   * that face is the bed. A sharp first layer is what you want there.
@@ -1134,7 +1236,8 @@ export_stl(cap, os.path.join(out, "bracer_endcap.stl"))
 # ★ Also export both parts ROTATED INTO PRINT ORIENTATION, bed at Z=0. Renders
 # taken off these are the ones worth looking at -- printability is judged in
 # the orientation it prints in, not the one it was modelled in.
-# ⚠️ Rot(-90,0,0) sends +Y to -Z, so the hand end goes to the bed. Verified
+# ⚠️ Rot(-90,0,0) sends +Y to -Z, so the JACK end (Y=OUT_L) goes to the bed.
+# That is the ELBOW end as worn. Verified
 # against the bounding box below rather than assumed.
 _pp = Pos(0, 0, OUT_L) * Rot(-90, 0, 0) * part
 _pc = Pos(0, 0, CAP_T) * Rot(90, 0, 0) * cap
