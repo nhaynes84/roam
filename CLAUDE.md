@@ -65,19 +65,21 @@ p2/          P2 firmware (board-specific, display.cpp is standalone)
 housing/     OpenSCAD + build123d + STL/STEP renders
 housing/lib/ Component library (reusable modules + spring button)
 hardware/    Wiring docs, pinout tables
-tools/       Utilities (roam-send Swift BLE tool)
+tools/       Utilities (roam-msg — network push to ROAM Touch over Tailscale)
 tests/       Test sketches
 ```
 
-## Roam Wrist Display — Push Messages
+## ROAM — Push Messages
 
-The user wears Roam on their wrist so they don't have to sit at the computer. **You must push key messages to Roam so the user can follow along remotely.**
+The user wears ROAM so they don't have to sit at the computer. **You must push key messages so the user can follow along remotely.**
 
 ```bash
 ~/Projects/roam/tools/roam-msg "your message here"
 ```
 
-Codex note: BLE/CoreBluetooth commands must run outside the Codex sandbox. If `roam-send` reports `Bluetooth is unsupported` from a sandboxed shell, rerun the Roam command with escalated command permissions; that error is sandbox visibility, not proof that Roam is disconnected. Verified 2026-07-30: `roam-send` found connected `Roam2` by `FF00` and `roam-msg` displayed successfully.
+⚠️ **BLE is retired (2026-08-11).** `roam-msg` now posts a notification to ROAM Touch (the Pixel) over **Tailscale** — pure network, works from any tailnet machine from anywhere, no pairing, no proximity, no CoreBluetooth permission. Ignore any older note about sandboxes or `Bluetooth is unsupported`; if a push fails now it is a network or adb-transport problem, not Bluetooth. `roam-send` (Swift/CoreBluetooth) and the 127-byte chunking are gone — see git history.
+
+Override the target with `ROAM_DEV=<host:port>`; default is the Pixel's tailnet address. `--pane N` tags per tmux pane so panes don't overwrite each other.
 
 **When to send:**
 - When you ask a question or need user input — send the question
@@ -85,7 +87,7 @@ Codex note: BLE/CoreBluetooth commands must run outside the Codex sandbox. If `r
 - When you hit an error or blocker — send what went wrong
 - When starting a long multi-step task — send what you're about to do
 
-**Keep messages concise** — the display is 128x64 pixels (~21 chars per line, 3 lines visible). Aim for 1-2 short sentences. Don't send routine tool calls or intermediate steps.
+**Keep messages concise** — 1-2 short sentences. The old 128x64 / ~21-char limit no longer applies (the phone renders a full notification with `bigtext`), but a glanceable message is still the point. Don't send routine tool calls or intermediate steps.
 
 **This is critical** — without these messages, the user has no idea what you're doing or asking. The automatic "Sent"/"Ready" hooks only signal that a prompt was submitted and a response finished, not what was said.
 

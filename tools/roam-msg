@@ -1,60 +1,45 @@
 #!/bin/bash
-# roam-msg — Send long messages to Roam, chunked to fit 127-char BLE buffer
-# Splits at word boundaries, sends each chunk with a delay between.
-# Usage: roam-msg [--pane N] "your long message here"
-# With --pane: prepends \x01 + pane_byte to tag message for per-pane filtering
+# roam-msg — push a message to ROAM Touch over the network.
+#
+# BLE IS RETIRED. This talks to the phone (ROAM Touch) over Tailscale, so it
+# works from any machine on the tailnet, from anywhere, with no pairing, no
+# proximity and no CoreBluetooth permission. The old chunked BLE path (127-byte
+# buffer, roam-send) is gone -- see git history if you ever need it back.
+#
+# Usage: roam-msg [--pane N] "your message here"
+#   --pane N   tag the notification per tmux pane so panes don't overwrite
+#              each other on the phone.
+#
+# Env:
+#   ROAM_DEV   adb target. Default is the Pixel on the tailnet.
+#   ROAM_TITLE notification title. Default "Claude / <hostname>".
 
-set -euo pipefail
+set -uo pipefail   # NOT -e: an unreachable phone must not kill the caller
 
-ROAM_SEND="$(dirname "$0")/roam-send"
-MAX_LEN=120  # Leave room for null + safety margin
-DELAY=2      # Seconds between chunks for BLE reconnect
+ROAM_DEV="${ROAM_DEV:-100.95.196.87:5555}"
+ROAM_TITLE="${ROAM_TITLE:-Claude / $(hostname -s)}"
+TAG="roam"
 
-# Parse --pane flag
-PANE_PREFIX=""
 if [ "${1:-}" = "--pane" ]; then
     shift
-    PANE_NUM="${1:-0}"
+    TAG="pane${1:-0}"
     shift
-    # Build 2-byte prefix: \x01 + pane index byte
-    PANE_PREFIX=$(printf '\x01'"$(printf '\\x%02x' "$PANE_NUM")")
-    MAX_LEN=118  # Account for 2-byte prefix
 fi
 
 msg="$*"
+[ -z "$msg" ] && { echo "roam-msg: nothing to send" >&2; exit 1; }
 
-if [ ${#msg} -le $MAX_LEN ]; then
-    "$ROAM_SEND" "${PANE_PREFIX}${msg}"
-    exit 0
+# Single-quote for the device-side shell: ' -> '\''
+q() { printf "%s" "$1" | sed "s/'/'\\\\''/g"; }
+
+# Reconnect if the transport dropped (adb tcpip does not survive a phone reboot).
+if ! adb devices | grep -q "^${ROAM_DEV}[[:space:]]*device$"; then
+    adb connect "$ROAM_DEV" >/dev/null 2>&1
 fi
 
-# Split into chunks at word boundaries
-chunks=()
-while [ ${#msg} -gt 0 ]; do
-    if [ ${#msg} -le $MAX_LEN ]; then
-        chunks+=("$msg")
-        break
-    fi
-
-    # Find last space within MAX_LEN
-    cut="${msg:0:$MAX_LEN}"
-    brk=$(echo "$cut" | grep -ob ' ' | tail -1 | cut -d: -f1 || echo "")
-
-    if [ -z "$brk" ] || [ "$brk" -eq 0 ]; then
-        # No space found, hard cut
-        chunks+=("${msg:0:$MAX_LEN}")
-        msg="${msg:$MAX_LEN}"
-    else
-        chunks+=("${msg:0:$brk}")
-        msg="${msg:$((brk + 1))}"
-    fi
-done
-
-total=${#chunks[@]}
-for i in "${!chunks[@]}"; do
-    n=$((i + 1))
-    "$ROAM_SEND" "${PANE_PREFIX}${chunks[$i]}"
-    if [ $n -lt $total ]; then
-        sleep $DELAY
-    fi
-done
+if ! adb -s "$ROAM_DEV" shell \
+        "cmd notification post -S bigtext -t '$(q "$ROAM_TITLE")' '$(q "$TAG")' '$(q "$msg")'" \
+        >/dev/null 2>&1; then
+    echo "roam-msg: ROAM Touch unreachable at $ROAM_DEV" >&2
+    exit 1
+fi
