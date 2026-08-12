@@ -42,6 +42,10 @@ VIEWS = [
     ("worn_end",    "bracer.stl", 4, 182),
     ("worn_under",  "bracer.stl", -38, 250),
     ("cap",         "bracer_endcap.stl", 24, 140),
+    # ★ The pack module -- where the battery went. Two views: the pocket it
+    # carries, and the saddle + strap channels that hold it to the arm.
+    ("pack_iso",    "bracer_pack.stl", 26, 130),
+    ("pack_saddle", "bracer_pack.stl", -34, 40),
 ]
 
 SCRIPT = r'''

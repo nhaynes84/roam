@@ -23,31 +23,46 @@ m = trimesh.load(os.path.join(HERE, "out", "bracer.stl"))
 m.fix_normals()
 cap = trimesh.load(os.path.join(HERE, "out", "bracer_endcap.stl"))
 cap.fix_normals()
+# ★ The pack module -- a THIRD solid since 2026-08-12. It is where the battery
+# went when it came out from under the phone, and it gets probed like the cap
+# does: the defect that argued for the cap's own pass (a window straight
+# through the nose) was invisible to every probe on the other solid, and a new
+# part with no probes at all is the same bet taken again.
+mod = trimesh.load(os.path.join(HERE, "out", "bracer_pack.stl"))
+mod.fix_normals()
 
 # geometry constants, mirrored from bracer.py
 FLOOR, POCK_D, LIP_H = 2.2, 8.8, 2.4
 OUT_W, OUT_L, OUT_H = 75.1, 147.0, 13.4
 POCK_W = 70.3
 HULL_HW, TEN_D, HULL_BELT = 40.0, 2.3, -5.0
-SAG = 30.25
+SAG = 18.85
 GUARD_H, GUARD_HW = 15.0, 40.0
 PACK_T, PACK_W, PACK_L = 10.0, 54.0, 85.6
-PACK_Z1, PACK_Z0 = -3.62, -14.02
 PACK_LEDGE, PACK_RAIL, PACK_CLR = 1.6, 3.0, 0.6
+# ★★ THE PACK IS NO LONGER UNDER THE TRAY (2026-08-12). It costs 13 mm of
+# standoff there and nothing on the underside of the forearm, so it moved to a
+# strap module -- bracer_pack.stl, checked at the foot of this file. What is
+# left under the tray is the two ID-1 cards, and the payload envelope every
+# check below measures the body against shrinks to match.
+PACK_ONBOARD = False
 # ★ The payload envelope and the arm, which between them are the WHOLE reason
 # any material exists below the belt. The dead-structure check below measures
 # the body against exactly these two things.
-PAYLOAD_Z = PACK_Z0 - PACK_LEDGE                       # -15.62
-PAYLOAD_HW = PACK_W / 2 + PACK_CLR + PACK_RAIL         # 30.6
-ARM_R, GAP, FOAM, TILT = 45.0, 23.0, 4.0, -25.0
+CARD_RAIL_ = 5.0
+PAYLOAD_Z = -3.2                                       # card channel + ledge
+PAYLOAD_HW = 53.98 / 2 + 0.35 + CARD_RAIL_             # 32.34
+ARM_R, GAP, FOAM, TILT = 45.0, 11.6, 4.0, -25.0
 ARM_CUT_R = ARM_R + FOAM
 ARM_CX = -ARM_R * math.sin(math.radians(TILT))
 ARM_CZ = -(GAP + FOAM) - ARM_R * math.cos(math.radians(TILT))
-HULL_Z_DEEP = PAYLOAD_Z - 2.0                          # -17.62
+CAP_FLANK_MIN = 6.0
+HULL_Z_DEEP = min(PAYLOAD_Z - 2.0, HULL_BELT - CAP_FLANK_MIN)   # -11.0
 GZ1 = OUT_H + GUARD_H
 WIN_X, BEZEL_CHAM, LIP_H = 32.03, 1.5, 2.4
 SIGHT = BEZEL_CHAM / LIP_H
 CARD_L, CARD_W, CARD_T = 85.60, 53.98, 0.76   # ISO/IEC 7810 ID-1
+STRAP_Y0, STRAP_Y1 = 34.0, 112.0
 # ★ Calibrated, not picked. The thinnest wall the FROZEN housing deliberately
 # has is 1.20 mm -- the 2.4 mm pocket wall behind the 1.2 mm button counterbore,
 # at the 1.5 mm ends where the bore does not pierce it. So the bar sits just
@@ -115,39 +130,45 @@ probes = [
     # sliced off by the cylinder on the shallow one. So these moved, and the
     # ones that matter are the last four -- they are the owner's two complaints
     # ("hard cuts sides", "a weird underbelly") written as points.
-    ("hull skin, deep flank",        (-42.5, 60.0, -10.0), True),
+    # ★★ ...and 2026-08-12 again, the PAYLOAD SPLIT. The pack came off the
+    # body, so GAP fell 23 -> 11.6 and the arm rose 11.4 mm inside the section,
+    # while the deep flank's foot rose 6.6. Every probe below the belt moved
+    # with it. They are taken off the built mesh, not offset by hand.
+    ("hull skin, deep flank",        (-40.25, 60.0, -10.0), True),
     ("outside the deep flank",       (-45.0, 60.0, -10.0), False),
-    ("hull skin, shallow flank",     (40.5, 60.0, -10.0), True),
-    ("★ old dead corner stays gone", (-38.0, 60.0, -30.0), False),
-    ("chine skin",                   (-38.0, 60.0, -19.0), True),
-    ("outside the chine",            (-42.0, 60.0, -19.0), False),
+    ("hull skin, shallow flank",     (38.0, 60.0, -10.0), True),
+    ("★ old dead corner stays gone", (-38.0, 60.0, -16.0), False),
+    ("chine skin",                   (-32.0, 60.0, -14.0), True),
+    ("outside the chine",            (-40.0, 60.0, -14.0), False),
     # ★ THE CUFF. The shallow side used to stop at 25 deg of wrap where the
     # flank happened to cross the cylinder; it now carries on round to
     # SHAL_WRAP = DEEP_WRAP and closes on a hem. If this reads empty the
     # underside has gone back to being cut off flat.
-    ("★ shallow cuff wraps the arm",  (46.0, 60.0, -25.0), True),
-    ("nothing outboard of the cuff", (53.0, 60.0, -25.0), False),
-    ("cuff is solid, not shelled",   (45.0, 60.0, -24.0), True),
-    ("nothing below the hem",        (-12.5, 60.0, -33.0), False),
+    ("★ shallow cuff wraps the arm",  (46.5, 60.0, -14.0), True),
+    ("nothing outboard of the cuff", (50.0, 60.0, -14.0), False),
+    ("cuff is solid, not shelled",   (45.0, 60.0, -14.0), True),
+    ("nothing below the hem",        (-12.5, 60.0, -21.0), False),
     ("hull cavity behind the flank", (-33.0, 60.0, -10.0), False),
-    ("hull cavity, over the arm",    (0.0, 60.0, -18.0), False),
-    ("arm-face skin under cavity",   (0.0, 60.0, -21.5), True),
-    ("arm void below the skin",      (0.0, 60.0, -25.0), False),
-    ("cavity open at the nose",      (0.0, 14.0, -18.0), False),
+    ("hull cavity, over the arm",    (0.0, 60.0, -8.0), False),
+    ("arm-face skin under cavity",   (0.0, 60.0, -10.1), True),
+    ("arm void below the skin",      (0.0, 60.0, -12.0), False),
+    ("cavity open at the nose",      (0.0, 14.0, -8.0), False),
     # ★ Card ACCESS. The channel must open at the USB end, because that is
     # the wrist -- the end his free hand reaches. If this ever reads solid
     # the cards load from the elbow end and that is an ergonomic failure,
     # not a naming one.
     ("card channel opens at USB end", (0.0, -5.0, -1.0), False),
     ("card stop is at the far end",  (0.0, 87.5, -1.0), True),
-    # ★ The power pack. Same C-rail pattern under the cards, loads from the
-    # USB end, cap retains it. If the mid probe reads solid the pocket has
-    # closed up and nothing buyable goes in the device.
-    ("pack pocket, mid",             (0.0, 45.0, -7.5), False),
-    ("pack pocket at its full width", (-26.0, 45.0, -7.5), False),
-    ("pack rail web",                (-30.0, 45.0, -7.5), True),
-    ("pack opens at the USB end",    (0.0, -5.0, -7.5), False),
-    ("pack stop at the far end",     (0.0, 89.0, -7.5), True),
+    # ★★ THE PACK IS NOT IN HERE ANY MORE. It is in bracer_pack.stl, on the
+    # underside of the arm -- see the module pass at the foot of this file. The
+    # five probes that used to police its channel are replaced by ONE that
+    # polices its absence: the volume it used to occupy is now the arm's, and
+    # if anything ever grows back into it GAP has crept back up with it.
+    ("pack channel is gone",         (-8.0, 60.0, -7.0), False),
+    ("shell closes onto the arm",    (-8.0, 60.0, -12.0), True),
+    # ★ ...and the lead has to be able to LEAVE, or the module is a paperweight.
+    ("cable exit through the flank", (-40.5, 16.0, -8.0), False),
+    ("flank is solid beside it",     (-40.5, 26.0, -8.0), True),
     ("cable slot through the floor", (34.0, 8.0, 1.0), False),
     ("floor beside the cable slot",  (34.0, 25.0, 1.0), True),
 
@@ -155,10 +176,18 @@ probes = [
     # The nose steps IN by TEN_D below the belt so the cap's collar lands
     # flush. If the step is missing the cap stands proud again; if it is too
     # deep the collar rattles. Probed either side of the tenon's flank face.
-    ("tenon flank, deep side",       (-39.5, 3.0, -8.0), True),
-    ("collar space outside tenon",   (-41.5, 3.0, -8.0), False),
-    ("snap dimple in tenon flank",   (-40.6, 7.0, -10.11), False),
-    ("full section above the belt",  (-37.0, 3.0, -1.0), True),
+    ("tenon flank, deep side",       (-38.0, 3.0, -8.0), True),
+    ("collar space outside tenon",   (-40.6, 3.0, -8.0), False),
+    # ★ A REAL dimple test, at last. The old one probed a point outboard of the
+    # tenon face, which is empty whether the dimple was cut or not -- and it
+    # was passing while the deep dome had migrated onto the chine. These two
+    # differ ONLY by Y: one is on the dome's centre, one is 8 mm along the
+    # flank. If they ever read the same the snap has stopped being cut.
+    # ⚠️ 2.5, not 15: the tenon is only CAP_D = 10 mm long, so a probe at Y 15
+    # is past the end of it and reads empty for the wrong reason.
+    ("snap dimple in tenon flank",   (-38.85, 7.0, -8.0), False),
+    ("tenon flank beside the dimple", (-38.85, 2.5, -8.0), True),
+    ("full section above the belt",  (-38.5, 3.0, -1.0), True),
 
     # ------------------------------------------------------- card slots
     ("card channel, mid",            (0.0, 40.0, -1.0), False),
@@ -166,7 +195,7 @@ probes = [
     ("card rail web, deep side",     (29.5, 40.0, -1.0), True),
     ("card rail web, shallow side",  (-29.5, 40.0, -1.0), True),
     ("floor above the card channel", (0.0, 40.0, 1.0), True),
-    ("thick arm band under strap",   (0.0, 34.0, -19.0), True),
+    ("thick arm band under strap",   (0.0, 34.0, -7.7), True),
     # ------------------------------------------------- ribs and visor
     # The canted louvres are gone; these are the proud ribs that replaced them.
     # ⚠️ They live on the CHINE now, not the deep flank -- so they are neither
@@ -200,10 +229,12 @@ probes = [
     # Strap runs in a channel under the hull instead of through side flanges,
     # so the device is tray-width. The bars bridge that channel, and they are
     # spaced about the ARM'S crown (X = ARM_CX), not the tray's centre line.
-    ("strap channel is open, deep",  (-8.0, 34, -25.5), False),
-    ("retaining bar fills it, deep", (5.0, 34, -19.5), True),
-    ("strap channel is open, shal",  (25.0, 34, -18.0), False),
-    ("retaining bar fills it, shal", (33.0, 34, -19.5), True),
+    ("strap channel is open, deep",  (-8.0, 34, -14.0), False),
+    ("retaining bar fills it, deep", (5.0, 34, -6.0), True),
+    ("strap channel is open, shal",  (25.0, 34, -6.5), False),
+    ("retaining bar fills it, shal", (33.0, 34, -6.0), True),
+    # ...and the same two points off the band, where the channel is only skin.
+    ("no bar between the bands",     (33.0, 60, -6.0), False),
 ]
 
 # ★ The cap gets its own pass now. The defect that prompted it -- a 5.5 x 10.7
@@ -238,6 +269,41 @@ for (label, _, want), g in zip(probes, got):
     print(f"  {'ok  ' if ok else 'FAIL'}  {label:<30} "
           f"expect {'solid' if want else 'empty':<5} got {'solid' if g else 'empty'}")
 
+# ★★ THE PACK MODULE. Its pocket has to actually take the pack, its plate has
+# to survive the strap channel cut into it, and its mouth has to face the
+# WRIST -- the same ergonomic rule as the cap, for the same reason (that is the
+# end his free hand reaches). MOD geometry, mirrored from bracer.py:
+MOD_PLATE, MOD_WALL, MOD_CLR = 4.4, 2.0, 0.6
+_MZ0 = ARM_CZ - ARM_CUT_R - MOD_PLATE
+_MZ1 = _MZ0 - (PACK_T + 2 * MOD_CLR)
+_MY0 = OUT_L / 2 - PACK_L / 2 - 1.0
+_MYC = OUT_L / 2
+mod_probes = [
+    ("pocket takes the pack, mid",   (ARM_CX, _MYC, (_MZ0 + _MZ1) / 2), False),
+    ("...at its full 54 mm width",   (ARM_CX - 26.0, _MYC, (_MZ0 + _MZ1) / 2), False),
+    ("side rail beside the pack",    (ARM_CX - 29.0, _MYC, (_MZ0 + _MZ1) / 2), True),
+    ("plate between pack and arm",   (ARM_CX, _MYC, _MZ0 + 1.0), True),
+    ("outer skin behind the pack",   (ARM_CX, _MYC, _MZ1 - 1.0), True),
+    # ⚠️ The strap channel is cut STRAP_D into that plate. At MOD_PLATE 2.0 it
+    # went straight through into the pocket; this is the probe that would have
+    # caught it without a render.
+    ("plate survives the strap cut", (ARM_CX, STRAP_Y0, _MZ0 + 0.6), True),
+    ("strap channel is open",        (ARM_CX, STRAP_Y0, _MZ0 + 3.6), False),
+    # ★ the mouth faces the WRIST (Y small), and the far end is closed
+    ("mouth opens at the wrist",     (ARM_CX, _MY0 - 1.5, (_MZ0 + _MZ1) / 2), False),
+    ("far end is closed",            (ARM_CX, _MY0 + PACK_L + 3.0,
+                                      (_MZ0 + _MZ1) / 2), True),
+    # ...and the lip that stops it falling straight back out
+    ("return lip across the mouth",  (ARM_CX, _MY0 - 1.0, _MZ1 + 0.8), True),
+]
+print("\n=== pack module solid/empty probes ===")
+for (label, p_, want), g in zip(mod_probes,
+                                mod.contains(np.array([p_ for _, p_, _ in mod_probes]))):
+    ok = bool(g) == want
+    bad += not ok
+    print(f"  {'ok  ' if ok else 'FAIL'}  {label:<30} "
+          f"expect {'solid' if want else 'empty':<5} got {'solid' if g else 'empty'}")
+
 print("\n=== end cap solid/empty probes ===")
 for (label, p, want), g in zip(cap_probes,
                                cap.contains(np.array([p for _, p, _ in cap_probes]))):
@@ -260,6 +326,11 @@ bad += not cap.is_watertight
 _cb = len(cap.split(only_watertight=False))
 bad += _cb != 1
 print(f"  cap bodies      {_cb}  {'ok' if _cb == 1 else 'FAIL — cap is in pieces'}")
+print(f"  module watertight  {mod.is_watertight}")
+bad += not mod.is_watertight
+_mb = len(mod.split(only_watertight=False))
+bad += _mb != 1
+print(f"  module bodies   {_mb}  {'ok' if _mb == 1 else 'FAIL — module is in pieces'}")
 print(f"  volume          {m.volume/1000:.1f} cm3")
 _cap_g = cap.volume / 1000 * 1.27
 print(f"  PETG mass       {m.volume/1000*1.27:.0f} g   (+{_cap_g:.0f} g cap, +143 g phone "
@@ -342,7 +413,8 @@ print("  -- checker self-test --")
 if not _selftest():
     bad += 1
 _parts = sorted(m.split(only_watertight=False), key=lambda b_: -b_.volume)
-_checks = [("bracer shell", _parts[0], MIN_WALL), ("end cap", cap, MIN_WALL)]
+_checks = [("bracer shell", _parts[0], MIN_WALL), ("end cap", cap, MIN_WALL),
+           ("pack module", mod, MIN_WALL)]
 _checks += [(f"button plunger {i+1}", b_, MIN_WALL_PLUNGER)
             for i, b_ in enumerate(_parts[1:])]
 for name, mesh, limit in _checks:
@@ -860,5 +932,27 @@ for name, T in orients.items():
             _o = m.triangles[_i].mean(axis=0)
             print(f"      worst face {a[_i]/100:5.2f} cm2  {_ang:4.0f} deg from "
                   f"horizontal  at model ({_o[0]:6.1f},{_o[1]:6.1f},{_o[2]:6.1f})")
+
+# ★ ...and the module, which is a different shape of problem: a shallow tray
+# with a saddle in its floor. Reported the same way and for the same reason --
+# it is information, not a constraint.
+print("\n=== pack module, print orientation ===")
+for _nm, _T in (("pocket up (saddle on the bed)", np.eye(4)),
+                ("pocket down", trimesh.transformations.rotation_matrix(
+                    math.pi, [1, 0, 0]))):
+    _q = mod.copy()
+    _q.apply_transform(_T)
+    _zmin = _q.bounds[0][2]
+    _n, _a = _q.face_normals, _q.area_faces
+    _zc = _q.triangles[:, :, 2].mean(axis=1)
+    _dn = (-_n[:, 2]) > math.sin(math.radians(45.0))
+    _ob = _zc < _zmin + 0.6
+    print(f"  {_nm:<30} unsupported {_a[_dn & ~_ob].sum()/100:6.1f} cm2   "
+          f"bed contact {_a[_ob & _dn].sum()/100:5.1f} cm2   "
+          f"height {_q.bounds[1][2]-_zmin:5.1f} mm")
+print(f"  module   {mod.bounds[1][0]-mod.bounds[0][0]:.1f} x "
+      f"{mod.bounds[1][1]-mod.bounds[0][1]:.1f} x "
+      f"{mod.bounds[1][2]-mod.bounds[0][2]:.1f} mm   "
+      f"{mod.volume/1000*1.27:.0f} g PETG")
 
 raise SystemExit(1 if bad else 0)

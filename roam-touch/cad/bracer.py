@@ -27,6 +27,20 @@ Consequences that fall out of it and are checked in verify_bracer.py: the card
 channel loads from the USB end, so cards are reachable; and charging while
 worn pulls at the wrist rather than across the elbow.
 
+★★★ 2026-08-12 -- THE PAYLOAD SPLIT, which is the newest thing in this file.
+The pack, the cards and the lead all used to stack under the phone, and that
+one decision was worth 13 of the 51 mm the device stood off the arm. They do
+not cost the same: a 54 mm wide payload has to clear the ARM'S CROWN, so the
+two ID-1 cards want GAP >= 11.6 and the 10 mm pack wants GAP >= 22.2, against
+the 8.4 a strapped tray needs with nothing under it at all. So they were split
+on that line -- cards stay (they are 4 g and the thing you actually pull out),
+the pack goes to a strap module on the underside of the forearm, where the arm
+is thickest, nothing brushes it, and ~100 g sits opposite ~143 g of phone.
+    51.2 -> 39.8 mm of standoff, 59.3 -> 47.9 tall, 132 -> 107 g.
+The module is a third solid, exported as bracer_pack.step; PACK_ONBOARD puts
+the pack back under the tray if that is ever wanted. And see landscape.py for
+the orientation study that ran alongside this one.
+
 Form: the phone housing (pocket, screen aperture, sensor holes, print-in-place
 buttons, jack notch) is a frozen tray. Around and under it sits a LOW-POLY
 TESSELLATED HULL: a rounded, chunky body approximated by planar facets.
@@ -234,9 +248,42 @@ PACK_RAIL, PACK_ENG, PACK_LEDGE = 3.0, 3.0, 1.6
 CARD_SH = CARD_N * CARD_T + CARD_SLACK
 PACK_Z1 = -CARD_SH - 1.8                 # just clear of the cards above
 PACK_Z0 = PACK_Z1 - (PACK_T + 0.4)
+
+# ★★★ WHERE THE PACK LIVES -- 2026-08-12, and it is the whole of this round.
+# Everything used to stack under the phone and the device stood 51 mm off the
+# arm.  The arithmetic below says why, and it says it in one line: THE TWO
+# ITEMS COST COMPLETELY DIFFERENT AMOUNTS, and putting them in the same place
+# charges the cheap one at the expensive one's rate.
+#
+# A 54 mm wide payload under a tilted tray has to clear the ARM'S CROWN, which
+# on this tilt sits at Z = 4.22 - GAP.  So:
+#     two ID-1 cards, 3.2 mm of channel   ->  GAP >= 11.6   (+1.5 mm standoff*)
+#     the card-format pack, 14.0 mm       ->  GAP >= 22.2   (+13 mm standoff)
+# * over the 8.4 mm GAP a strapped tray needs anyway with nothing under it.
+# The cards are 4 g and they are the item you actually pull out at a counter.
+# The pack is ~100 g, the least-accessed thing on the device, and it is buying
+# 13 mm of standoff for itself.  So it comes off the body: PACK_ONBOARD False
+# puts it in a strap module on the UNDERSIDE of the forearm (built at the foot
+# of this file), where the arm is thickest and nothing brushes it, joined by
+# the same flat USB-C lead that used to run to it internally.  That also puts
+# ~100 g opposite ~143 g of phone instead of stacking them.
+#
+# ⚠️ THE ALTERNATIVES WERE MEASURED, NOT DISMISSED.
+#   * BESIDE the phone: the tray is 75.1 wide and the pack is 54 -- 130 mm
+#     across a 98 mm arm, hanging off both sides.  Dead.
+#   * IN THE TILT WEDGE, which is volume the tilt creates anyway: at GAP 8.5
+#     the wedge's widest band with 12 mm of depth under it is ~28 mm and the
+#     pack needs 54.  A plate tangent to the arm instead of parallel to the
+#     tray fits only if it wraps past 65 deg, which puts its far corner at
+#     X -48 and Z -53 -- wider AND deeper than the thing it was fixing.  Dead,
+#     and see landscape.py for the orientation where the wedge DOES swallow it.
+# Set this True to put it back under the tray; nothing else has to change.
+PACK_ONBOARD = False
+
 # ★ THE ONE NUMBER THE HULL IS DERIVED FROM: the underside of the deepest
 # thing carried under the tray. Below this line the body houses nothing.
-PAYLOAD_Z = PACK_Z0 - PACK_LEDGE
+PAYLOAD_Z = (PACK_Z0 - PACK_LEDGE) if PACK_ONBOARD \
+    else -(CARD_SH + CARD_LEDGE)
 
 # ★★ GAP IS THE VOLUME KNOB, TILT IS THE ERGONOMIC ONE. They were conflated
 # for a round and the arithmetic settles it. The cavity's ceiling is the tray
@@ -256,8 +303,22 @@ PAYLOAD_Z = PACK_Z0 - PACK_LEDGE
 # ⚠️ AND IT IS NOT WHAT MADE THE BODY BLOCKY. Cutting the section back to the
 # payload took the part from 72.1 mm tall to 58.0 with GAP untouched, because
 # the extra 14 mm was never the pack -- it was the wedge being enclosed out to
-# the flank. Standoff is still 51 mm and that IS the pack; height is not.
-GAP = 23.0           # air gap between arm and tray underside, at the crown
+# the flank. Height and standoff are separate knobs; do not conflate them again.
+# ★ Where it landed, once the pack moved off the body:
+#     GAP 23.0 -> 11.6    standoff 51.2 -> 39.8 mm    height 59.3 -> 47.9 mm
+#     mass 132 -> 107 g (+20 g cap, +47 g module, +143 g phone)
+#
+# ★★ AND IT FOLLOWS THE PAYLOAD NOW.  The crown of the arm cut sits at
+# ARM_R*(1 - cos TILT) - GAP relative to the tray floor -- 4.19 - GAP here --
+# and three things have to fit above it: WALL_ARM of skin, the strap channel
+# plus STRAP_MEMB of membrane, and the payload channel itself.  Each is one
+# inequality in GAP and the largest wins.  Both values below are the answer to
+# those inequalities, not a taste; they are ASSERTED further down, once
+# WALL_ARM and STRAP_D exist, so this cannot drift again -- which is exactly
+# what happened to 23.0, right for the pack and left in place after the pack's
+# reason for being under the tray had gone.
+STRAP_MEMB = 1.8     # membrane left between a strap channel and the payload
+GAP = 23.0 if PACK_ONBOARD else 11.6
 FOAM = 4.0           # compliant pad thickness on EVERY arm face -- see below
 STRAP_Y = (34.0, 112.0)  # strap channel centres, from the USB (open) end
 
@@ -504,6 +565,19 @@ CAP_CLR = 0.30       # slip fit over the tenon
 # what the end cap collided with. This keeps the whole thing tray-width.
 STRAP_W = 26.0       # channel width along the arm, for 25 mm webbing
 STRAP_D = 2.2        # channel depth into the rib's arm face
+
+# ★★ THE GAP INEQUALITIES, asserted rather than trusted -- see the note at GAP.
+# The crown of the arm cut sits ARM_R*(1 - cos TILT) - GAP above the tray floor
+# (4.19 - GAP here), and three things have to fit between it and whatever is
+# directly above. Typing GAP is what let 23.0 outlive its reason; this is what
+# stops the next one.
+_CROWN = ARM_R * (1 - math.cos(math.radians(TILT))) - GAP
+assert _CROWN + WALL_ARM <= 0.0, "GAP too small: no skin over the arm crown"
+assert _CROWN + WALL_ARM <= PAYLOAD_Z, \
+    f"GAP too small: payload floor {PAYLOAD_Z:.2f} is inside the arm"
+assert _CROWN + STRAP_D + STRAP_MEMB <= PAYLOAD_Z, \
+    (f"GAP too small: only {PAYLOAD_Z - _CROWN - STRAP_D:.2f} mm of membrane "
+     f"between the strap channel and the payload (want {STRAP_MEMB})")
 # ⚠️ 14, not 20. The bar is trimmed by the arm cut, so its tip is a wedge
 # whose angle is the local slope of the arm face -- and at 25 deg of tilt a
 # bar 39 mm from the crown came out at 31 deg, under the crest limit. Closer
@@ -621,7 +695,20 @@ def cuff_pt(theta, r=None):
 
 # ★ Deep flank: it stops one wall below the payload. Nothing is carried below
 # PAYLOAD_Z, so nothing is enclosed below it either.
-HULL_Z_DEEP = PAYLOAD_Z - WALL_OUT
+# ⚠️ ...OR WHERE THE CAP NEEDS IT, whichever is deeper -- new 2026-08-12.
+# With the pack off the body PAYLOAD_Z is only -3.2, which is 1.8 mm under the
+# belt, and the deep flank all but vanishes: the section would run from the
+# belt straight onto the chine. Geometrically that is right (there is nothing
+# down there to enclose) but the END CAP has no flank left to snap into. Its
+# collar only exists BELOW the belt, so a 1.8 mm flank gives it 1.8 mm of grip
+# on the deep side, and the dome ends up on the raked chine where a horizontal
+# cone grazes tangentially -- which is exactly the invalid solid that showed up
+# the first time this was tried.
+# ★ So the floor is CAP_FLANK_MIN, and that material is not dead: it is the
+# snap. It is declared here, next to the payload, rather than buried in the cap
+# section, because it is the second thing that sets how deep the body goes.
+CAP_FLANK_MIN = 6.0
+HULL_Z_DEEP = min(PAYLOAD_Z - WALL_OUT, HULL_BELT - CAP_FLANK_MIN)
 # The shallow flank runs down until it meets the cuff's own circle; from there
 # the cuff carries it round to SHAL_WRAP. Solved, not guessed, so TILT stays a
 # real knob.
@@ -996,7 +1083,12 @@ part = bbox(-OUT_W / 2, OUT_W / 2, 0, OUT_L, 0, OUT_H)
 # flank that bows past ~43.5 is material standing off everything it could hold.
 # 4.0 puts the widest point at 42.5. That is the ceiling on this knob.
 FLANK_BULGE = 4.0    # how far the flank bows out past shoulder->cuff
-CHINE_BULGE = 3.5    # ...and the chine past hem->flank foot
+# ⚠️ 2.0, down from 3.5 (2026-08-12). With the pack off the body the chine is
+# a shorter chord -- flank foot Z -11 to the hem instead of -17.6 -- and 3.5 mm
+# of bow on it put the outer surface 13.7 mm from BOTH the payload box and the
+# arm, which the dead-structure check calls at 13.0. The bulge is bounded by
+# that check and not by taste; when the chord gets shorter the bow follows.
+CHINE_BULGE = 2.0    # ...and the chine past hem->flank foot
 # ★ THREE chords, not five. Facet angle is (arc angle / chords), and at five it
 # came out at 13 deg -- adjacent facets differed by so little tone that the
 # render came back looking smooth. At three it is ~22 deg and the creases read.
@@ -1462,24 +1554,32 @@ part -= bbox(CARD_X0, CARD_X1, -10.0, CARD_Y1, -CARD_SH, 0.0)
 # footprint the card channel already uses, just far thicker. It sits directly
 # under the cards in the same C-rails pattern, loads from the USB end, and the
 # cap retains it -- so nothing can fall out onto the floor when it is off.
-# ⚠️ This is what GAP=20 buys. At GAP=8 there were 0 mm under the cards; the
-# arm's crown was right up against the tray floor. See the note on GAP.
+# ⚠️ This is what GAP=23 bought, and why it is not bought any more: at the
+# 8.4 mm GAP a strapped tray needs anyway there are 0 mm under the cards, the
+# arm's crown being right up against the tray floor. See the note on GAP.
 # (dimensions up with the payload block; PAYLOAD_Z is derived from them and
 #  is what the hull's deep flank is cut to.)
+# ⚠️⚠️ ...AND SINCE 2026-08-12 IT IS NOT UNDER THE TRAY. See PACK_ONBOARD:
+# the pack costs 13 mm of standoff here and 0 mm on the underside of the arm,
+# so it moved to a strap module and this whole channel is skipped. The code
+# stays, guarded, because the flag has to be a real switch and not a rewrite.
 PACK_SW = PACK_W + 2 * PACK_CLR
 PACK_X0, PACK_X1 = -PACK_SW / 2, PACK_SW / 2
 PACK_Y1 = PACK_L + 1.5
-for _xa, _xb in ((PACK_X0 - PACK_RAIL, PACK_X0 + PACK_ENG),
-                 (PACK_X1 - PACK_ENG, PACK_X1 + PACK_RAIL)):
-    cav -= bbox(_xa, _xb, -1.0, PACK_Y1 + 2.0, PACK_Z0 - PACK_LEDGE, PACK_Z1)
-cav -= yz_prism([
-    (PACK_Y1, PACK_Z0 - PACK_LEDGE),
-    (PACK_Y1 + 2.0, PACK_Z0 - PACK_LEDGE),
-    (PACK_Y1 + 2.0 + (PACK_Z1 - PACK_Z0 + PACK_LEDGE), PACK_Z1),
-    (PACK_Y1, PACK_Z1),
-], PACK_X0, PACK_X1)
+if PACK_ONBOARD:
+    for _xa, _xb in ((PACK_X0 - PACK_RAIL, PACK_X0 + PACK_ENG),
+                     (PACK_X1 - PACK_ENG, PACK_X1 + PACK_RAIL)):
+        cav -= bbox(_xa, _xb, -1.0, PACK_Y1 + 2.0,
+                    PACK_Z0 - PACK_LEDGE, PACK_Z1)
+    cav -= yz_prism([
+        (PACK_Y1, PACK_Z0 - PACK_LEDGE),
+        (PACK_Y1 + 2.0, PACK_Z0 - PACK_LEDGE),
+        (PACK_Y1 + 2.0 + (PACK_Z1 - PACK_Z0 + PACK_LEDGE), PACK_Z1),
+        (PACK_Y1, PACK_Z1),
+    ], PACK_X0, PACK_X1)
 part -= cav
-part -= bbox(PACK_X0, PACK_X1, -10.0, PACK_Y1, PACK_Z0, PACK_Z1)
+if PACK_ONBOARD:
+    part -= bbox(PACK_X0, PACK_X1, -10.0, PACK_Y1, PACK_Z0, PACK_Z1)
 
 # ---- cable route: pocket in the cap, slot through the floor, then the cavity
 # ⚠️ Outboard of both the card rails and the pack rails, because those already
@@ -1491,8 +1591,22 @@ part -= bbox(PACK_X0, PACK_X1, -10.0, PACK_Y1, PACK_Z0, PACK_Z1)
 # leaves a sliver of rail between the two, and at 1.00 mm the wall check calls
 # it -- correctly, it would be a rib you could snap with a fingernail.
 part -= bbox(CARD_X1 + CARD_RAIL, CABLE_X1,
-             -1.0, 17.0, PACK_Z1 - 2.0, FLOOR + 4.0)   # runs out to the mouth,
-             # or a 1 mm rib of floor is left standing between slot and face
+             -1.0, 17.0, min(PACK_Z1, PAYLOAD_Z) - 2.0, FLOOR + 4.0)
+             # runs out to the mouth, or a 1 mm rib of floor is left standing
+             # between slot and face
+
+# ---- ...and, with the pack off the body, the lead has to LEAVE ------------
+# ★ A 4 x 3.5 mm slot through the DEEP FLANK, just past the cap and before the
+# first strap band. The lead drops out of the cavity on the OUTBOARD side --
+# the side his eye is not over and his torso never touches -- and runs under
+# the webbing to the module.
+# ⚠️ On the FLANK, not the chine, and not through the cuff. Through the cuff it
+# would sit under the webbing's clamping load every time the strap is
+# tightened; on the chine its lower edge grazed the raked surface and left a
+# 0.33 mm sliver, which the wall check called immediately. The flank is the one
+# face here that is nearly parallel to the cut, so the hole has a real rim.
+if not PACK_ONBOARD:
+    part -= bbox(-48.0, -34.0, 12.5, 21.5, -9.3, -6.7)
 
 # ★★ THE RIBS AND THE LOUVRES ARE BOTH GONE. They were two successive
 # attempts to stop the chine reading as one lazy blank face -- first cut
@@ -1715,8 +1829,13 @@ for _nm, _sh in SHAVE.items():
 # ⚠️ 1.4, down from 1.8. The shallow flank is only 6.9 mm tall between the
 # belt and the arm cut, and 3 mm of that is the belt's bevel -- a 1.8 mm
 # dome does not fit in what is left.
-CAP_BUMP_R = 1.4     # snap dome radius
-CAP_DIMPLE_D = 0.7   # how deep the dome sinks into the tenon flank
+# ⚠️ 1.0, down from 1.4 (2026-08-12, the payload split). The shallow flank
+# below the belt is only 3.8 mm tall now that GAP has fallen to 11.6 -- the
+# cuff picks it up at Z -8.8 instead of -20.2 -- and a 1.4 R dome centred in
+# that leaves 0.90 mm between the dimple and the belt, which the wall check
+# calls. Same failure mode as the 1.8 -> 1.4 change, one flank up.
+CAP_BUMP_R = 1.0     # snap dome radius
+CAP_DIMPLE_D = 0.5   # how deep the dome sinks into the tenon flank
 CAP_BUMP_Y = 7.0     # dome centre, out near the collar's free end
 CAP_SLOT_W = 1.4     # relief slot freeing the deep flank from the chine fold
 CAP_SLOT_ROOT = 2.5  # slot stops this far from the plate, leaving the root
@@ -1796,10 +1915,23 @@ _sh_bot = HULL_Z_SHAL + 5.0
 # the bevel face.
 # ⚠️ ...and on the deep side, of the flank ABOVE the relief slot, because the
 # slot is what turns that flank into a cantilever. Below it the collar is stiff.
+# ★★ THE RELIEF SLOT IS CONDITIONAL, since the payload split (2026-08-12). It
+# exists to free a TALL deep flank -- 12 mm of collar folded onto the chine is
+# stiff enough to refuse the snap. With the pack off the body the deep flank is
+# 1.8 mm and the collar's deep side IS the chine: there is no cantilever to
+# free, and a slot cut there would only be a notch through the fold. So the
+# slot is skipped and the deep dome is placed the same way the shallow one is,
+# midway down the flat the flank actually has.
+CAP_SLOT_ON = (HULL_BELT - HULL_Z_DEEP) > 10.0
 DEEP_SLOT_Z0 = HULL_Z_DEEP + 6.0          # bottom of the flat deep flank
 DEEP_SLOT_Z1 = DEEP_SLOT_Z0 + CAP_SLOT_W
-FLANKS = ((-SD, (HULL_BELT - 5.0 + _sh_bot) / 2),
-          (SD, (HULL_BELT - 5.0 + DEEP_SLOT_Z1) / 2))
+# ⚠️ With no slot the flank is short, so the dome goes at the midpoint of what
+# the flank ACTUALLY is -- belt to foot. Reusing the tall-flank expression put
+# it below the foot and onto the chine, where a horizontal cone grazes a raked
+# face tangentially and OCCT hands back an invalid solid.
+_zc_deep = ((HULL_BELT - 5.0 + DEEP_SLOT_Z1) / 2 if CAP_SLOT_ON
+            else (HULL_BELT + HULL_Z_DEEP) / 2)
+FLANKS = ((-SD, (HULL_BELT - 5.0 + _sh_bot) / 2), (SD, _zc_deep))
 
 # Dimples in the TENON's flanks now, not the tray's. TRUNCATED CONES, not
 # cylinders and not spheres: a cylinder presents a sharp edge square to the
@@ -1909,11 +2041,13 @@ cap -= bbox(-CABLE_W / 2, CABLE_X1, -CABLE_H - 1.0, EPS,
 # The deep side does need one slot -- there the collar wraps the flank into the
 # chine, and that fold is stiff enough to resist the 0.3 mm the dome has to
 # ride, so this frees the flank from it. It sits at the foot of the flat flank.
-_slot_x = sec_x((DEEP_SLOT_Z0 + DEEP_SLOT_Z1) / 2, SD)
-cap -= bbox(min(_slot_x, _slot_x - SD * CAP_W) - 0.4,
-            max(_slot_x, _slot_x - SD * CAP_W) + 0.4,
-            CAP_SLOT_ROOT, CAP_D + EPS,
-            DEEP_SLOT_Z0, DEEP_SLOT_Z1)
+# ⚠️ ...only while there IS a tall deep flank. See CAP_SLOT_ON.
+if CAP_SLOT_ON:
+    _slot_x = sec_x((DEEP_SLOT_Z0 + DEEP_SLOT_Z1) / 2, SD)
+    cap -= bbox(min(_slot_x, _slot_x - SD * CAP_W) - 0.4,
+                max(_slot_x, _slot_x - SD * CAP_W) + 0.4,
+                CAP_SLOT_ROOT, CAP_D + EPS,
+                DEEP_SLOT_Z0, DEEP_SLOT_Z1)
 
 # Snap noses: cones rooted inside the wall (never coplanar with a face) and
 # protruding 0.6 mm past the inner surface, so they stand 0.3 mm proud of the
@@ -2113,15 +2247,93 @@ for _tgt, _glist in (("part", _groups), ("cap", _cap_groups)):
               f"({_name}, one at a time, {len(_pool)} refused)")
 part, cap = _targets["part"], _targets["cap"]
 
+# ==================================================================== module
+# ★★★ THE PACK CARRIER -- where the battery went (2026-08-12).
+#
+# It sits on the UNDERSIDE OF THE FOREARM, diametrically opposite the tray, on
+# the same webbing. Three reasons, in order:
+#   1. it costs NOTHING in standoff. Under the tray the pack pushes GAP from
+#      8.4 to 22.2 and the whole assembly 13 mm further off the arm; under the
+#      arm it adds thickness on the face that touches nothing;
+#   2. it is the LEAST-ACCESSED item on the device and the heaviest (~100 g),
+#      so it is the right thing to move and the wrong thing to stack;
+#   3. ~100 g under the arm sits opposite ~143 g of phone over it, which
+#      balances the assembly on the limb instead of towering it.
+# And it makes the pack OPTIONAL: leave the module off and the everyday device
+# is the bracer alone.
+#
+# ⚠️ The mouth faces the WRIST, for the same reason the cap does -- that is
+# where his free hand reaches. The strap channels are cut at exactly the
+# bracer's own radius and Y positions, so ONE piece of 25 mm webbing runs
+# through both parts and the module cannot travel along the arm.
+# ⚠️ Its arm face is cut by the SAME arm_cyl(ARM_CUT_R), so it carries the
+# 4 mm FOAM relief without anyone having to remember to add it.
+# ⚠️ 4.4, NOT 2.0, and it is the strap that sets it -- the same number the
+# bracer carries as WALL_ARM_STRAP. The webbing runs against the arm the whole
+# way round, so where the module is it runs BETWEEN the module and the arm, in
+# a channel STRAP_D deep cut into this plate. At 2.0 the channel went straight
+# through into the pocket and the render showed daylight into it. 4.4 leaves
+# 2.2 mm of floor under the webbing. It cannot be thickened only at the bands
+# either: the pack is a rigid slab, so its floor has to be one flat plane.
+MOD_PLATE = 4.4        # pocket floor over the arm -- thinnest at the centre,
+                       # and it thickens toward the edges as the arm falls away
+MOD_WALL = 2.0         # side and outer skin
+MOD_LIP = 1.6          # return at the mouth so the pack cannot just slide out
+MOD_CLR = 0.6          # per side around the pack
+MOD_SW = PACK_W + 2 * MOD_CLR
+MOD_ST = PACK_T + 2 * MOD_CLR
+MOD_Y0 = OUT_L / 2 - PACK_L / 2 - 1.0        # centred on the bracer
+MOD_Y1 = MOD_Y0 + PACK_L + 2.0
+# Outward from the arm is -Z here: the module hangs under the arm's own axis,
+# which the tilt puts at X = ARM_CX, not on the tray's centre line.
+_MZ0 = ARM_CZ - ARM_CUT_R - MOD_PLATE        # pocket floor (arm side)
+_MZ1 = _MZ0 - MOD_ST                         # pocket ceiling (outboard side)
+
+
+def _mod_box(dx, y0, y1, z0, z1, r=4.0):
+    """A rounded-corner prism in plan, per the print tenets -- R on the four
+    outer vertical corners, done as an intersection so nothing can escape it."""
+    dz = abs(z1 - z0)
+    r = min(r, 0.45 * min(dx, dz))            # or RectangleRounded refuses
+    b = Pos(ARM_CX, (y0 + y1) / 2, (z0 + z1) / 2) * Box(dx, y1 - y0, dz)
+    keep = Pos(ARM_CX, (y0 + y1) / 2, (z0 + z1) / 2) * Rot(90, 0, 0) * extrude(
+        Plane.XY * RectangleRounded(dx, dz, r), amount=(y1 - y0) / 2,
+        both=True)
+    return b & keep
+
+
+mod = _mod_box(MOD_SW + 2 * MOD_WALL, MOD_Y0 - MOD_WALL, MOD_Y1 + MOD_WALL,
+               _MZ0 + MOD_PLATE, _MZ1 - MOD_WALL)
+# the pocket, open at the WRIST end
+mod -= _mod_box(MOD_SW, MOD_Y0 - MOD_WALL - 1.0, MOD_Y1, _MZ0, _MZ1, r=1.0)
+# ...with a return lip across the mouth's outboard face, so the pack has to be
+# pushed past it rather than falling out the moment the strap is loosened.
+mod += _mod_box(MOD_SW, MOD_Y0 - MOD_WALL, MOD_Y0 - MOD_WALL + 2.0,
+                _MZ1 + MOD_LIP, _MZ1, r=1.0)
+# strap channels, at the bracer's own radius and Y -- one piece of webbing
+for _y in STRAP_Y:
+    mod -= arm_cyl(ARM_CUT_R + STRAP_D, STRAP_W, _y)
+# the lead's notch, at the mouth, on the DEEP/outboard side where the bracer's
+# own chine slot puts it
+mod -= bbox(ARM_CX - MOD_SW / 2 - MOD_WALL - 1.0, ARM_CX - MOD_SW / 2 + 2.0,
+            MOD_Y0 - MOD_WALL - 1.0, MOD_Y0 + 3.0, _MZ0 - 5.0, _MZ0 + 1.0)
+mod -= arm_cyl(ARM_CUT_R)                    # FOAM relief, cut last as always
+
 # ----------------------------------------------------------------- export
 out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "out")
 os.makedirs(out, exist_ok=True)
 # ★ Check the solids BEFORE writing them. A non-manifold shell makes every
 # contains() probe downstream return nonsense, and the failures it produces
 # look like feature bugs a long way from the actual cause. Ask here.
-for _nm, _sd in (("bracer", part), ("end cap", cap)):
+for _nm, _sd in (("bracer", part), ("end cap", cap), ("pack module", mod)):
     if not _sd.is_valid:
         raise SystemExit(f"{_nm}: solid is not valid -- coincident faces?")
+export_step(mod, os.path.join(out, "bracer_pack.step"))
+export_stl(mod, os.path.join(out, "bracer_pack.stl"))
+# print orientation: pocket UP, sitting on its outboard face (which the R4 plan
+# fillets make a proper land) -- reported, never designed around.
+export_stl(Rot(180, 0, 0) * Pos(0, 0, -_MZ1 + MOD_WALL) * mod,
+           os.path.join(out, "bracer_pack_print.stl"))
 export_step(part, os.path.join(out, "bracer.step"))
 export_stl(part, os.path.join(out, "bracer.stl"))
 export_step(cap, os.path.join(out, "bracer_endcap.step"))
