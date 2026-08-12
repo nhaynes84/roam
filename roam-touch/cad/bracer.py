@@ -1018,10 +1018,29 @@ P_TOP_D = (SD * (OUT_W / 2 - 9.0), HULL_SHOULDER + 3.0)
 HULL_SEC = [P_TOP_S]
 HULL_SEC += arc_chords(P_TOP_S, P_SHO_S, 0.0, 1, _rng, False)
 HULL_SEC += arc_chords(P_SHO_S, P_CUF_S, FLANK_BULGE, FLANK_CHORDS, _rng, False)
-# the cuff itself: concentric with the forearm, two flats
-for _k in (1, 2):
-    HULL_SEC.append(cuff_pt(SHAL_FOOT_TH
-                            + (-SHAL_WRAP - SHAL_FOOT_TH) * _k / 2.0))
+# ★★ THE BELLY IS NOT CONCENTRIC (2026-08-12). Owner: "the whole back of this
+# thing is a round belly that could be streamlined... those kinds of cuts are
+# exactly the things needed to not make this read 'box holding a phone on some
+# guy's arm'."
+#
+# It used to be `cuff_pt()` twice -- points on a circle CONCENTRIC with the arm
+# cut, so the outside was just the inside plus CUFF_T. It was a tube because a
+# forearm is a tube, and nothing about it was designed. The inner surface still
+# has to be that circle (it is the arm, plus FOAM). The OUTER surface does not.
+#
+# So: one straight plane across the shallow belly. Measured, the straight chord
+# between the same two endpoints dips only 0.52 mm inside the wall, so the plane
+# is pushed radially out by that deficit plus BELLY_MARGIN and the cuff stays at
+# least CUFF_T everywhere. A flat costs half a millimetre and buys a hard crease
+# at each end instead of a surface that dissolves into the flanks.
+BELLY_MARGIN = 0.2
+_b0, _b1 = cuff_pt(SHAL_FOOT_TH), cuff_pt(-SHAL_WRAP)
+_bm = ((_b0[0] + _b1[0]) / 2.0, (_b0[1] + _b1[1]) / 2.0)
+_bd = math.hypot(_bm[0] - ARM_CX, _bm[1] - ARM_CZ)
+_push = max(0.0, (ARM_CUT_R + CUFF_T) - _bd) + BELLY_MARGIN
+_bu = ((_bm[0] - ARM_CX) / _bd, (_bm[1] - ARM_CZ) / _bd)      # radial unit
+HULL_SEC.append((_bm[0] + _bu[0] * _push, _bm[1] + _bu[1] * _push))
+HULL_SEC.append(_b1)
 HULL_SEC += [P_HEM_SI, P_HEM_DI, P_HEM_DO]   # hem, closing chord, hem
 HULL_SEC += arc_chords(P_HEM_DO, P_CHI_D, CHINE_BULGE, CHINE_CHORDS, _rng, False)
 HULL_SEC += arc_chords(P_CHI_D, P_SHO_D, FLANK_BULGE, FLANK_CHORDS, _rng, False)
