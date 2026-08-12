@@ -3,6 +3,7 @@ package com.roam.touch.channels
 import com.roam.touch.channels.model.Channel
 import com.roam.touch.channels.model.Coverage
 import com.roam.touch.channels.model.Event
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
@@ -24,6 +25,8 @@ object Fx {
         truncated: Boolean = false,
         ts: Double = T0,
         meta: Map<String, String> = emptyMap(),
+        /** `meta.echo_of` — a JSON *number* on the wire, so it is one here too. */
+        echoOf: Long? = null,
         coverage: Coverage? = null,
     ) = Event(
         id = id,
@@ -34,7 +37,11 @@ object Fx {
         bodyChars = chars,
         bodyTruncated = truncated,
         coverage = coverage,
-        meta = JsonObject(meta.mapValues { JsonPrimitive(it.value) }),
+        meta = JsonObject(
+            meta.mapValues { JsonPrimitive(it.value) as JsonElement } +
+                (echoOf?.let { mapOf<String, JsonElement>("echo_of" to JsonPrimitive(it)) }
+                    ?: emptyMap())
+        ),
         ts = ts,
     )
 

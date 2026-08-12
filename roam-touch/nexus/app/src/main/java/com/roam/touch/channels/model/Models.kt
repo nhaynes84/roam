@@ -101,6 +101,22 @@ data class Event(
 
     val origin: String? get() = metaString("origin")
 
+    /**
+     * ★ The id of the `sent` this event is the echo of, or null.
+     *
+     * Sending from ROAM types the text into the pane, which fires the same
+     * `UserPromptSubmit` hook as his own typing — so one thing he said arrives twice,
+     * a second apart, as a `sent` and then a `receipt` with identical text. The hub
+     * decides which receipts are that echo (`API.md`, `meta.echo_of`) and the thread
+     * collapses them, so a message he sent is **one** entry, not "YOU" followed by
+     * "PROMPT".
+     *
+     * ⚠️ Null on a prompt he typed at the keyboard, and that receipt is the only
+     * record the message exists. Never suppress receipts as a class.
+     */
+    val echoOf: Long?
+        get() = (meta["echo_of"] as? JsonPrimitive)?.content?.toLongOrNull()
+
     /** What the wearer actually typed, for an `error` event whose send was refused. */
     val attempted: String? get() = metaString("attempted")
 

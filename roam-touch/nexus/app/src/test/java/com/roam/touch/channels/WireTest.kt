@@ -3,6 +3,7 @@ package com.roam.touch.channels
 import com.roam.touch.channels.model.ChannelStatus
 import com.roam.touch.channels.model.ChannelsResponse
 import com.roam.touch.channels.model.ControlKeys
+import com.roam.touch.channels.model.Event
 import com.roam.touch.channels.model.EventKind
 import com.roam.touch.channels.model.FrameParser
 import com.roam.touch.channels.model.HubFrame
@@ -66,6 +67,26 @@ class WireTest {
         "event_count":1}],"latest_event_id":9,"server_time":1.0}""".trimIndent()
         val r = HubJson.decodeFromString<ChannelsResponse>(withExtras)
         assertEquals("app", r.channels.first().lastInputSource)
+    }
+
+    @Test
+    fun `an echo receipt names the send it duplicates`() {
+        // Captured from the live hub, 2026-08-12. `echo_of` is a JSON number.
+        val e = HubJson.decodeFromString<Event>(
+            """{"id":341,"pane_id":"%0","kind":"receipt","body":"Not done yet.",
+            "summary":"Not done yet.","meta":{"source":"claude-hook","echo_of":340},
+            "ts":1786516984.1}""".trimIndent()
+        )
+        assertEquals(340L, e.echoOf)
+    }
+
+    @Test
+    fun `a keyboard prompt has no echo reference`() {
+        val e = HubJson.decodeFromString<Event>(
+            """{"id":341,"pane_id":"%0","kind":"receipt","body":"run the tests",
+            "meta":{"source":"claude-hook"},"ts":1786516984.1}"""
+        )
+        assertNull(e.echoOf)
     }
 
     @Test

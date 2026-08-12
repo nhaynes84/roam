@@ -44,6 +44,9 @@ data class ChannelsState(
 
     fun thread(paneId: String): List<Event> = threads[paneId].orEmpty()
 
+    /** What the thread screen actually draws. See [ThreadEntries]. */
+    fun entries(paneId: String): List<ThreadEntry> = ThreadEntries.of(thread(paneId))
+
     /** The full body if we have it, otherwise whatever the bulk payload carried. */
     fun bodyOf(event: Event): String = fullBodies[event.id] ?: event.body
 
@@ -83,6 +86,55 @@ data class ChannelsState(
 
     companion object {
         val ATTENTION_KINDS = setOf(EventKind.OUTCOME, EventKind.ERROR, EventKind.NOTE)
+    }
+}
+
+/**
+ * One row in the thread — deliberately not the same thing as one event.
+ *
+ * ★★ **A message is one thing with a lifecycle**, not a series of separate events that
+ * happen to share text. He says it, and it is his (`YOU`); the agent takes it, and it is
+ * a prompt (`PROMPT`). Same entry, next state — the owner's own framing, and the reason
+ * the second event never becomes a second row.
+ *
+ * @property deliveredBy the echo `receipt` that confirmed [event] reached the pane, once
+ *   it has arrived. Its presence *is* the advanced state; it is kept whole rather than
+ *   reduced to a boolean because it carries when that happened.
+ */
+data class ThreadEntry(val event: Event, val deliveredBy: Event? = null) {
+    val id: Long get() = event.id
+    val delivered: Boolean get() = deliveredBy != null
+}
+
+/**
+ * ★ One entry per thing he actually said.
+ *
+ * A message sent from ROAM is typed into the tmux pane, and that fires the same
+ * `UserPromptSubmit` hook his own keyboard does — so it comes back a second later as a
+ * `receipt` with identical text, and the thread drew it twice ("YOU", then "PROMPT").
+ * Seen on the device, 2026-08-12, on the first end-to-end push-to-talk message.
+ *
+ * The echo is not a second message. It is *confirmation that the first one landed*, so
+ * it folds into the entry it duplicates as a state change rather than a row.
+ *
+ * ⚠️ **This is not "hide receipts".** A receipt with no `echo_of` is a prompt he typed
+ * at the keyboard, and it is the only record that message exists — it renders like any
+ * other message. And an echo whose `sent` is not in the loaded window renders on its
+ * own too: a message shown twice is a nuisance, a message shown zero times is a lie.
+ */
+object ThreadEntries {
+    fun of(events: List<Event>): List<ThreadEntry> {
+        val present = events.mapTo(HashSet()) { it.id }
+        val deliveredBy = HashMap<Long, Event>()
+        val folded = HashSet<Long>()
+        for (event in events) {
+            val original = event.echoOf ?: continue
+            if (original !in present) continue
+            folded += event.id
+            if (original !in deliveredBy) deliveredBy[original] = event
+        }
+        return events.filterNot { it.id in folded }
+            .map { ThreadEntry(it, deliveredBy[it.id]) }
     }
 }
 

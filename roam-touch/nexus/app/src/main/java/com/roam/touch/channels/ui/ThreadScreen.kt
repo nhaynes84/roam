@@ -53,6 +53,7 @@ import androidx.compose.ui.unit.dp
 import com.roam.touch.channels.ChannelsState
 import com.roam.touch.channels.Liveliness
 import com.roam.touch.channels.Liveness
+import com.roam.touch.channels.ThreadEntry
 import com.roam.touch.channels.model.Channel
 import com.roam.touch.channels.model.Event
 import com.roam.touch.channels.model.EventKind
@@ -89,14 +90,16 @@ fun ThreadScreen(
     onPttCancel: () -> Unit,
     onPttDismiss: () -> Unit,
 ) {
-    val events = state.thread(channel.paneId)
+    // ★ Entries, not events: the echo of a message he sent from here is folded into
+    // the entry it confirms, so one thing he said is one row. See [ThreadEntries].
+    val entries = state.entries(channel.paneId)
     val listState = rememberLazyListState()
     var stopDialog by remember { mutableStateOf(false) }
 
     // Follow the tail: an outcome landing while he is reading should scroll into view,
     // because the reason he is on this screen is that he is waiting for it.
-    LaunchedEffect(events.lastOrNull()?.id) {
-        if (events.isNotEmpty()) listState.animateScrollToItem(events.lastIndex)
+    LaunchedEffect(entries.lastOrNull()?.id) {
+        if (entries.isNotEmpty()) listState.animateScrollToItem(entries.lastIndex)
     }
 
     Column(
@@ -112,7 +115,7 @@ fun ThreadScreen(
             onStop = { stopDialog = true },
         )
 
-        if (events.isEmpty()) {
+        if (entries.isEmpty()) {
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 Text(
                     "no history",
@@ -129,13 +132,13 @@ fun ThreadScreen(
                 ),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                items(events, key = { it.id }) { event ->
+                items(entries, key = { it.id }) { entry ->
                     EventCard(
                         state = state,
-                        event = event,
-                        speaking = speakingEventId == event.id,
-                        onExpand = { onExpand(event) },
-                        onPlay = { onPlay(event) },
+                        entry = entry,
+                        speaking = speakingEventId == entry.id,
+                        onExpand = { onExpand(entry.event) },
+                        onPlay = { onPlay(entry.event) },
                         onStopPlaying = onStopPlaying,
                     )
                 }
@@ -265,16 +268,17 @@ private fun ThreadTopBar(
 @Composable
 private fun EventCard(
     state: ChannelsState,
-    event: Event,
+    entry: ThreadEntry,
     speaking: Boolean,
     onExpand: () -> Unit,
     onPlay: () -> Unit,
     onStopPlaying: () -> Unit,
 ) {
+    val event = entry.event
     var expanded by remember(event.id) { mutableStateOf(false) }
     val kind = event.kindEnum
     val mine = kind == EventKind.SENT
-    val accent = accentFor(kind)
+    val accent = accentFor(entry)
 
     Column(
         Modifier
@@ -295,7 +299,7 @@ private fun EventCard(
             .padding(12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            StateChip(kindLabel(event), accent)
+            StateChip(statusLabel(entry), accent)
             Spacer(Modifier.weight(1f))
             Text(
                 Format.clock(event.tsMillis),
@@ -378,6 +382,29 @@ private fun EventCard(
         }
     }
 }
+
+/**
+ * ★★ **A message is one thing with a lifecycle, not a pile of events that share text.**
+ *
+ * The owner, on seeing his first voice message drawn twice: *"just change the 'status'
+ * from 'YOU' to 'PROMPT' on receival — same message, multiple states."* So the entry he
+ * sent is `YOU` while it is only in the hub, and becomes `PROMPT` the moment the echo
+ * says the agent has it. One row, whose status advances.
+ *
+ * Deliberately not inside the composable: this is the string on the card that has to be
+ * right, and a rule that lives in a `@Composable` can only be checked by looking at a
+ * phone.
+ */
+internal fun statusLabel(entry: ThreadEntry): String =
+    // ⚠️ A control byte is an action, not something he said; it keeps its own word.
+    if (entry.advanced) "PROMPT" else kindLabel(entry.event)
+
+/** The chip colour follows the status, so `PROMPT` looks the same however it got there. */
+internal fun accentFor(entry: ThreadEntry): Color =
+    if (entry.advanced) RoamColors.Quiet else accentFor(entry.event.kindEnum)
+
+private val ThreadEntry.advanced: Boolean
+    get() = delivered && event.controlKey == null
 
 private fun kindLabel(event: Event): String =
     event.controlKey?.label ?: when (event.kindEnum) {
