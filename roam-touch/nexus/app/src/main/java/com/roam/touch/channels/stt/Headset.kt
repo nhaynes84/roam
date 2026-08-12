@@ -80,9 +80,18 @@ class BluetoothHeadsetLink(context: Context) : HeadsetLink {
      * up)"). Asking the input list here would report "no headset" for every first press.
      */
     override val connected: Boolean
-        get() = audio.isBluetoothScoAvailableOffCall && audio
-            .getDevices(AudioManager.GET_DEVICES_OUTPUTS)
-            .any { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
+        get() {
+            // ⚠️ If this were ever false, PTT would report "no headset" forever and the
+            // device would have no working microphone at all — so it is named in the log
+            // rather than folded silently into the answer. (Measured true on sailfish:
+            // TESTscoprobe brought SCO up off-call.)
+            val offCall = audio.isBluetoothScoAvailableOffCall
+            val present = audio
+                .getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+                .any { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
+            if (!offCall) Log.e(TAG, "isBluetoothScoAvailableOffCall=false — SCO capture is impossible here")
+            return offCall && present
+        }
 
     override suspend fun open(): Boolean {
         if (up) {
