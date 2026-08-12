@@ -54,6 +54,7 @@ class EventKind(str, Enum):
     OUTCOME = "outcome"  # the agent finished a response
     OPENED = "opened"    # the pane appeared on this host
     CLOSED = "closed"    # the pane went away (channel is dead)
+    CONTROL = "control"  # a control key was sent (escape, interrupt)
     NOTE = "note"        # free-form hub/agent note
     ERROR = "error"      # something failed on the way to the pane
 

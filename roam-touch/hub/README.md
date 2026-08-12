@@ -64,11 +64,17 @@ tail -f ~/Library/Logs/roam-hub.log                      # uvicorn access + hub 
 tail -f ~/Library/Logs/roam-hub.err
 ```
 
-Health check (no auth):
+Health check (no auth) — `build` tells you which commit is actually serving:
 
 ```bash
 curl -s http://100.67.237.109:8787/health
 ```
+
+⚠️ **`launchctl kickstart` after every deploy.** A green test suite says nothing
+about the running process: the service once served `coverage: null` for two commits
+because nobody restarted it, and the client built against `API.md` could not use the
+feature at all. `build.commit` in `/health` is there so that is visible instead of
+silent.
 
 ## The bridge (hub → phone)
 

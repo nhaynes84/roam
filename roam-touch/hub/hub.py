@@ -18,6 +18,7 @@ import logging
 import os
 import re
 import secrets
+import subprocess
 import stat
 import time
 from contextlib import asynccontextmanager
@@ -44,6 +45,7 @@ from channels import Channel, TmuxError
 from presence import DEFAULT_TTL_S, UNKNOWN_COVERAGE, Presence
 from store import (
     DEFAULT_DB_PATH,
+    SCHEMA_VERSION,
     INPUT_APP,
     INPUT_TMUX,
     EventKind,
@@ -53,7 +55,7 @@ from store import (
 from transcript import INLINE_BODY_CHARS
 
 HUB_DIR = Path(__file__).resolve().parent
-HUB_VERSION = "1.0.0"
+HUB_VERSION = "1.1.0"
 PROTOCOL_VERSION = 1
 
 #: WebSocket frames a subscriber may fall behind by before we cut it loose and
@@ -63,6 +65,53 @@ SUBSCRIBER_QUEUE_MAX = 512
 HEARTBEAT_SECONDS = 30.0
 
 _PANE_RE = re.compile(r"^%\d+$")
+
+#: Keystrokes the control endpoint may send, by name. An allow-list, not a
+#: passthrough: `/interrupt` must never become "type arbitrary keys into a
+#: shell". Values are tmux key names, sent as keys rather than literally.
+CONTROL_ACTIONS: dict[str, str] = {
+    "escape": "Escape",      # stop an agent mid-response
+    "interrupt": "C-c",      # signal the foreground process
+}
+
+#: C0 control characters never belong in a typed message. Newline, carriage
+#: return and tab do (multi-line paste), everything else is a key press and
+#: belongs at `/interrupt` -- otherwise the ledger fills with raw bytes that
+#: read as if the user typed them, and the search index inherits the noise.
+_CONTROL_CHARS = {chr(c) for c in range(0x20)} - {"\n", "\r", "\t"}
+_CONTROL_CHARS.add("\x7f")
+
+
+def build_identity() -> dict[str, Any]:
+    """What code is actually running.
+
+    A stale launchd job served `coverage: null` for two commits while the test
+    suite was green, and nothing in the API could tell a client that the
+    process was older than the contract it was built against. Now it can ask.
+    """
+    commit = "unknown"
+    try:
+        proc = subprocess.run(
+            ("git", "-C", str(HUB_DIR), "rev-parse", "--short", "HEAD"),
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+        if proc.returncode == 0:
+            commit = proc.stdout.strip() or "unknown"
+    except (OSError, subprocess.SubprocessError):
+        pass
+    try:
+        code_mtime = Path(__file__).stat().st_mtime
+    except OSError:
+        code_mtime = 0.0
+    return {
+        "version": HUB_VERSION,
+        "protocol": PROTOCOL_VERSION,
+        "commit": commit,
+        "schema": SCHEMA_VERSION,
+        "code_mtime": code_mtime,
+    }
 
 log = logging.getLogger("roam.hub")
 
@@ -208,6 +257,16 @@ class EventRequest(BaseModel):
     meta: dict[str, Any] | None = None
 
 
+class InterruptRequest(BaseModel):
+    """Stop whatever the channel is doing. No text, so nothing is 'typed'."""
+
+    action: str = Field(
+        default="escape",
+        description="escape (stop generating) | interrupt (C-c to the process)",
+    )
+    origin: str = Field(default="client", description="Who asked, for the log.")
+
+
 class ArchiveRequest(BaseModel):
     archived: bool = True
 
@@ -345,6 +404,7 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
         app.state.settings = settings
         app.state.token = token
         app.state.started_at = time.time()
+        app.state.build = build_identity()
         app.state.tmux_ok = True
         app.state.live_channels = []
         app.state.poller = asyncio.create_task(_poll_forever(app))
@@ -462,6 +522,9 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
             "version": HUB_VERSION,
             "protocol": PROTOCOL_VERSION,
             "uptime_s": round(time.time() - app.state.started_at, 3),
+            # So a client can tell whether the running process actually has the
+            # code its contract describes. See `build_identity`.
+            "build": app.state.build,
         }
 
     @app.get("/status", tags=["meta"], dependencies=[Depends(require_auth)])
@@ -478,6 +541,7 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
             "latest_event_id": st.latest_event_id(),
             "subscribers": app.state.broadcaster.subscriber_count,
             "db_path": str(st.path),
+            "build": app.state.build,
             "presence": app.state.presence.snapshot(),
         }
 
@@ -553,6 +617,16 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
     async def send_endpoint(payload: SendRequest, pane: str = PathParam(...)):
         pane_id = normalise_pane_id(pane)
         st = _store()
+        offending = sorted(_CONTROL_CHARS & set(payload.text))
+        if offending:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "control characters cannot be typed as a message "
+                    f"({[hex(ord(c)) for c in offending]}); "
+                    "use POST /channels/{pane}/interrupt"
+                ),
+            )
         live = await run_in_threadpool(channels_mod.get, pane_id)
         if live is None:
             raise HTTPException(
@@ -585,6 +659,59 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
             EventKind.SENT,
             payload.text,
             meta={"origin": payload.origin, "enter": payload.enter},
+        )
+        _publish_event(event)
+        return {
+            "event": event.to_dict(),
+            "channel": channel_view(st, pane_id, live, st.get_channel(pane_id)),
+        }
+
+    @app.post(
+        "/channels/{pane}/interrupt",
+        tags=["channels"],
+        dependencies=[Depends(require_auth)],
+    )
+    async def interrupt_endpoint(
+        payload: InterruptRequest | None = None, pane: str = PathParam(...)
+    ):
+        """Send a control key without pretending the user typed one.
+
+        Firing Escape through `/send` works -- it types literally -- but it
+        stores a `sent` event whose body is a raw control byte, which reads in
+        the thread as if he sent it and lands in the search index as noise.
+        This records what actually happened instead: a `control` event naming
+        the action.
+        """
+        pane_id = normalise_pane_id(pane)
+        request = payload or InterruptRequest()
+        key = CONTROL_ACTIONS.get(request.action)
+        if key is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"unknown action {request.action!r}; "
+                    f"expected one of {sorted(CONTROL_ACTIONS)}"
+                ),
+            )
+        st = _store()
+        live = await run_in_threadpool(channels_mod.get, pane_id)
+        if live is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"channel {pane_id} is not live; nothing was sent",
+            )
+        try:
+            await run_in_threadpool(channels_mod.press, pane_id, key)
+        except (TmuxError, ValueError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"tmux refused the key: {exc}",
+            ) from exc
+        event = st.append(
+            pane_id,
+            EventKind.CONTROL,
+            request.action,
+            meta={"key": key, "origin": request.origin},
         )
         _publish_event(event)
         return {

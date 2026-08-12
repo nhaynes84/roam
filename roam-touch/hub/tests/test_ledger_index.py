@@ -54,6 +54,30 @@ def test_short_and_empty_events_are_skipped(ledger):
     assert len(ids) == 2, "only the two events with real text"
 
 
+def test_archived_events_leave_the_index(tmp_path):
+    """Soft-delete has to reach search: hidden in the thread but findable by
+    `memsearch` is not hidden."""
+    path = tmp_path / "hub.sqlite"
+    with Store(path) as st:
+        st.remember_channel("%0", "a channel", "main")
+        st.append("%0", EventKind.OUTCOME, "a thing he later cleared from the thread")
+        assert len(list(li.ledger_chunks(path))) == 1
+        st.archive_history("%0")
+    assert list(li.ledger_chunks(path)) == []
+
+
+def test_an_archived_channels_events_leave_the_index(tmp_path):
+    """Archiving a whole channel hides its events too -- how a test channel
+    (or anything he removes) stops surfacing in search."""
+    path = tmp_path / "hub.sqlite"
+    with Store(path) as st:
+        st.remember_channel("%9", "TEST throwaway", "probe")
+        st.append("%9", EventKind.OUTCOME, "output from a test run, not real work")
+        assert len(list(li.ledger_chunks(path))) == 1
+        st.set_channel_archived("%9", True)
+    assert list(li.ledger_chunks(path)) == []
+
+
 def test_a_missing_ledger_is_not_an_error(tmp_path):
     assert list(li.ledger_chunks(tmp_path / "nope.sqlite")) == []
 

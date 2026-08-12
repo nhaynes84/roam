@@ -97,6 +97,12 @@ def ledger_chunks(db_path: str | Path = LEDGER_DB) -> Iterator[dict[str, Any]]:
 
     Each carries its channel label and timestamp inline, because a result has
     to be usable read aloud: *which* channel, *when*, and what was said.
+
+    ⚠️ Archived events -- and every event of an archived *channel* -- are
+    excluded. Soft-delete has to reach the index too: "hidden from the thread
+    but still findable in search" is not hidden, and the point of never
+    hard-deleting is that recovery is deliberate, not that the data keeps
+    surfacing on its own.
     """
     db_path = Path(db_path)
     if not db_path.exists():
@@ -111,6 +117,8 @@ def ledger_chunks(db_path: str | Path = LEDGER_DB) -> Iterator[dict[str, Any]]:
             FROM events e
             LEFT JOIN channels c ON c.pane_id = e.pane_id
             WHERE e.kind IN ({placeholders})
+              AND e.archived = 0
+              AND COALESCE(c.archived, 0) = 0
             ORDER BY e.id
             """.format(placeholders=",".join("?" for _ in LEDGER_KINDS)),
             LEDGER_KINDS,

@@ -451,8 +451,10 @@ def index_records(conn, source: str, stats: dict):
             )
 
     count = 0
+    produced = set()
     for chunk in chunk_iter:
         count += 1
+        produced.add(chunk["id"])
         chunk_id, text = chunk["id"], chunk["text"]
         text_hash = hashlib.sha256(text.encode()).hexdigest()[:16]
         existing = conn.execute(
@@ -488,6 +490,32 @@ def index_records(conn, source: str, stats: dict):
             stats["indexed"] += 1
         if count % 50 == 0:
             conn.commit()
+
+    # Stale chunks: a record that no longer exists (an archived event, a
+    # deleted transcript) must leave the index, or a soft-delete is only a
+    # soft-delete in one place. Only safe to prune when this run saw every
+    # record -- the session source skips unchanged files by mtime.
+    if source == "ledger" or not stats.get("skipped_files"):
+        existing = {
+            row[0]
+            for row in conn.execute(
+                "SELECT id FROM chunks WHERE source = ?", (source,)
+            ).fetchall()
+        }
+        stale = sorted(
+            chunk_id
+            for chunk_id in existing
+            if chunk_id not in produced
+            and chunk_id.rsplit("-", 1)[0] not in produced  # split sub-chunks
+        )
+        if stale:
+            conn.executemany(
+                "DELETE FROM chunks WHERE id = ?", [(i,) for i in stale]
+            )
+            conn.executemany(
+                "DELETE FROM chunks_fts_v2 WHERE id = ?", [(i,) for i in stale]
+            )
+            stats["deleted"] += len(stale)
     conn.commit()
     print(f"  {source}: {count} records seen")
 

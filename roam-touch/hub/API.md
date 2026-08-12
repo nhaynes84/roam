@@ -1,6 +1,6 @@
 # ROAM Touch hub — client contract
 
-Version `1.0.0`, protocol `1`. This document is the contract the Android client is
+Version `1.1.0`, protocol `1`. This document is the contract the Android client is
 built against. If the code and this file disagree, that is a bug in one of them —
 say so rather than guessing.
 
@@ -17,7 +17,7 @@ pushed. A client that was asleep catches up by id — it never has to poll.
 | | |
 |---|---|
 | Base URL | `http://talos:8787` (Tailscale MagicDNS) or `http://100.67.237.109:8787` |
-| WebSocket | `ws://talos:8787/ws` |
+| WebSocket | the same base URL, path `/ws` — see the note below before hard-coding a scheme |
 | Auth | `Authorization: Bearer <token>` on **every** request except `GET /health` |
 | Content type | `application/json` in and out; UTF-8 |
 | Transport | Plaintext HTTP. The socket is bound to the Tailscale address only, and Tailscale (WireGuard) is already the encryption layer. Do not expose it anywhere else. |
@@ -125,6 +125,7 @@ rather than dropping it.
 | `opened` | the hub first saw this pane (`body` = its label) |
 | `closed` | the pane went away; the channel is dead |
 | `note` | free-form note |
+| `control` | an interrupt was issued (`body` = `escape` \| `interrupt`) |
 | `error` | a send failed (`meta.attempted` = what was not typed) |
 
 ### Channel
@@ -249,8 +250,17 @@ because it read 13.2 hours idle while he was actively typing over SSH.
 ### `GET /health` — no auth
 
 ```json
-{"ok": true, "service": "roam-hub", "version": "1.0.0", "protocol": 1, "uptime_s": 2.15}
+{"ok": true, "service": "roam-hub", "version": "1.1.0", "protocol": 1,
+ "uptime_s": 2.15,
+ "build": {"version": "1.1.0", "protocol": 1, "commit": "6229cdb", "schema": 5,
+           "code_mtime": 1786520867.4}}
 ```
+
+`build` says what code is **actually running** — the deployed commit, the database
+schema version, and when the file on disk was last written. A stale service once
+served `coverage: null` for two commits while its test suite was green, and no
+client could tell. Compare `build.commit` (or `schema`) against what your client
+expects and warn loudly rather than silently losing a field.
 
 ### `GET /status`
 
@@ -295,6 +305,31 @@ Response `200`:
 
 `404` if the pane is not live (nothing was typed). `502` if tmux refused; an
 `error` event is recorded and pushed so the failure shows up in the thread.
+
+### `POST /channels/{pane}/interrupt`
+
+Stop what the channel is doing. Sends a **key press**, and records that an
+interrupt was issued — not a message.
+
+```json
+{"action": "escape", "origin": "client"}
+```
+
+* `action` — `escape` (default; stops an agent mid-response) or `interrupt`
+  (`C-c` to the foreground process). Anything else is `400`; this is an
+  allow-list, not a keystroke passthrough.
+* Body may be omitted entirely; it defaults to `escape`.
+* Returns `{"event": Event, "channel": Channel}` where the event is
+  `kind: "control"`, `body: "escape"`, `meta.key: "Escape"`.
+* `404` if the pane is not live, `502` if tmux refused.
+* An interrupt does **not** move the conversation: `last_input_source` is
+  unchanged, because stopping a run is not answering it.
+
+⚠️ **Do not fire control characters through `/send`.** It used to work — `/send`
+types literally — but it stored a `sent` event whose body was a raw control byte,
+which reads in the thread as if the user typed it and pollutes the search index.
+`/send` now rejects C0 control characters with `400` and points here. Newline,
+carriage return and tab are still accepted (multi-line messages).
 
 ### `GET /channels/{pane}/history`
 
@@ -408,9 +443,21 @@ One event, **never trimmed** — this is "expand the details" behind a summary.
 
 ## 4. WebSocket
 
+**⚠️ Build the URL from the HTTP base; do not hard-code a `ws://` string.** Several
+HTTP clients (OkHttp's `HttpUrl` among them) reject any scheme but `http`/`https`
+and throw when handed `ws://…` — on Android that surfaced as a crash inside a
+coroutine and a restart loop. The upgrade to WebSocket is negotiated by the
+`Upgrade: websocket` handshake, not by the scheme in the string:
+
 ```
-ws://talos:8787/ws?since=<last_event_id>
+http://talos:8787/ws?since=<last_event_id>     ← give clients this
+ws://talos:8787/ws?since=<last_event_id>       ← equivalent on the wire; only use it
+                                                 if your library demands it
 ```
+
+Both reach the same endpoint. Take the base URL you already use for REST, append
+`/ws`, and let the library perform the upgrade — OkHttp does exactly that for
+`Request.Builder().url("http://…/ws")` passed to `newWebSocket`.
 
 Auth: `Authorization: Bearer <token>` header (preferred), or `?token=<token>` when
 the client cannot set headers. `since` is optional; omit it on a first connection.
@@ -453,7 +500,7 @@ Send only JSON objects. A non-JSON frame ends the connection.
 ### Client algorithm
 
 1. `GET /channels` → paint the list, remember `latest_event_id` as `cursor`.
-2. Connect `ws://…/ws?since=<cursor>`.
+2. Connect to `<base>/ws?since=<cursor>` (keep the http(s) base — see §4).
 3. `hello` → replace the channel list (authoritative).
 4. `backlog` → append in order; `cursor = max(cursor, last id)`.
 5. `event` → append to that channel's thread; `cursor = event.id`. Show

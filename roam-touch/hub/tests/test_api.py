@@ -209,6 +209,90 @@ def test_a_tmux_failure_is_502_and_leaves_an_error_event(client, auth, fake_tmux
     assert error["meta"]["attempted"] == "boom"
 
 
+# ---------------------------------------------------------------- interrupt
+
+
+def test_interrupt_sends_escape_as_a_key_not_as_text(client, auth, fake_tmux):
+    """`send-keys Escape` (a key press), never `send-keys -l` (typed text)."""
+    resp = client.post("/channels/0/interrupt", json={"action": "escape"}, headers=auth)
+    assert resp.status_code == 200
+    assert fake_tmux.argv_for("send-keys") == [("send-keys", "-t", "%0", "Escape")]
+
+
+def test_interrupt_defaults_to_escape_with_no_body(client, auth, fake_tmux):
+    assert client.post("/channels/0/interrupt", headers=auth).status_code == 200
+    assert fake_tmux.argv_for("send-keys")[0][-1] == "Escape"
+
+
+def test_interrupt_can_send_control_c(client, auth, fake_tmux):
+    client.post("/channels/0/interrupt", json={"action": "interrupt"}, headers=auth)
+    assert fake_tmux.argv_for("send-keys")[0][-1] == "C-c"
+
+
+def test_interrupt_records_what_happened_not_the_raw_bytes(client, auth):
+    """The old workaround stored a `sent` event holding a control byte, which
+    reads as if he typed it and poisons the search index."""
+    event = client.post(
+        "/channels/0/interrupt", json={"action": "escape"}, headers=auth
+    ).json()["event"]
+    assert event["kind"] == "control"
+    assert event["body"] == "escape"
+    assert event["meta"]["key"] == "Escape"
+    assert "\x1b" not in event["body"]
+    history = client.get("/channels/0/history", headers=auth).json()["events"]
+    assert not any(e["kind"] == "sent" for e in history), "no phantom typed message"
+
+
+def test_an_interrupt_does_not_move_the_conversation(client, auth, store):
+    """Stopping a run is not answering it: coverage must not flip to `app`."""
+    client.post(
+        "/events", json={"pane": "%0", "kind": "receipt", "body": "typed"}, headers=auth
+    )
+    client.post("/channels/0/interrupt", headers=auth)
+    assert store.get_channel("%0").last_input_source == "tmux"
+
+
+def test_an_unknown_interrupt_action_is_refused(client, auth, fake_tmux):
+    resp = client.post("/channels/0/interrupt", json={"action": "rm -rf"}, headers=auth)
+    assert resp.status_code == 400
+    assert "escape" in resp.json()["detail"]
+    assert fake_tmux.argv_for("send-keys") == [], "nothing was pressed"
+
+
+def test_interrupting_a_dead_pane_is_404(client, auth, fake_tmux):
+    fake_tmux.kill_pane("%0")
+    assert client.post("/channels/0/interrupt", headers=auth).status_code == 404
+
+
+def test_interrupt_requires_a_token(client):
+    assert client.post("/channels/0/interrupt").status_code == 401
+
+
+def test_control_events_are_pushed_like_any_other(client, auth):
+    with client.websocket_connect("/ws", headers=auth) as ws:
+        ws.receive_json()
+        client.post("/channels/0/interrupt", headers=auth)
+        frame = next_frame(ws, "event", where=lambda f: f["event"]["kind"] == "control")
+        assert frame["event"]["body"] == "escape"
+
+
+def test_send_refuses_control_characters_and_says_where_to_go(client, auth, fake_tmux):
+    """The workaround that polluted the ledger is now closed off."""
+    resp = client.post("/channels/0/send", json={"text": "\x1b"}, headers=auth)
+    assert resp.status_code == 400
+    assert "/interrupt" in resp.json()["detail"]
+    assert fake_tmux.argv_for("send-keys") == []
+    history = client.get("/channels/0/history", headers=auth).json()["events"]
+    assert not any(e["kind"] == "sent" for e in history), "nothing was recorded"
+
+
+def test_send_still_accepts_newlines_and_tabs(client, auth):
+    resp = client.post(
+        "/channels/0/send", json={"text": "line one\nline two\tindented"}, headers=auth
+    )
+    assert resp.status_code == 200
+
+
 # ------------------------------------------------------------------ history
 
 

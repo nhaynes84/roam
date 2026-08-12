@@ -157,6 +157,21 @@ def send(pane_id: str, text: str, enter: bool = True) -> None:
         _tmux("send-keys", "-t", pane_id, "Enter")
 
 
+def press(pane_id: str, key: str) -> None:
+    """Send one *named* key to a pane -- `Escape`, `C-c`.
+
+    The deliberate opposite of `send()`: no `-l`, so tmux interprets the name
+    as a key press. That is only ever safe for a fixed set of names chosen by
+    the hub (see `hub.CONTROL_ACTIONS`); never pass user text through here, or
+    "Enter C-c" in a transcript becomes two key presses.
+    """
+    if not key:
+        raise ValueError("no key to press")
+    if not exists(pane_id):
+        raise TmuxError(f"no such pane: {pane_id}")
+    _tmux("send-keys", "-t", pane_id, key)
+
+
 def _paste(pane_id: str, text: str) -> None:
     """Load `text` into a private tmux buffer and paste it as one block."""
     buf = f"roam-{pane_id.lstrip('%')}"
