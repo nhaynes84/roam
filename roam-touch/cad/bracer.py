@@ -265,7 +265,12 @@ for (yc, ln) in ((73.0, 50.0), (135.0, 18.0)):
 # it you would unclip the cap every time you charged, which is how a
 # removable part becomes a lost part.
 CAP_W = 2.0          # cap side wall
-CAP_T = 2.4          # cap end plate
+# ⚠️ 6 mm, not 2.4. The full-face trough is lofted into this plate, so a thin
+# plate makes the trough meet the outer face at a feather edge at the corners.
+# The answer is material, not a slicer setting: a thicker plate gives the scoop
+# real depth, a proper rim, and a gentler taper that prints cleanly. It also
+# suits the chunky retro-futurist read.
+CAP_T = 6.0          # cap end plate
 CAP_CLR = 0.30       # slip fit over the tray
 CAP_BUMP_R = 1.6     # snap dome radius
 CAP_DIMPLE_D = 0.7   # how deep the dome sinks into the tray wall
