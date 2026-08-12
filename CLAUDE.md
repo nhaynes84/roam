@@ -77,7 +77,9 @@ The user wears ROAM so they don't have to sit at the computer. **You must push k
 ~/Projects/roam/tools/roam-msg "your message here"
 ```
 
-⚠️ **BLE is retired (2026-08-11).** `roam-msg` now posts a notification to ROAM Touch (the Pixel) over **Tailscale** — pure network, works from any tailnet machine from anywhere, no pairing, no proximity, no CoreBluetooth permission. Ignore any older note about sandboxes or `Bluetooth is unsupported`; if a push fails now it is a network or adb-transport problem, not Bluetooth. `roam-send` (Swift/CoreBluetooth) and the 127-byte chunking are gone — see git history.
+⚠️ **BLE is retired (2026-08-11), and `roam-msg` no longer touches the device (2026-08-12).** It posts to the **hub** (`POST /notify`), which decides whether the message is worth interrupting him for; the **bridge** is the only thing that speaks to the phone. Say what happened and let the hub judge — it applies "reply where the last message came from", so a status line about a pane he is typing in will not buzz him. That is correct, not a failure.
+
+★ **Everything goes through the hub.** Do not call `adb` to notify, and do not add a second path — `tools/roam-push` is the bridge's transport and yours to leave alone. If `roam-msg` reports **NOT DELIVERED**, the hub process is down (same box, so the bridge is too); the message is recorded in the ledger and pushed when the hub returns. `roam-send` (Swift/CoreBluetooth) and the 127-byte chunking are gone — see git history.
 
 Override the target with `ROAM_DEV=<host:port>`; default is the Pixel's tailnet address. `--pane N` tags per tmux pane so panes don't overwrite each other.
 
