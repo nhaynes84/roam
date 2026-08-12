@@ -286,6 +286,12 @@ USB_Z = FLOOR + PH_T / 2   # port sits mid phone thickness, NOT near the floor
 # slim cable head ever reaches the port -- a funnel lets fat overmoulds seat,
 # and it reads as a designed feature instead of a punched hole.
 USB_FLARE = 5.0            # per side, so a ~10 mm spread down to the opening
+# ★ Retro-futurist: the flare is not an oval around the port, it is a trough
+# spanning the whole face with the port at its centre. The loft tapers to
+# nothing at the edges, so it never breaches the 2.4 mm plate -- it reads as a
+# machined scoop rather than a punched hole with a chamfer round it.
+TROUGH_INSET = 3.0         # margin left at each end of the face
+TROUGH_H = 11.0            # trough height at the outer face
 
 # Dimples in the tray's outer side walls. TRUNCATED CONES, not cylinders and
 # not spheres: a cylinder presents a sharp edge square to the travel direction
@@ -313,10 +319,10 @@ cap -= Pos(0, -CAP_T - EPS, USB_Z) * Rot(-90, 0, 0) * extrude(
 # comes out rotated 90 deg -- wide where the cap is thin, and it eats the plate.
 # ⚠️ Built as a LOFT, not extrude(taper=). OCCT's extrude_taper throws
 # Standard_TypeMismatch on a rounded profile at this angle (~64 deg).
-_big_h = USB_H + 2 * USB_FLARE
+_cap_half_w = OUT_W / 2 + CAP_CLR + CAP_W
 cap -= loft([
     Plane(origin=(0, -CAP_T - EPS, USB_Z), x_dir=(1, 0, 0), z_dir=(0, 1, 0))
-    * RectangleRounded(USB_W + 2 * USB_FLARE, _big_h, _big_h / 2 - 0.01),
+    * RectangleRounded(2 * (_cap_half_w - TROUGH_INSET), TROUGH_H, 2.0),
     Plane(origin=(0, EPS, USB_Z), x_dir=(1, 0, 0), z_dir=(0, 1, 0))
     * RectangleRounded(USB_W, USB_H, USB_H / 2 - 0.01),
 ])
