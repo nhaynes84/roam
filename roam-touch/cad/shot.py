@@ -27,6 +27,16 @@ VIEWS = [
     ("print_iso",   "bracer_print.stl", 26, 34),
     ("print_side",  "bracer_print.stl", 8, 96),
     ("print_back",  "bracer_print.stl", 22, 208),
+    # ★ The three the owner had to ask for twice: the TOP, and each END square
+    # on. The low-poly pass before this one tessellated the flanks only, and
+    # from every view except a flank it was still a slab -- but no render in
+    # this file was pointed at the surfaces that were still flat. A view of
+    # every face you have claimed to treat is part of the claim.
+    ("top",         "bracer.stl", 88, 0),
+    ("end_elbow",   "bracer.stl", 6, 180),
+    ("end_elbow_q", "bracer.stl", 20, 150),
+    ("end_wrist",   "bracer_endcap.stl", 6, 0),
+    ("guard_side",  "bracer.stl", 16, 272),
     ("worn_iso",    "bracer.stl", 28, 128),
     ("worn_iso2",   "bracer.stl", 24, 300),
     ("worn_end",    "bracer.stl", 4, 182),

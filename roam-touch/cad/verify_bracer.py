@@ -173,7 +173,13 @@ probes = [
     # vertical nor at |X| = HULL_HW, and the probes have to be taken on the
     # facet. Points computed off TOE + u*(along) + v*(outward).
     # The high guard: three-sided, screen sunk deep inside it.
-    ("guard wall, deep/outboard",    (-39.0, 73.0, OUT_H + 6.0), True),
+    # ⚠️ -36.2, not -39.0. The guard's outer wall is FACETED since 2026-08-12
+    # and recedes up to 3 mm from GUARD_HW, so a probe pinned to the old flat
+    # plane tests the tessellation rather than the guard. The wall itself is
+    # what matters: it must be present between the scoop (33.8 at the base) and
+    # the belt line, and the "no guard on the shallow flank" probe below is
+    # what still pins the guard to one side.
+    ("guard wall, deep/outboard",    (-36.2, 73.0, OUT_H + 6.0), True),
     ("guard wall near the crest",    (-37.5, 73.0, OUT_H + 12.6), True),
     ("screen well is open",          (0.0, 73.0, OUT_H + 6.0), False),
     # ★ THREE-sided. If this reads solid a guard has appeared on the deep
@@ -181,16 +187,13 @@ probes = [
     ("shallow flank has NO guard",   (39.0, 73.0, OUT_H + 6.0), False),
     ("scoop has cut the wall back",  (-34.5, 73.0, OUT_H + 6.0), False),
     ("...but not at its base",       (-34.5, 73.0, OUT_H + 0.4), True),
-    # ★★ THE TWO BROWS MUST MATCH. The crest ramp starts BROW_RAMP inside each
-    # brow's base, and it was only doing that at the elbow end -- so the wrist
-    # brow stood 8.4 mm above the tray face against the elbow's 5.0 and read,
-    # correctly, as massive. Four probes rather than two: each brow has to be
-    # there at 4.5 mm AND absent at 5.5, which pins the height from both sides.
-    # If either pair goes one-sided the brows have drifted apart again.
-    ("USB brow present at 4.5 mm",   (0.0, 8.0, OUT_H + 4.5), True),
-    ("USB brow stops by 5.5 mm",     (0.0, 8.0, OUT_H + 5.5), False),
-    ("jack brow present at 4.5 mm",  (0.0, 145.0, OUT_H + 4.5), True),
-    ("jack brow stops by 5.5 mm",    (0.0, 145.0, OUT_H + 5.5), False),
+    # ★★ THE TWO BROWS MUST MATCH -- measured off the mesh, in its own section
+    # below. It used to be four fixed-height probes (present at 4.5, absent at
+    # 5.5), which stopped meaning anything once the crest ramps were faceted:
+    # a facet moves the local crest by a few tenths, so the probes were testing
+    # the tessellation and not the thing the owner actually complained about,
+    # which was that one brow was massive and the other was not. Measure both
+    # and compare them.
     ("crest ramps down at the jack", (-37.0, 144.0, OUT_H + 13.0), False),
     ("crest ramps down at the USB",  (-37.0, 4.0, OUT_H + 13.0), False),
     ("nothing above the crest",      (-37.0, 73.0, GZ1 + 1.0), False),
@@ -208,14 +211,21 @@ probes = [
 # cable channel over-ran the cap's own half width -- was invisible to every
 # probe here, because every probe here is on the other solid.
 cap_probes = [
-    ("cap flank closed beside the run", (36.5, -1.0, 5.0), True),
-    ("cap flank closed, low",           (36.5, -4.0, 1.0), True),
-    ("cap flank closed, high",          (36.5, -3.0, 11.0), True),
+    # ⚠️ X 36.0, not 36.5. Both the side-wall panel and the nose's plan rake are
+    # faceted now, so the flank's outer surface moves by up to ~1.2 mm; these
+    # probes sit just OUTBOARD of CABLE_X1 (35.65), which is the number they
+    # exist to police -- the cable run must not reach the flank.
+    ("cap flank closed beside the run", (36.0, -1.0, 5.0), True),
+    ("cap flank closed, low",           (36.0, -2.0, 2.0), True),
+    ("cap flank closed, high",          (36.0, -2.0, 11.0), True),
     ("cable run open inside the cap",   (30.0, -3.0, 3.0), False),
     ("plug pocket in the inner face",   (0.0, -3.0, 6.45), False),
     ("plate behind the plug pocket",    (0.0, -8.0, 6.45), True),
     ("sunken face panel",               (25.0, -10.5, 6.0), False),
-    ("panel rim stands proud of it",    (25.0, -11.5, 12.0), True),
+    # ⚠️ The rim is faceted too, so it is proud of the panel floor by 1.5-3 mm
+    # rather than by exactly FACE_DEPTH. Probed at Y -11.0, inside the shallowest
+    # rim facet; the panel floor above is what it is being compared against.
+    ("panel rim stands proud of it",    (25.0, -11.0, 12.6), True),
 ]
 
 pts = np.array([p for _, p, _ in probes])
@@ -401,28 +411,50 @@ print(f"  {'ok  ' if _dead_ok else 'FAIL'}  bracer shell                "
       f"{_d:5.1f} mm  (max {DEAD_BUDGET}){_where}")
 
 # ---------------------------------------------------- ★★ facet census
-# THE CHECK THIS PART DID NOT HAVE, and the one that encodes the owner's first
+# THE CHECK THIS PART DID NOT HAVE, and the one that encodes the owner's
 # complaint -- "we still have hard cuts sides" -- as a number instead of an
 # opinion. A hard cut side IS a single large planar facet: the old flank was one
 # plane roughly 20 x 147 mm, about 2900 mm2, and no amount of chamfering its
 # edges changed what it read as. Low poly (ref/lowpoly-*.png) is the opposite
 # property: MANY planes, none of them dominant.
 #
-# So: cluster the outer-hull triangles into coplanar facets and assert
-#   * there are at least FACET_MIN of them -- the shell is tessellated at all;
-#   * none exceeds FACET_MAX_A -- no facet has grown back into a slab face.
-# ⚠️ Restricted to the HULL SKIN (below the belt, outside the payload box), so
-# the frozen tray face, the screen bezel and the visor cannot flatter or spoil
-# the count. Those are supposed to be flat.
-FACET_MIN = 40
-FACET_MAX_A = 900.0      # mm2 -- the old flank was ~2900
+# ⚠️⚠️ 2026-08-12: THIS CHECK WAS SCOPED TO THE SURFACE IT HAD ALREADY FIXED.
+# It looked only BELOW THE BELT and outside the payload box, on the theory that
+# "the frozen tray face, the screen bezel and the visor... are supposed to be
+# flat". They are not. It therefore reported a green 597 mm2 maximum while the
+# elbow end was a single unbroken 2883 mm2 plate, the tray's side walls were
+# 1845 each, the deck was 1441 and the guard's outer wall was 1116 -- and the
+# owner photographed one of them and said "still looking at a flat top wall".
+# ★ A check that passes on a part the owner can see is broken is worse than no
+# check. So the census now covers THE WHOLE EXTERIOR SKIN of both solids:
+#   * exterior = a ray fired along the outward normal escapes the mesh;
+#   * minus a NAMED exclusion list, printed every run so nothing hides in it.
+# The exclusions are the frozen phone housing (which is the owner's phone, not
+# our surface to style), genuine internal volumes that happen to be visible
+# through an opening, and the two mating faces at the cap joint. Everything
+# else -- deck, both ends, guard, ramps, cuff, flanks, the cap's nose -- is
+# skin and is held to FACET_MAX_A.
+FACET_MIN = 120
+# mm2. For scale: the old flat flank was ~2900, the elbow end 2883, the tray's
+# side walls 1845 each, the deck 1441, the guard's outer wall 1116. 500 is
+# comfortably below every one of them and comfortably above the largest facet
+# the section loft produces on its own (311, on the shallow flank).
+FACET_MAX_A = 500.0
+
+
+def _exterior(mesh):
+    """Faces you can see from outside: fire along the outward normal and keep
+    the ones whose ray never hits the mesh again."""
+    cen = mesh.triangles.mean(axis=1)
+    nrm = mesh.face_normals
+    hit = mesh.ray.intersects_first(cen + nrm * 0.05, nrm)
+    return hit < 0
 
 
 def facets(mesh, keep):
     """Coplanar-triangle clusters (area, normal, centroid) over a face filter."""
-    tri = mesh.triangles
-    cen = tri.mean(axis=1)
-    sel = keep(cen)
+    cen = mesh.triangles.mean(axis=1)
+    sel = keep(cen) & _exterior(mesh)
     n = np.round(mesh.face_normals[sel], 3)
     d = np.round(np.einsum("ij,ij->i", n, cen[sel]), 2)
     key = {}
@@ -435,23 +467,92 @@ def facets(mesh, keep):
     return [(v[0], v[1], v[2] / v[0]) for v in key.values()]
 
 
-print("\n=== facet census (the outer hull is a low-poly shell) ===")
-_hull_keep = lambda c: (c[:, 2] < HULL_BELT - 0.5) & (
-    (np.abs(c[:, 0]) > PAYLOAD_HW + 4.0) | (c[:, 2] < PAYLOAD_Z - 1.0))
-_fs = [f for f in facets(_parts[0], _hull_keep) if f[0] >= 12.0]
-_fs.sort(key=lambda f: -f[0])
+# The exclusion list, stated rather than implied. Each entry is a name and a
+# predicate on face centroids; anything it matches is NOT skin and is not
+# counted. If a flat face ever hides behind one of these, the name is where to
+# look -- that is the whole reason they are named.
+def _in_pocket(c):
+    return ((np.abs(c[:, 0]) < POCK_W / 2 + 0.05) & (c[:, 1] < 144.65)
+            & (c[:, 2] > FLOOR - 0.05) & (c[:, 2] < FLOOR + POCK_D + LIP_H))
+
+
+def _bezel_loft(c):
+    # the frozen aperture: its flare and the sensor bores, inboard of the deck
+    return ((np.abs(c[:, 0]) < WIN_X + BEZEL_CHAM + 0.05)
+            & (c[:, 2] > FLOOR + POCK_D - 0.05) & (c[:, 2] < OUT_H + 0.05))
+
+
+def _internal(c):
+    # the shell cavity, card channel, pack bay and cable run: all below the
+    # tray floor and inboard of the hull skin, visible only through the nose
+    return (c[:, 2] < 0.05) & (np.abs(c[:, 0]) < PAYLOAD_HW + 6.0)
+
+
+def _cap_joint(c):
+    # the two faces that meet at Y = 0: the tray's nose and the cap's collar
+    # mouth. They are in contact in the assembly and neither is ever seen.
+    return np.abs(c[:, 1]) < 0.05
+
+
+def _btn_bay(c):
+    # the print-in-place plungers and their bores -- a frozen mechanism
+    return (np.abs(c[:, 0]) > POCK_W / 2 - 0.1) & (c[:, 2] > 2.5) \
+        & (c[:, 2] < 11.0) & (np.abs(c[:, 0]) < X_OUT + BTN_PROUD + 0.2) \
+        & (((c[:, 1] > 68.0) & (c[:, 1] < 92.0))
+           | ((c[:, 1] > 95.0) & (c[:, 1] < 110.0)))
+
+
+X_OUT, BTN_PROUD = OUT_W / 2, 0.6
+EXCLUDE = [
+    ("frozen phone pocket + lip", _in_pocket),
+    ("frozen screen aperture + sensor bores", _bezel_loft),
+    ("internal: cavity, cards, pack, cable", _internal),
+    ("cap joint faces at Y=0", _cap_joint),
+    ("frozen button bay + plungers", _btn_bay),
+]
+PLUG_D = 6.0
+# ⚠️ The cap needs its OWN list, not the bracer's. Sharing them was the first
+# attempt and "internal: cavity, cards, pack" (everything below Z 0 and inboard
+# of the skin) swallowed the cap's entire raked chin -- the census came back
+# with five facets and 0.8 cm2, i.e. it had stopped looking at the part.
+CAP_EXCLUDE = [
+    ("cap joint faces at Y=0", _cap_joint),
+    ("cap internal cable + plug pocket",
+     lambda c: (c[:, 1] > -PLUG_D - 0.3) & (c[:, 1] < 0.2)
+     & (np.abs(c[:, 0]) < 35.6) & (c[:, 2] > -1.5) & (c[:, 2] < 10.5)),
+    ("collar bore and snap noses",
+     lambda c: (c[:, 1] > 0.2) & (np.abs(c[:, 0]) < 39.0)),
+]
+
+print("\n=== facet census (THE WHOLE EXTERIOR SKIN, both solids) ===")
+
+
+def _census(mesh, excl, label):
+    keep = lambda c: ~np.any([f(c) for _, f in excl], axis=0)
+    fs = [f for f in facets(mesh, keep) if f[0] >= 12.0]
+    fs.sort(key=lambda f: -f[0])
+    print(f"  {label}: {len(fs)} facets over 12 mm2, "
+          f"{sum(f[0] for f in fs)/100:.1f} cm2 of skin, "
+          f"median {np.median([f[0] for f in fs]):.0f} mm2")
+    for a, _, c in fs[:3]:
+        print(f"        largest {a:6.0f} mm2 at "
+              f"({c[0]:6.1f},{c[1]:6.1f},{c[2]:6.1f})")
+    return fs
+
+
+for _n_, _f_ in EXCLUDE + CAP_EXCLUDE:
+    print(f"        not skin: {_n_}")
+_fs = _census(_parts[0], EXCLUDE, "bracer")
+_cfs = _census(cap, CAP_EXCLUDE, "end cap")
 _n_ok = len(_fs) >= FACET_MIN
-_a_ok = (not _fs) or _fs[0][0] <= FACET_MAX_A
+_worst = max([f[0] for f in _fs] + [f[0] for f in _cfs])
+_a_ok = _worst <= FACET_MAX_A
 bad += not _n_ok
 bad += not _a_ok
-print(f"  {'ok  ' if _n_ok else 'FAIL'}  facets over 12 mm2        {len(_fs):4d}  "
+print(f"  {'ok  ' if _n_ok else 'FAIL'}  facets on the bracer's skin {len(_fs):4d}  "
       f"(min {FACET_MIN})")
-if _fs:
-    print(f"  {'ok  ' if _a_ok else 'FAIL'}  largest hull facet      {_fs[0][0]:6.0f} mm2  "
-          f"(max {FACET_MAX_A:.0f})  at "
-          f"({_fs[0][2][0]:6.1f},{_fs[0][2][1]:6.1f},{_fs[0][2][2]:6.1f})")
-    print(f"        median facet {np.median([f[0] for f in _fs]):6.0f} mm2, "
-          f"total skin {sum(f[0] for f in _fs)/100:5.1f} cm2")
+print(f"  {'ok  ' if _a_ok else 'FAIL'}  largest facet, either solid {_worst:6.0f} mm2  "
+      f"(max {FACET_MAX_A:.0f})")
 
 # ------------------------------------------------- ★ cuff wrap symmetry
 # The second complaint -- "a weird underbelly" -- was the shell being sliced off
@@ -459,6 +560,36 @@ if _fs:
 # fix is that both edges of the arm opening now leave the arm at the SAME angle,
 # so measure the angle rather than trusting the source. Taken off the mesh: the
 # outermost surface point on each side of the arm's crown, below the belt.
+# --------------------------------------------- ★ the two brows must match
+# Replaces four fixed-height probes (present at 4.5 mm, absent at 5.5). Those
+# stopped meaning anything once the crest ramps were faceted -- a facet moves
+# the local crest by a few tenths, so they were testing the tessellation. What
+# the owner actually said was "the side guards aren't even the same height, the
+# top side is better, the bottom is massive", and that is a COMPARISON. So
+# measure the crest at mirrored stations either side of the ramps and compare.
+# ⚠️ Mirrored about the ramps, not about the tray: the ramp starts BROW_RAMP
+# inside each brow's base, so RAMP_Y0 - t and RAMP_Y1 + t are the matching
+# pair. Anything else compares two different points on the ramp.
+BROW_Y0, BROW_Y1, BROW_RAMP = 11.0, 141.0, 7.0
+RAMP_Y0, RAMP_Y1 = BROW_Y0 + BROW_RAMP, BROW_Y1 - BROW_RAMP
+BROW_TOL = 0.6
+print("\n=== the two brows (mirrored about their ramps) ===")
+
+
+def _brow_h(yc, w=1.2):
+    v = m.vertices
+    sel = (np.abs(v[:, 1] - yc) < w) & (np.abs(v[:, 0]) < 25.0) \
+        & (v[:, 2] > OUT_H + 0.1)
+    return (v[sel][:, 2].max() - OUT_H) if sel.any() else 0.0
+
+
+_h_usb, _h_jack = _brow_h(RAMP_Y0 - 10.0), _brow_h(RAMP_Y1 + 10.0)
+_bsym_ok = abs(_h_usb - _h_jack) <= BROW_TOL and min(_h_usb, _h_jack) > 3.0
+bad += not _bsym_ok
+print(f"  {'ok  ' if _bsym_ok else 'FAIL'}  USB {_h_usb:4.1f} mm vs jack "
+      f"{_h_jack:4.1f} mm above the tray face  (differ by <= {BROW_TOL}, "
+      f"both > 3.0)")
+
 print("\n=== cuff wrap (the underside embraces the arm) ===")
 WRAP_TARGET, WRAP_TOL = 40.0, 6.0
 _pts, _ = trimesh.sample.sample_surface_even(_parts[0], 40000)
@@ -515,8 +646,11 @@ def classify(mid, part_name):
             return "sensor apertures + bezel loft (FROZEN)"
         if abs(y) < 0.3:
             return "USB-end mouth / cap joint"
+        # ⚠️ NOT "the print bed" any more. The elbow end is tessellated like
+        # every other surface; if it is printed standing on this end it needs
+        # a brim and some support, and that is fine.
         if abs(y - OUT_L) < 0.3:
-            return "jack end = the print bed"
+            return "elbow end, outermost facets"
         if 2.0 < z < OUT_H - 0.5 and abs(x) > 30.0:
             return "button bay + jack (FROZEN)"
         # ⚠️ 34, not 30. The retaining bars moved out to straddle the ARM's
@@ -537,6 +671,13 @@ def classify(mid, part_name):
             return "guard crest -- land set by CREST_W"
         if z > OUT_H + 3.0:
             return "brow blades -- converging faces, checked below"
+        # The guard stands GUARD_HW wide on a tray wall that is OUT_W/2, so its
+        # base overhangs by 2.45 mm on a GUARD_BASE_CH bevel. Both edges of
+        # that ledge are sharp by design -- a chamfer there eats the bevel.
+        if abs(abs(x) - GUARD_HW) < 1.8 and z > OUT_H - 0.6:
+            return "guard base ledge + the brows' outer corners"
+        if y > OUT_L - 9.0:
+            return "elbow end facets"
     else:
         if abs(y) < 0.3 or abs(y - CAP_D) < 0.3:
             return "collar joint faces"
@@ -693,14 +834,20 @@ for name, T in orients.items():
           f"bed contact {bed_area/100:5.1f} cm2   "
           f"height {q.bounds[1][2]-zmin:5.1f} mm")
     if name.startswith("standing on jack"):
-        # ★ ASSERTED, not just printed. A tessellated shell can only stay
-        # support-free while the station-to-station radius change is small next
-        # to the station spacing; this is the number that would move if that
-        # ever stopped being true.
-        _u_ok = a[need].sum() / 100 <= UNSUPPORTED_BUDGET
-        bad += not _u_ok
-        print(f"  {'ok  ' if _u_ok else 'FAIL'}  unsupported area within budget "
-              f"({UNSUPPORTED_BUDGET:.0f} cm2)")
+        # ⚠️⚠️ REPORTED, NOT ASSERTED, since 2026-08-12. This used to FAIL over
+        # 40 cm2, and a failing number is a design driver whether you meant it
+        # to be one or not: it is what kept the elbow end a flat plate, and the
+        # owner named that directly --
+        #   "don't let print orientation delegate design... 'oh the elbow end
+        #    is fugly so you can print without supports' is a dumbass thing
+        #    to say"
+        #   "i don't want that to even be the main consideration, i can get
+        #    creative or just use trees, if the design comes first, that's the
+        #    main thing"
+        # So: measure it, print it, let him decide how to print it. Do not
+        # reshape the object to move this number. See feedback-supports-are-fine.
+        print(f"        ^ reported only -- supports are acceptable and the form "
+              f"is not shaped around this")
     if name.startswith("standing on jack") and need.any():
         # ★ Name the worst face, not just the total. "27 cm2 of overhang" is
         # not actionable; "the guard's hand ramp, 4.9 cm2 at 44 deg" is.

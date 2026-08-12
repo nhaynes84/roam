@@ -48,6 +48,28 @@ rounding the corners of a slab. And it is how the two references stop fighting:
 the forearm); LOW POLY GIVES THE SURFACE. A wrist device with Pip-Boy bones,
 rendered in facets. Nothing is split down the middle.
 
+★★ ROUND TWO, same day: EVERY SURFACE, NOT THE SIDES. The pass above
+tessellated the flanks and the cuff, because the flanks were what had been
+complained about, and left everything a section loft cannot reach exactly as
+built -- the deck round the screen, the guard's outer wall, the tray's own side
+walls, the guard's two crest ramps and BOTH END FACES. Single planes, the
+largest of them 2883 mm2. Owner, looking at the result: "still looking at a
+flat top wall". The facet census in verify_bracer.py reported green throughout,
+because it had been scoped to the surface it had already fixed.
+Those surfaces are now carved by FACETED PANELS (see facet_shave): a jittered
+point cloud over a flat panel, each point pushed in by a depth its own budget
+allows, Delaunay-triangulated, and the volume in front of the result
+subtracted. Subtraction only -- it cannot grow the envelope, bury a plunger or
+eat into the 4 mm FOAM relief. The census now covers the WHOLE EXTERIOR SKIN of
+both solids with a named exclusion list, and the largest facet anywhere is
+311 mm2 against a 500 limit.
+⚠️ There is NO exempt face. The elbow end was argued for as "the print bed, it
+has to stay flat"; the owner rejected that outright -- "don't let print
+orientation delegate design", "i can get creative or just use trees, if the
+design comes first, that's the main thing". Supports are acceptable. The print
+study still measures and prints unsupported area; it no longer FAILS on it, and
+nothing in this file is shaped to move that number.
+
 How the shell is built, and why this construction rather than a mesh:
   * ONE section polygon, stated as ARCS (the flanks bow FLANK_BULGE proud, the
     chine bows, the cuff follows the forearm) and delivered as chords -- facet
@@ -101,19 +123,22 @@ this read as a chamfered box, and the low-poly references have no chamfers
 anywhere -- the creases between facets ARE the surface. CHAMFER survives only on
 the visor rim and the cap's face, where it is relief on a frozen feature.
 verify_bracer.py audits every sharp exterior crease and classifies it, and its
-FACET CENSUS is the regression test for the flat-slab flank: no single facet on
-the hull skin may exceed 900 mm2 (the old flank was ~2900).
+FACET CENSUS is the regression test: no facet on the exterior skin of EITHER
+solid may exceed 500 mm2 (the old flank was ~2900, the elbow end 2883).
 
-★ Every hull facet is a PLANE, and nearly parallel to the arm axis -- the
-station scaling tilts each one by a few degrees and no more. Stood on end the
-outer body is therefore effectively vertical: no support anywhere on it, and
-nothing curved for the exporter to tessellate.
+★ Every facet is a PLANE and exports as one in the STEP -- the loft's because
+uniform-scale-plus-offset makes them planar, the panels' because they are
+literally triangles. There is nothing curved on the exterior for the mesher to
+approximate except the arm saddle and the guard's scoops.
 
-Print orientation: STANDING ON THE HAND END, on a brim. Measured, not guessed --
-verify_bracer.py scores five orientations by unsupported face area, and the
-jack end wins on both support and bed contact because the hull's closed end is
-down there and the cavity opens upward at the nose. (⚠️ the two end-on rotations
-were labelled backwards until 2026-08-12; -pi/2 about X is the HAND end.)
+Printing: it is 147 mm long and it will want support somewhere whichever way it
+goes up. Standing on the ELBOW end is still the best of the five orientations
+the harness scores, and it is what out/bracer_print.stl is rotated into, but
+the end is faceted now so the bed contact is a few cm2 of scattered facet tips
+rather than a flat land -- it wants a brim, and probably trees. That is a
+slicer decision and it is deliberately NOT a design input; see the note in the
+print study. (⚠️ -pi/2 about X sends +Y to -Z, which stands it on the JACK end
+= the elbow. That label has been wrong in both directions before now.)
 
 Geometry note -- the constraint that drives the shape:
 a ~75 mm wide flat tray on a 90 mm diameter forearm has ~20 mm of sagitta, and
@@ -132,6 +157,8 @@ If you do want it closer: ARM_R = forearm circumference / (2*pi).
 """
 
 from build123d import *
+from scipy.spatial import Delaunay
+import numpy as np
 import math
 import os
 
@@ -791,6 +818,149 @@ def yz_prism(pts, x0, x1):
     return Pos(x0, 0, 0) * sol
 
 
+# ------------------------------------------------- ★★ THE FACET CARVER
+# ⚠️⚠️ 2026-08-12, ROUND TWO. The first low-poly pass tessellated the FLANKS
+# and the cuff and stopped there, because the flanks were what the owner had
+# complained about. Everything else -- the guard's outer wall, the deck round
+# the screen, the tray's own side walls, both end faces -- stayed exactly as
+# built: single planes, the biggest of them 2883 mm2. Owner, looking at it:
+# "still looking at a flat top wall". He is right, and the census in
+# verify_bracer.py said the part was fine because it only ever looked BELOW THE
+# BELT. A check scoped to the surface you already fixed is worse than no check.
+#
+# ★ THE RULE, and it is the whole of it: in ref/lowpoly-*.png EVERY surface of
+# the object is faceted. Not the sides. Not the sides and one end. All of it.
+# A slab with textured flanks is a decorated box, which is what this was.
+#
+# HOW. The flanks got their facets from the SECTION -- arcs chorded into planes
+# and lofted through stations. That construction cannot reach a face whose
+# normal is not perpendicular to the arm axis, which is precisely why the deck
+# and the two ends escaped it. So those surfaces are carved instead:
+#
+#   a flat panel is covered with a jittered point cloud, each point pushed IN
+#   by its own depth, Delaunay-triangulated, and the volume in front of the
+#   resulting triangle mesh is subtracted from the solid.
+#
+# Three properties earn it its place:
+#   * every facet is a triangle of a plane, so it exports as a plane in the
+#     STEP and there is nothing for the mesher to approximate;
+#   * it only ever REMOVES material. It cannot grow the envelope, it cannot
+#     bury a plunger, it cannot eat into the 4 mm FOAM relief on an arm face,
+#     and it cannot invent the dead structure the owner objected to last round;
+#   * depth is a FUNCTION OF POSITION, so the frozen housing is respected by
+#     construction rather than by hoping. Each panel below carries a budget
+#     function that knows what is behind that patch of surface -- 0.9 mm over
+#     the phone pocket's 2.4 mm wall, 0.0 mm over a button counterbore, 8 mm
+#     over the solid skirt at the elbow -- and the minimum-wall check in the
+#     harness is the independent audit of every one of those numbers.
+# ⚠️ Its own RNG, seeded off SEED but separate, so adding panels cannot shift
+# the hull's station walk and silently move geometry a probe was placed against.
+_prng = __import__("random").Random(SEED + 1)
+
+
+def facet_shave(origin, u, v, n, a0, a1, b0, b1, budget, base=None,
+                pitch=11.0, pitch_b=None, reach=90.0, deep=0.42, jit=0.36,
+                drop=0.12):
+    """The volume in FRONT of a faceted surface laid over a flat panel.
+
+    `origin`, `u`, `v`, `n` define the panel frame: a point on the untouched
+    plane, two in-plane unit axes, and the OUTWARD normal. `a`/`b` bounds are
+    in u/v. Depth at a point is `base(a, b) + budget(a, b) * random`, measured
+    along -n: `base` is surface that is ALREADY set back there and must be
+    followed exactly (the guard's outer bevel, the cap's sunken panel), while
+    `budget` is what may additionally be carved out of solid material.
+
+    Points sit on a jittered grid rather than at random: a Poisson-ish spray
+    makes slivers that OCCT then refuses, and a grid this coarse with this much
+    jitter is already irregular enough that no fan of equal facets appears.
+    `drop` deletes a fraction of the interior points, which is what gives the
+    mix of large and small facets the references have -- an even mesh reads as
+    a badly-tessellated fillet, the exact failure the flanks had at 5 chords.
+
+    ⚠️⚠️ SATISFYING THE BUDGET AT THE VERTICES IS NOT ENOUGH, and the first
+    build of this proved it by cutting a hole through the elbow end's wall over
+    the phone pocket. The depth across a facet is the LINEAR INTERPOLATION of
+    its three corners, so a triangle with two corners out in the 8 mm skirt and
+    one on the 0.9 mm pocket band carries almost the skirt's depth right across
+    the band. The budget map has cliffs in it because the housing behind it
+    does, and no grid pitch resolves a cliff.
+    ★ So the depth field is RELAXED against the budget: sample each triangle at
+    its centroid, its edge midpoints and six interior points, and wherever the
+    interpolated depth exceeds what is allowed there, scale that triangle's
+    three corners down. Depths only ever decrease, so it converges, and it
+    costs depth only next to a cliff instead of everywhere (which is what a
+    neighbourhood-minimum would have done -- it blanked the 3 mm deck strip
+    outboard of the screen entirely).
+    """
+    # ⚠️⚠️ FOUR DIVISIONS MINIMUM, and this is not cosmetic. A panel narrower
+    # than ~2 pitches gets two rows of points, BOTH on its rim -- and every rim
+    # point is faded to zero depth, so the panel carves precisely nothing. That
+    # silently happened to the two tray side walls (12.1 mm tall, pitch 10) and
+    # the guard's outer wall (14.9 mm, pitch 11): the build ran clean, the
+    # renders looked shaved, and 1840 mm2 of flat wall was still sitting there.
+    # The census over the whole skin is what caught it.
+    # ⚠️ `pitch_b` exists for panels whose BASE has structure across b -- the
+    # cap's sunken face. There the rim rows are pinned to zero depth, and if
+    # the next row inward is a whole pitch away the relaxation drags it back to
+    # the rim's budget and the recess never gets carved: 617 mm2 of flat panel
+    # floor survived exactly that way, which is how the census caught it.
+    na = max(4, int(round((a1 - a0) / pitch)) + 1)
+    nb = max(4, int(round((b1 - b0) / (pitch if pitch_b is None else pitch_b))) + 1)
+    P, D = [], []
+    for i in range(na):
+        for j in range(nb):
+            edge = i in (0, na - 1) or j in (0, nb - 1)
+            if not edge and _prng.random() < drop:
+                continue
+            a = a0 + (a1 - a0) * i / (na - 1)
+            b = b0 + (b1 - b0) * j / (nb - 1)
+            if 0 < i < na - 1:
+                a += _prng.uniform(-jit, jit) * (a1 - a0) / (na - 1)
+            if 0 < j < nb - 1:
+                b += _prng.uniform(-jit, jit) * (b1 - b0) / (nb - 1)
+            P.append((a, b))
+            D.append((0.0 if base is None else base(a, b))
+                     + budget(a, b) * _prng.uniform(deep, 1.0))
+    tri = Delaunay(np.array(P))
+
+    # ---- relax the depth field until every sampled point is inside budget ---
+    _W = [(1 / 3, 1 / 3, 1 / 3), (.5, .5, 0), (0, .5, .5), (.5, 0, .5),
+          (.6, .2, .2), (.2, .6, .2), (.2, .2, .6),
+          (.8, .1, .1), (.1, .8, .1), (.1, .1, .8)]
+    for _pass in range(10):
+        moved = False
+        for s in tri.simplices:
+            k = (int(s[0]), int(s[1]), int(s[2]))
+            for w in _W:
+                qa = sum(w[t] * P[k[t]][0] for t in range(3))
+                qb = sum(w[t] * P[k[t]][1] for t in range(3))
+                dq = sum(w[t] * D[k[t]] for t in range(3))
+                cap_ = (0.0 if base is None else base(qa, qb)) + budget(qa, qb)
+                if dq > cap_ + 1e-9 and dq > 1e-9:
+                    f = cap_ / dq
+                    for t in range(3):
+                        D[k[t]] *= f
+                    moved = True
+        if not moved:
+            break
+    W = [origin + u * P[k][0] + v * P[k][1] - n * D[k] for k in range(len(P))]
+    W2 = [w + n * reach for w in W]
+    faces, seen = [], {}
+    for s in tri.simplices:
+        i0, i1, i2 = int(s[0]), int(s[1]), int(s[2])
+        faces.append(Face(Wire.make_polygon([W[i0], W[i1], W[i2]], close=True)))
+        faces.append(Face(Wire.make_polygon([W2[i2], W2[i1], W2[i0]], close=True)))
+        for e in ((i0, i1), (i1, i2), (i2, i0)):
+            k = (min(e), max(e))
+            seen[k] = seen.get(k, 0) + 1
+    # the panel's rim: every edge used by one triangle only
+    for (i0, i1), cnt in seen.items():
+        if cnt == 1:
+            faces.append(Face(Wire.make_polygon(
+                [W[i0], W[i1], W2[i1], W2[i0]], close=True)))
+    return Solid(Shell(faces))
+
+
 # ------------------------------------------------------------------ build
 # Tray body: Y = 0 at the USB (open) end -- the WRIST -- and Y = OUT_L at the
 # jack end -- the ELBOW. See the orientation block at the top of the file.
@@ -1013,6 +1183,180 @@ for y in STRAP_Y:
                             -SAG - 1, 0)
 part -= arm
 
+# ------------------------------------------------ ★★ THE FACETED PANELS
+# One entry per flat surface the loft cannot reach. Read facet_shave() first.
+# The budget functions are where the frozen housing lives; each number below
+# says what is behind that patch of skin and is audited by the minimum-wall
+# check, never by eye.
+_UX, _UY, _UZ = Vector(1, 0, 0), Vector(0, 1, 0), Vector(0, 0, 1)
+
+# The two button bays, in Y. Nothing may be taken off the shell there: the wall
+# between the counterbore at X 36.4 and the outer face at 37.55 is 1.20 mm and
+# that is the thinnest thing the FROZEN housing deliberately has.
+_BTN_Y = [(fy(_b1) - (BTN_CB_EXT + 2.4) / 2, fy(_b0) + (BTN_CB_EXT + 2.4) / 2)
+          for (_b0, _b1) in (PWR_SVG, VOL_SVG)]
+
+
+def _in_btn(y):
+    return any(y0 < y < y1 for y0, y1 in _BTN_Y)
+
+
+def _fade(*ts):
+    """⚠️ EVERY PANEL MUST DIE AT ITS OWN RIM. A shave solid is a prism, so it
+    ends in a flat rim face; if that rim lands inside material it leaves a
+    WAFER -- a step of the original surface a few tenths thick, with the
+    facet cut just past it. The first build left exactly that at Z 13.1 where
+    the side-wall panel stopped under the deck panel, and the wall check read
+    0.03 mm. Multiplying a budget by _fade(...) brings the depth to zero at
+    the rim, so the panel's surface rejoins the surface it started from and
+    the rim cuts nothing. Each argument is (distance past the rim / margin)."""
+    return max(0.0, min(1.0, min(ts)))
+
+
+def _bud_end(x, z):
+    """ELBOW END. Behind this face: 2.4 mm of frozen pocket wall in the middle
+    band, the tray floor and lip outside it, and below Z=0 the shell's closing
+    wall -- which is as thick as we care to make it, because the cavity is cut
+    back to follow these facets (see the shell section)."""
+    # ⚠️ The pocket band runs from BELOW the floor to ABOVE the ceiling. Taking
+    # it from FLOOR+0.6 left the wall behind the pocket's own floor corner on
+    # the 2.6 mm budget and the wall check read 1.01 mm at Z 2.3.
+    if abs(x) < POCK_W / 2 + 0.8 and FLOOR - 0.4 < z < FLOOR + POCK_D + 0.4:
+        return 0.9
+    if z > OUT_H + 0.8:
+        # ⚠️ The guard's tail. Deeper than this and the elbow brow loses the
+        # 5.0 mm crest the owner had the two brows equalised to -- that is a
+        # decision on record, not spare material.
+        return 1.6
+    if -0.8 < z:
+        return 2.6                      # tray floor, lip band and side walls
+    return 8.0                          # the skirt: the cavity follows it back
+
+
+def _bud_deck(x, y):
+    """TOP DECK -- the face the screen sits in. The lip over the phone is only
+    LIP_H = 2.4 mm thick, so most of this panel is shallow; the strip outboard
+    of the pocket is standing on the tray's side wall and can take more.
+    ⚠️ The button test is NOT handed: PWR/VOL are on the phone's right edge,
+    which is +X whichever way TILT goes."""
+    f = _fade((x + 33.0) / 1.5, (y - 11.0) / 2.5, (140.5 - y) / 2.5)
+    if (abs(x) < WIN_X + BEZEL_CHAM + 0.6
+            and WIN_Y0 - BEZEL_CHAM - 0.6 < y < WIN_Y1 + BEZEL_CHAM + 0.6):
+        return 0.8 * f                  # the aperture's flare must survive
+    if abs(x) < POCK_W / 2 + 0.5 and y < POCK_L - 0.5:
+        return 1.1 * f
+    if x > 30.0 and _in_btn(y):
+        return 1.5 * f                  # counterbore ceiling is at Z 10.1
+    return 2.2 * f
+
+
+def _bud_wall(side):
+    """TRAY SIDE WALL, above the hull's shoulder. 2.4 mm of frozen pocket wall
+    below the lip line and 4.9 mm above it. Zero across the button bays.
+    ⚠️ This panel cuts the CAP as well (Y < 0), and behind the cap's +X flank
+    at Y in [-6, 0] runs the internal cable channel -- which leaves only 1.9 mm
+    of flank there by design. That is the wall the square-hole bug went
+    through; it does not get shaved."""
+    def f(y, z):
+        k = _fade((z - 1.0) / 1.5, (OUT_H - 0.3 - z) / 1.5)
+        # ⚠️ The button bay is NOT a zero in this map. It used to be, and the
+        # relaxation then dragged every triangle touching it down with it --
+        # 1497 mm2 of the +X wall came out untouched. The bay is protected by
+        # `_btn_keep`, which is a hard box, so the budget here can stay normal
+        # and the bay simply stands proud as a pad. Protection belongs in the
+        # boolean, not in a hole in the budget field.
+        # ⚠️ The internal cable run reaches CABLE_X1 = 35.65 on BOTH solids --
+        # the pocket in the cap's plate (Y -6..0) and the slot through the
+        # tray floor (Y -1..17) -- so from there out there is only 1.9 mm of
+        # flank. That is the wall the square-hole bug went through, and the
+        # wall check read 0.86 mm here before this clause existed.
+        if side > 0 and -6.5 < y < 18.0 and -6.0 < z < 10.2:
+            return 0.4 * k
+        return (1.8 if z > OUT_H - LIP_H + 0.4 else 1.1) * k
+    return f
+
+
+def _guard_in(z):
+    """|X| of the guard's scooped inner wall at height z -- the same circle the
+    well is cut with, so the budget below tracks the real wall thickness
+    instead of a guess that would go stale the moment GUARD_H moved."""
+    r2 = SCOOP_R_SIDE ** 2 - (_GZ1 - z) ** 2
+    return math.sqrt(max(0.0, r2)) + SCOOP_CX
+
+
+def _guard_out(z):
+    """|X| of the guard's nominal outer surface: vertical to GUARD_BEV_H below
+    the crest, then raked in by GUARD_BEV_X. This is the `base` of the guard
+    panel -- the facets must FOLLOW the bevel, not cut across it."""
+    return GUARD_HW - max(0.0, z - (_GZ1 - GUARD_BEV_H)) * (
+        GUARD_BEV_X / GUARD_BEV_H)
+
+
+def _bud_guard(y, z):
+    """GUARD OUTER WALL, vertical face and outer bevel as one panel. Thickness
+    runs 6.2 mm at the base to CREST_W at the crest, so the budget tapers with
+    it and is forced to zero before the crest: CREST_W is set by the min-wall
+    check and a facet that ate into it would make the crest a feather edge --
+    which is exactly what the first build did, 0.00 mm at Z 28.4."""
+    if z > _GZ1 - 1.6:
+        return 0.0
+    # ⚠️ capped at 3.0 rather than at the wall: past that the guard's outer face
+    # falls INBOARD of the tray wall it stands on (37.55 against 40) and the
+    # base turns into an undercut ledge instead of a facet.
+    return (min(3.0, max(0.0, _guard_out(z) - _guard_in(z) - 1.7))
+            * _fade((z - _GZ0 - 0.4) / 1.2))
+
+
+# ---- the panels themselves -------------------------------------------------
+# ⚠️ SD is the deep side, so the guard's outer wall is at X = SD*GUARD_HW and
+# the panel normals are handed off it. Written as SD, never as a literal sign.
+SHAVE = {}
+SHAVE["elbow end"] = facet_shave(
+    Vector(0, OUT_L, 0), _UX, _UZ, _UY, -50.0, 56.0, -34.0, 30.0, _bud_end,
+    pitch=12.0)
+# The deck, between the two brows -- outboard of them the guard covers it.
+# ⚠️ Y bounds are where the WELL FLOOR actually starts and stops. The two end
+# brows span the full width of the tray, so a panel that ran past them would
+# take its 2.2 mm out of the underside of a brow instead of off the deck -- the
+# first build did, and left a 0.10 mm sliver under the USB brow's base.
+SHAVE["deck"] = facet_shave(
+    Vector(0, 0, OUT_H), _UX, _UY, _UZ,
+    min(SD * 33.0, -SD * 44.0), max(SD * 33.0, -SD * 44.0), 11.0, 140.5,
+    _bud_deck, pitch=10.0)
+# ★ The side walls are subtracted from BOTH solids. The cap's end plate is
+# flush with the tray's walls, so one shared cutter is what keeps the facets
+# running through the joint instead of stepping at it.
+for _nm, _sx in (("+X wall (buttons)", 1), ("-X wall", -1)):
+    SHAVE[_nm] = facet_shave(
+        Vector(_sx * OUT_W / 2, 0, 0), _UY, _UZ, _UX * _sx,
+        -CAP_T - 2.0, OUT_L + 2.0, 1.0, OUT_H - 0.3, _bud_wall(_sx),
+        pitch=6.0, pitch_b=3.0)
+# ★ ONE panel for the guard's whole outer surface, vertical face AND bevel.
+# Two panels meeting on the bevel crease left a 1.5 mm ledge running the length
+# of the part, because neither knew what the other had cut. Giving the single
+# panel the bevel as its `base` makes the facets ride over the crease.
+SHAVE["guard wall"] = facet_shave(
+    Vector(SD * GUARD_HW, 0, 0), _UY, _UZ, _UX * SD,
+    -2.0, OUT_L + 2.0, _GZ0 + 0.2, _GZ1 + 0.1, _bud_guard,
+    base=lambda a, b: GUARD_HW - _guard_out(b), pitch=7.5)
+# The two CREST RAMPS -- the guard sweeping down into each end. Each is a
+# single plane, 654 and 330 mm2, and they are the most visible surfaces on the
+# object after the guard wall itself.
+# ⚠️ Standing on the elbow these faces point downward at 48 deg. Faceting moves
+# each facet a couple of degrees either side of that, so some will cross 45 and
+# want support. That is reported by the harness and deliberately not designed
+# around -- see the note on the print study.
+for _nm, _ry, _sy in (("usb crest ramp", RAMP_Y0, -1), ("jack crest ramp", RAMP_Y1, 1)):
+    SHAVE[_nm] = facet_shave(
+        Vector(0, _ry, _GZ1), _UX,
+        Vector(0, _sy * RAMP_SLOPE, -1.0).normalized(),
+        Vector(0, _sy, RAMP_SLOPE).normalized(),
+        -42.0, 42.0, -0.5, 24.0, lambda a, b: 1.2, pitch=8.0)
+
+# The cap's own panels are built down in the cap section, where FACE_* and
+# CAP_CHIN are declared -- see "THE CAP'S FACETED PANELS".
+
+
 # ------------------------------------------------------------------- shell
 # ★ The wedge is dead volume, so hollow it. The cavity is the same faceted
 # section inset by WALL_OUT, bounded away from the arm face by WALL_ARM (which
@@ -1025,6 +1369,13 @@ part -= arm
 # exactly WALL_OUT thick, measured perpendicular to itself, at every station.
 cav = tessellated(inset(HULL_SEC, WALL_OUT)) \
     & bbox(-90, 90, CAP_D - 1, OUT_L - CAV_Y1, -90, 90)
+# ★★ ...AND THE CAVITY FOLLOWS THE ELBOW END'S FACETS BACK. Without this the
+# closing wall is a flat CAV_Y1 = 3 mm slab and the deepest end facet (8 mm)
+# would cut straight into the cavity. Cutting the SAME shave solid out of the
+# cavity, pushed back by WALL_END, leaves exactly WALL_END of material behind
+# every facet -- so the end can be sculpted as deeply as the form wants
+# without adding a gram of dead slug behind it.
+cav -= Pos(0, -WALL_END, 0) * SHAVE["elbow end"]
 # Over the tenon the skin has to be measured off the STEPPED-IN face, or the
 # cavity would sit outside it and the tenon wall would come out negative.
 cav += prism(inset(HULL_SEC, WALL_OUT), -1.0, CAP_D) & _above
@@ -1312,6 +1663,26 @@ for (yc, ln, vw) in ((24.0, 26.0, VENT_W), (73.0, 50.0, VENT_W),
     part -= Pos(0, yc, -0.4) * vent
 
 
+# ------------------------------------------- ★★ APPLY THE FACETED PANELS
+# Last, so every panel carves the finished surface -- guard included -- rather
+# than a blank that later features would re-flatten. Subtraction only: nothing
+# here can add material, move a frozen aperture or reach an arm face.
+# ⚠️ The button bays are protected OUTRIGHT as well as by a zero budget. The
+# plungers stand BTN_PROUD past the wall, so a panel whose surface sits exactly
+# on the wall would still shear their heads off. Belt and braces, because the
+# bay is print-in-place and there is no second chance at it.
+_btn_keep = None
+for (_b0, _b1) in (PWR_SVG, VOL_SVG):
+    _k = bbox(X_POCK, X_OUT + BTN_PROUD + 1.0,
+              fy(_b1) - (BTN_CB_EXT + 3.0) / 2, fy(_b0) + (BTN_CB_EXT + 3.0) / 2,
+              Z_BTN - BTN_CB_H / 2 - 1.0, Z_BTN + BTN_CB_H / 2 + 1.0)
+    _btn_keep = _k if _btn_keep is None else _btn_keep + _k
+
+for _nm, _sh in SHAVE.items():
+    part -= (_sh - _btn_keep)
+    print(f"facet      carved {_nm}")
+
+
 # --------------------------------------------------------- USB end cap
 # The phone slides in at the USB end, so without this it can slide out --
 # the strap is otherwise the only thing stopping it. REMOVABLE, not glued:
@@ -1474,21 +1845,20 @@ for _sx in (-1, 1):
     cap -= Pos(_p0 + _n * 100.0) \
         * Rot(0, 0, math.degrees(math.atan2(_n.Y, _n.X))) * Box(200, 200, 200)
 
-# ---- the face: a sunken panel with the two vent slots in it ----
-# ★ Replaces the trough. Flat, bevelled at CHAMFER, and it belongs to the same
-# family as the belt and the guard crest rather than being the one curved,
-# funnel-shaped thing on an otherwise faceted object.
-# ⚠️ Two margins, not one. The face is 75 wide and only 13.4 tall above Z=0,
-# so a single 5 mm inset left a 3.4 mm letterbox slot rather than a panel --
-# the feature the comment above describes did not actually exist on the part.
+# ---- the face: a FACETED WELL, not a flat sunken panel ----
+# ★★ It used to be a flat rectangle sunk FACE_DEPTH into the plate with a
+# bevelled rim. That was the right instinct on a chamfered body and the wrong
+# one on a faceted one: its floor came out as 617 mm2 of unbroken plane, the
+# single largest facet on either solid, sitting in the middle of the wrist end
+# -- the end you look at when the thing is on your arm. Trying to keep the flat
+# floor AND facet it fought itself (a stepped `base` either left the floor
+# untouched or made a 32 deg wedge at the rim), so the flat is gone: the recess
+# is now carved entirely by the face panel, whose budget runs from 1.3 mm at
+# the rim to FACE_DEPTH + 1.5 in the middle. Same silhouette, no plane in it.
+# FACE_INSET / FACE_INSET_Z still set where the rim is; FACE_DEPTH still sets
+# how deep the middle goes.
 _fz0, _fz1 = FACE_INSET_Z, OUT_H - FACE_INSET_Z
 _fx = OUT_W / 2 - FACE_INSET
-cap -= yz_prism([
-    (-CAP_T - EPS, _fz0),
-    (-CAP_T + FACE_DEPTH, _fz0 - CHAMFER_SM),
-    (-CAP_T + FACE_DEPTH, _fz1 + CHAMFER_SM),
-    (-CAP_T - EPS, _fz1),
-], -_fx, _fx)
 
 # Speaker and primary mic, straight through the plate. No taper, no funnel --
 # they are holes, and both have to stay open: the speaker is TTS out, the mic
@@ -1536,6 +1906,71 @@ for _sd, _zc in FLANKS:
         * Rot(0, -90 * _sx, 0) \
         * Cone(CAP_BUMP_R, CAP_BUMP_R * 0.5, CAP_W / 2 + 0.6,
                align=(Align.CENTER, Align.CENTER, Align.MIN))
+
+# ------------------------------------------- ★★ THE CAP'S FACETED PANELS
+# Its deck, so the top face reads as one treated surface across the joint
+# rather than facets that stop dead at Y = 0...
+CAP_SHAVE = {}
+CAP_SHAVE["cap deck"] = facet_shave(
+    Vector(0, 0, OUT_H), _UX, _UY, _UZ, -44.0, 44.0, -CAP_T - 1.0, 1.0,
+    lambda a, b: 2.0 * _fade((b + CAP_T) / 3.0), pitch=9.0)
+# ...the plate face above Z=0. ⚠️ The two panels either side of Z=0 both taper
+# to nothing AT Z=0. They are different planes (the chin rakes, the face does
+# not) and two independent faceted surfaces meeting head-on left a 0.12 mm
+# knife edge along the join -- the wall check found it. Meeting on the crease
+# that is already there costs a 2 mm unfaceted band and is worth it.
+# ★ The whole face is ONE graded budget: 1.3 mm at the rim, FACE_DEPTH + 1.5 in
+# the middle, transitioning over 3 mm. That IS the sunken panel -- same
+# silhouette, same depth, but built out of facets so there is no floor plane in
+# it. ⚠️ Behind the middle of this face sits the cable/plug pocket at Y = -6, so
+# the deepest the budget may go is CAP_T - PLUG_D - MIN_WALL = 4.8; 4.0 leaves
+# 2.0 mm of plate.
+def _cap_panel(a, b):
+    return _fade((_fx - abs(a)) / 3.0, (b - _fz0) / 3.0, (_fz1 - b) / 3.0)
+
+
+CAP_SHAVE["cap face"] = facet_shave(
+    Vector(0, -CAP_T, 0), _UX, _UZ, _UY * -1, -44.0, 44.0, 0.0, OUT_H,
+    lambda a, b: ((1.3 + (FACE_DEPTH + 1.5 - 1.3) * _cap_panel(a, b))
+                  * _fade(b / 2.5, (OUT_H - b) / 2.0)),
+    pitch=7.0, pitch_b=3.0)
+# ...and the CHIN below it, which is the cap's single largest face: the whole
+# raked nose, 1424 mm2 of it. ⚠️ Its panel is the RAKE PLANE, not Y = -CAP_T,
+# so the facets sit on the surface that is actually there. Carving a raked face
+# from a vertical panel would have flattened the rake back out over half its
+# height and left a step where the two disagreed.
+_chin_v = Vector(0, CAP_CHIN, -(SAG + 10.0)).normalized()
+CAP_SHAVE["cap chin"] = facet_shave(
+    Vector(0, -CAP_T, 0), _UX, _chin_v,
+    Vector(0, -(SAG + 10.0), -CAP_CHIN).normalized(),
+    -46.0, 56.0, 0.0, SAG + 8.0,
+    lambda a, b: min(1.0, b / 3.0) * 2.2, pitch=11.0)
+# ...and the two plan-view rakes on the nose corners, 372 and 303 mm2.
+for _sx in (-1, 1):
+    _n = Vector(_sx * CAP_T, -CAP_RAKE, 0).normalized()
+    # ⚠️ Faded out before B = 14.4, which is where this plane crosses Y = 0.
+    # The rake is deliberately sized "to finish exactly at Y=0 so it never
+    # reaches the collar"; a facet 1.2 mm past it does reach the collar, and
+    # the crest check found the 33 deg wedge it left at (-40, 1.5, -7.3).
+    CAP_SHAVE[f"cap nose rake {_sx:+d}"] = facet_shave(
+        Vector(_sx * (GUARD_HW - CAP_RAKE), -CAP_T, 0), _UZ,
+        Vector(CAP_RAKE * _sx, CAP_T, 0).normalized(), _n,
+        -SAG - 6.0, OUT_H + 1.0, -16.0, 14.0,
+        lambda a, b: 1.2 * _fade((12.0 - b) / 2.0, (b + 14.0) / 2.0),
+        pitch=8.0)
+
+# ★ The two SIDE-WALL panels are the ones off the bracer, not copies. The cap's
+# end plate is flush with the tray's own walls, so cutting both solids with the
+# SAME solid is what makes the facets run through the joint instead of stepping
+# at it -- the same argument as the tenon, applied to the surface treatment.
+# ⚠️ Nothing here touches the collar, the bore or the snap noses: every panel
+# is above Z = 1.0 or ahead of Y = 0, and the collar lives below the belt at
+# Y > 0. The seated/slide-path interference check is the proof, not this note.
+for _nm, _sh in list(CAP_SHAVE.items()) + [
+        (k, SHAVE[k]) for k in ("+X wall (buttons)", "-X wall")]:
+    cap -= _sh
+    print(f"facet      carved {_nm} (cap)")
+
 
 # ------------------------------------------------------- edge treatment
 # ★★ BIG chamfers, and the same size everywhere they fit. 1.0/1.5 read as
