@@ -121,6 +121,9 @@ class ChannelsViewModel(
 
     val pttState: StateFlow<PttState> get() = ptt.state
 
+    /** The mic's input level, kept off [pttState] so it cannot churn the state machine. */
+    val pttLevel: StateFlow<Double> get() = ptt.level
+
     /** Thumb down. [target] is captured here and never re-read; see [PttTarget]. */
     fun pttPress(target: PttTarget) = ptt.press(target)
 

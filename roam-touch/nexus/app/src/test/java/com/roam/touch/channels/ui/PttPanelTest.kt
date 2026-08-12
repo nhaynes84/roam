@@ -8,6 +8,7 @@ import androidx.compose.ui.test.performClick
 import com.roam.touch.channels.stt.Ptt
 import com.roam.touch.channels.stt.PttState
 import com.roam.touch.channels.stt.PttTarget
+import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -43,6 +44,7 @@ class PttPanelTest {
             RoamTheme {
                 PttPanel(
                     state = state,
+                    level = MutableStateFlow(-24.0),
                     channelLabel = target.label,
                     targetLive = live,
                     nowMs = 12_000L,
@@ -122,7 +124,7 @@ class PttPanelTest {
      */
     @Test
     fun `listening says so, with an elapsed count and where it is going`() {
-        render(PttState.Listening(target, startedAtMs = 9_000L, levelDbfs = -21.0))
+        render(PttState.Listening(target, startedAtMs = 9_000L))
 
         compose.onNodeWithText("LISTENING · 3s").assertIsDisplayed()
         compose.onNodeWithText("release to send").assertIsDisplayed()
@@ -161,10 +163,24 @@ class PttPanelTest {
     @Test
     fun `the failure reasons are distinct sentences, not one generic message`() {
         val reasons = listOf(
-            Ptt.NO_MIC, Ptt.TOO_SHORT, Ptt.TOO_QUIET,
-            Ptt.NOTHING_HEARD, Ptt.WHISPER_UNREACHABLE, Ptt.WHISPER_FAILED,
+            Ptt.NO_MIC, Ptt.TOO_SHORT, Ptt.TOO_QUIET, Ptt.NOTHING_HEARD,
+            Ptt.WHISPER_UNREACHABLE, Ptt.WHISPER_FAILED, Ptt.micDropout(240, 5_000),
         )
         assertEquals("no two failures may read alike", reasons.size, reasons.toSet().size)
+    }
+
+    /**
+     * ⚠️ The message that would have diagnosed the 0.4 bug on sight. He held it for five
+     * seconds; the panel must say the mic dropped out and show both numbers, not tell
+     * him to hold it longer.
+     */
+    @Test
+    fun `a capture fault names the mic and both durations`() {
+        render(PttState.Failed(Ptt.micDropout(240, 5_000)))
+
+        compose.onNode(hasText("mic dropped out", substring = true)).assertIsDisplayed()
+        compose.onNode(hasText("0.2s", substring = true)).assertIsDisplayed()
+        compose.onNode(hasText("5.0s", substring = true)).assertIsDisplayed()
     }
 
     /** ★ Idle is silent: no panel, no leftover chrome above the composer. */

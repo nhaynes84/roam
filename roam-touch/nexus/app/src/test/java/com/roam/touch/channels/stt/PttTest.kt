@@ -10,6 +10,7 @@ import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.IOException
@@ -24,6 +25,10 @@ class FakeRecorder(private var next: Recording = speech()) : Recorder {
         private set
     var discards = 0
         private set
+
+    /** ⚠️ Must always be zero: one press, one recorder. */
+    var overlappingStarts = 0
+        private set
     var refuse = false
 
     override var recording: Boolean = false
@@ -31,6 +36,10 @@ class FakeRecorder(private var next: Recording = speech()) : Recorder {
 
     override fun start(): Boolean {
         if (refuse) return false
+        // ⚠️ The real MicRecorder refuses and logs loudly here. The fake counts, so any
+        // test that provokes a press-cycling bug fails on the count rather than on a
+        // subtle byte total.
+        if (recording) overlappingStarts++
         starts++
         recording = true
         return true
@@ -114,6 +123,10 @@ class PttTest {
 
     @After
     fun tearDown() = scope.cancel()
+
+    /** ⚠️ One press, one recorder — asserted for every scenario in this file. */
+    private fun FakeRecorder.assertNoOverlap() =
+        assertEquals("a recorder was started while one was live", 0, overlappingStarts)
 
     private fun mic() = FakeRecorder()
 
@@ -213,6 +226,51 @@ class PttTest {
 
         assertEquals(0, stt.calls)
         assertEquals(PttState.Failed(Ptt.TOO_QUIET), ptt.state.value)
+    }
+
+    /**
+     * ★★ The regression that cost an evening, stated as a test.
+     *
+     * ⚠️ He held the button for five seconds and got *"too short — hold the button while
+     * you talk"*. That was a true statement about the audio and a false one about him:
+     * the recorder had stopped collecting after 240 ms. Blaming the press for a capture
+     * fault is what sent him looking in the wrong place, so the two are now told apart
+     * by comparing the press against the audio it produced — and the message carries
+     * both numbers, which is what makes it diagnose itself.
+     */
+    @Test
+    fun `a long press that captured almost nothing blames the mic, not the user`() =
+        runTest(dispatcher) {
+            var now = 1_000L
+            val rec = mic().also { it.willCapture(FakeRecorder.speech(ms = 240)) }
+            val stt = FakeStt()
+            val ptt = Ptt(rec, stt, scope) { now }
+
+            ptt.press(augment)
+            now += 5_000L          // a five-second hold
+            ptt.release()
+            advanceUntilIdle()
+
+            val reason = (ptt.state.value as PttState.Failed).reason
+            assertEquals(Ptt.micDropout(240, 5_000), reason)
+            assertTrue("it must name the audio it got", reason.contains("0.2s"))
+            assertTrue("and the press it got it from", reason.contains("5.0s"))
+            assertTrue("this is not a 'hold it longer' problem", !reason.contains("hold the button"))
+            assertEquals("nothing that short goes to whisper", 0, stt.calls)
+        }
+
+    @Test
+    fun `a genuinely short press is still reported as a short press`() = runTest(dispatcher) {
+        var now = 1_000L
+        val rec = mic().also { it.willCapture(FakeRecorder.speech(ms = 120)) }
+        val ptt = Ptt(rec, FakeStt(), scope) { now }
+
+        ptt.press(augment)
+        now += 130L            // he really did just brush it
+        ptt.release()
+        advanceUntilIdle()
+
+        assertEquals(PttState.Failed(Ptt.TOO_SHORT), ptt.state.value)
     }
 
     @Test
@@ -393,7 +451,30 @@ class PttTest {
         ptt.press(augment)
         ptt.press(roam)
         assertEquals(1, rec.starts)
+        rec.assertNoOverlap()
         assertEquals(augment, (ptt.state.value as PttState.Listening).target)
+    }
+
+    /**
+     * ⚠️ The press being cycled by something upstream is what fragments a hold. However
+     * many times it arrives, the mic is opened once and never re-opened underneath a
+     * live session.
+     */
+    @Test
+    fun `a press repeated during a hold never reopens the mic`() = runTest(dispatcher) {
+        val rec = mic()
+        val ptt = Ptt(rec, FakeStt("still here"), scope)
+        ptt.press(augment)
+        repeat(40) { ptt.press(augment) }
+
+        assertEquals("one press, one recorder", 1, rec.starts)
+        rec.assertNoOverlap()
+        assertEquals(0, rec.stops)
+
+        ptt.release()
+        advanceUntilIdle()
+        assertEquals(1, rec.stops)
+        assertEquals(PttState.Confirming(augment, "still here"), ptt.state.value)
     }
 
     @Test
@@ -422,18 +503,31 @@ class PttTest {
 
     // --- what the wearer sees ------------------------------------------------
 
+    /**
+     * ⚠️ The level is a **signal, not state**. Folding it into `Listening` made every
+     * state consumer churn eight times a second on a real microphone — and a silent
+     * emulator mic conflated the identical values away, so it looked fine in test.
+     */
     @Test
-    fun `the level meter only moves while the mic is open`() = runTest(dispatcher) {
+    fun `the level is carried beside the state, never inside it`() = runTest(dispatcher) {
         val ptt = Ptt(mic(), FakeStt(), scope) { 5L }
         ptt.onLevel(-22.0)
-        assertEquals("no level outside listening", PttState.Idle, ptt.state.value)
+        assertEquals("no level outside listening", Pcm.FLOOR_DBFS, ptt.level.value, 0.001)
+        assertEquals(PttState.Idle, ptt.state.value)
 
         ptt.press(augment)
+        val listening = ptt.state.value
         ptt.onLevel(-22.0)
-        assertEquals(-22.0, (ptt.state.value as PttState.Listening).levelDbfs, 0.001)
+        assertEquals(-22.0, ptt.level.value, 0.001)
+        assertSame("a moving level must not produce a new state", listening, ptt.state.value)
+
+        ptt.onLevel(-31.0)
+        assertEquals(-31.0, ptt.level.value, 0.001)
+        assertSame(listening, ptt.state.value)
 
         ptt.release()
         ptt.onLevel(-10.0)
+        assertEquals("the meter is dead once the mic is", Pcm.FLOOR_DBFS, ptt.level.value, 0.001)
         assertEquals(PttState.Transcribing(augment), ptt.state.value)
     }
 

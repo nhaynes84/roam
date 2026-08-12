@@ -38,11 +38,17 @@ sealed interface PttState {
     /** Nothing is happening, and no microphone is open. */
     data object Idle : PttState
 
-    /** The mic is open. This is the only state in which audio is being captured. */
+    /**
+     * The mic is open. This is the only state in which audio is being captured.
+     *
+     * ⚠️ The input level is deliberately **not** here. It changes eight times a second
+     * on a real microphone, and folding it into the state made every consumer of the
+     * state machine churn at that rate — while a silent emulator mic conflated the
+     * identical values away and hid it. The level is a signal; see [Ptt.level].
+     */
     data class Listening(
         val target: PttTarget,
         val startedAtMs: Long,
-        val levelDbfs: Double = Pcm.FLOOR_DBFS,
     ) : PttState
 
     /** Thumb up, audio sent, waiting on Whisper. */
@@ -83,6 +89,16 @@ class Ptt(
     private val _state = MutableStateFlow<PttState>(PttState.Idle)
     val state: StateFlow<PttState> = _state.asStateFlow()
 
+    private val _level = MutableStateFlow(Pcm.FLOOR_DBFS)
+
+    /**
+     * The live input level in dBFS, for the meter — a signal, not part of the state.
+     *
+     * ⚠️ Kept off [state] on purpose: a real mic updates this ~8 Hz, and anything that
+     * recomposes or re-subscribes on a state change must not be dragged along with it.
+     */
+    val level: StateFlow<Double> = _level.asStateFlow()
+
     private var work: Job? = null
 
     /**
@@ -105,10 +121,14 @@ class Ptt(
      * flight and a second recording would race it.
      */
     fun press(target: PttTarget) {
-        when (_state.value) {
-            is PttState.Listening, is PttState.Transcribing, is PttState.Sending -> return
+        when (val current = _state.value) {
+            is PttState.Listening, is PttState.Transcribing, is PttState.Sending -> {
+                Log.w(TAG, "PRESS ignored, already ${current.javaClass.simpleName}")
+                return
+            }
             else -> Unit
         }
+        Log.i(TAG, "PRESS ${target.paneId}")
         work?.cancel()
         work = null
         replacing = _state.value as? PttState.Confirming
@@ -117,8 +137,8 @@ class Ptt(
             return
         }
         val startedAt = clock()
+        _level.value = Pcm.FLOOR_DBFS
         _state.value = PttState.Listening(target, startedAt)
-        Log.i(TAG, "listening for ${target.paneId}")
 
         // ⚠️ A thumb that never comes up — a snagged sleeve, a stuck pointer event —
         // must not hold the mic open indefinitely. The cap ends the recording and
@@ -134,14 +154,19 @@ class Ptt(
 
     /** Thumb up. Ignored unless the mic is actually open. */
     fun release() {
-        val listening = _state.value as? PttState.Listening ?: return
+        val listening = _state.value as? PttState.Listening
+        if (listening == null) {
+            Log.w(TAG, "RELEASE ignored, not listening")
+            return
+        }
+        Log.i(TAG, "RELEASE after ${clock() - listening.startedAtMs} ms held")
         work?.cancel()
         finish(listening.target)
     }
 
-    /** The mic's own level, for the meter. Ignored outside [PttState.Listening]. */
+    /** The mic's own level, for the meter. Ignored unless the mic is actually open. */
     fun onLevel(dbfs: Double) {
-        _state.update<PttState.Listening> { it.copy(levelDbfs = dbfs) }
+        if (_state.value is PttState.Listening) _level.value = dbfs
     }
 
     /**
@@ -195,7 +220,10 @@ class Ptt(
     // -----------------------------------------------------------------------
 
     private fun finish(target: PttTarget) {
+        val heldMs = (clock() - (_state.value as? PttState.Listening)?.startedAtMs.orZero())
+            .coerceAtLeast(0)
         val recording = recorder.stop()
+        _level.value = Pcm.FLOOR_DBFS
 
         // ⚠️⚠️ The two gates below exist because of a measured fact, not a hunch:
         // wyoming-faster-whisper returned "Smart home commands." for one second of
@@ -204,8 +232,33 @@ class Ptt(
         // are its edges. Without them a fumbled press produces a confident sentence
         // nobody said, one tap away from a live agent.
         if (recording.durationMs < MIN_MS) {
-            fail(TOO_SHORT)
+            // ★★ Say which of the two things went wrong.
+            //
+            // "not held long enough" was a true statement about the audio and a false
+            // one about the user: he held it for five seconds and the recorder dropped
+            // all but 240 ms of it (Nexus 0.4, sailfish). Blaming the press for a
+            // capture fault sent him looking in the wrong place, and it is the single
+            // thing that would have made the bug diagnose itself. So the two are now
+            // told apart by comparing the press against the audio it produced.
+            if (heldMs >= MIN_MS) {
+                Log.e(
+                    TAG,
+                    "CAPTURE FAULT: ${recording.durationMs} ms of audio from a " +
+                            "$heldMs ms press — the recorder stopped collecting"
+                )
+                fail(micDropout(recording.durationMs, heldMs))
+            } else {
+                fail(TOO_SHORT)
+            }
             return
+        }
+        // Long enough to use, but well short of the press: transcribe it — he can read
+        // it and redo — but never let it pass unrecorded.
+        if (heldMs > MIN_MS && recording.durationMs < heldMs / 2) {
+            Log.w(
+                TAG,
+                "capture short: ${recording.durationMs} ms of audio from a $heldMs ms press"
+            )
         }
         if (recording.rmsDbfs < MIN_RMS_DBFS) {
             Log.i(TAG, "rejected at ${"%.1f".format(recording.rmsDbfs)} dBFS")
@@ -242,6 +295,8 @@ class Ptt(
         if (e is SttException) e.message.orEmpty().ifBlank { WHISPER_FAILED }
         else WHISPER_UNREACHABLE
 
+    private fun Long?.orZero(): Long = this ?: 0L
+
     /** Update [_state] only when it is currently of type [T]. */
     private inline fun <reified T : PttState> MutableStateFlow<PttState>.update(
         transform: (T) -> PttState,
@@ -268,6 +323,16 @@ class Ptt(
 
         const val NO_MIC = "no microphone — check the mic permission"
         const val TOO_SHORT = "too short — hold the button while you talk"
+
+        /**
+         * ★ A long press that produced almost no audio. Names both numbers, because
+         * the difference between them *is* the diagnosis.
+         */
+        fun micDropout(audioMs: Long, heldMs: Long): String =
+            "mic dropped out — only ${tenths(audioMs)}s captured from a " +
+                    "${tenths(heldMs)}s hold"
+
+        private fun tenths(ms: Long): String = "%.1f".format(ms / 1000.0)
         const val TOO_QUIET = "nothing heard — is the mic covered?"
         const val NOTHING_HEARD = "whisper heard nothing"
         const val WHISPER_UNREACHABLE = "whisper unreachable"

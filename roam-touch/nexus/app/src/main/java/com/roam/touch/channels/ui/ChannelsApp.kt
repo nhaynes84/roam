@@ -124,6 +124,7 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
                 nowMs = nowMs,
                 speakingEventId = speakingEventId,
                 pttState = pttState,
+                pttLevel = vm.pttLevel,
                 onBack = { openPane = null; vm.stopSpeaking(); vm.pttCancel() },
                 onExpand = vm::expand,
                 onPlay = vm::play,

@@ -29,12 +29,14 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -46,6 +48,7 @@ import com.roam.touch.channels.stt.Pcm
 import com.roam.touch.channels.stt.Ptt
 import com.roam.touch.channels.stt.PttState
 import com.roam.touch.channels.stt.PttTarget
+import kotlinx.coroutines.flow.StateFlow
 
 /**
  * ★★ Push to talk — the input half of the product thesis, on screen.
@@ -87,6 +90,16 @@ fun PttButton(
     val listening = state is PttState.Listening
     val busy = state is PttState.Transcribing || state is PttState.Sending
 
+    // ⚠️⚠️ The gesture is keyed on Unit and reads its callbacks through
+    // rememberUpdatedState, so no recomposition can ever restart it mid-hold. A press
+    // that is torn down and rebuilt while the thumb is still down closes the
+    // microphone and reopens it, which is how a five-second hold becomes 240 ms.
+    // ⚠️ Do not put `state`, `target` or a fresh lambda into pointerInput's keys.
+    val currentTarget by rememberUpdatedState(target)
+    val currentPress by rememberUpdatedState(onPress)
+    val currentRelease by rememberUpdatedState(onRelease)
+    val currentEnabled by rememberUpdatedState(enabled)
+
     val tint = when {
         !enabled -> RoamColors.Dead
         listening -> RoamColors.Alarm
@@ -97,9 +110,11 @@ fun PttButton(
 
     // A ring that grows while the mic is open. The button is under a thumb, so the
     // signal has to be readable from the edge that is not covered.
-    val pulse by rememberInfiniteTransition(label = "ptt").animateFloat(
+    // ⚠️ Read inside graphicsLayer, never with `by` in the composable body: a 60 Hz
+    // animation read at composition scope recomposes this button on every frame.
+    val pulse = rememberInfiniteTransition(label = "ptt").animateFloat(
         initialValue = 1f,
-        targetValue = if (listening) 1.16f else 1f,
+        targetValue = 1.16f,
         animationSpec = infiniteRepeatable(tween(620), RepeatMode.Reverse),
         label = "pulse",
     )
@@ -107,22 +122,26 @@ fun PttButton(
     Box(
         modifier = modifier
             .size(52.dp)
-            .scale(if (listening) pulse else 1f)
+            .graphicsLayer {
+                val s = if (listening) pulse.value else 1f
+                scaleX = s
+                scaleY = s
+            }
             .background(
                 if (listening) RoamColors.Alarm.copy(alpha = 0.22f) else RoamColors.SurfaceRaised,
                 CircleShape,
             )
             .border(if (listening) 2.dp else 1.dp, tint.copy(alpha = 0.75f), CircleShape)
-            .pointerInput(target, enabled) {
-                if (!enabled) return@pointerInput
+            .pointerInput(Unit) {
                 detectTapGestures(onPress = {
+                    if (!currentEnabled) return@detectTapGestures
                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                    onPress(target)
+                    currentPress(currentTarget)
                     // Returns whether the pointer was lifted rather than cancelled; a
                     // cancel (a scroll stealing the gesture) still has to close the mic,
                     // so both outcomes release.
                     tryAwaitRelease()
-                    onRelease()
+                    currentRelease()
                 })
             }
             .semantics {
@@ -156,6 +175,7 @@ fun PttButton(
 @Composable
 fun PttPanel(
     state: PttState,
+    level: StateFlow<Double>,
     channelLabel: String,
     targetLive: Boolean,
     nowMs: Long,
@@ -202,7 +222,7 @@ fun PttPanel(
                         color = RoamColors.TextSecondary,
                     )
                 }
-                LevelMeter(state.levelDbfs)
+                LevelMeter(level)
                 Destination(channelLabel, targetLive)
             }
 
@@ -357,9 +377,15 @@ private fun Destination(channelLabel: String, live: Boolean) {
     }
 }
 
-/** A live input meter. Moving = the mic is genuinely open and hearing something. */
+/**
+ * A live input meter. Moving = the mic is genuinely open and hearing something.
+ *
+ * ★ It subscribes to the level itself rather than being handed a value from above, so
+ * an 8 Hz signal invalidates one 8 dp bar instead of the whole thread screen.
+ */
 @Composable
-private fun LevelMeter(dbfs: Double) {
+private fun LevelMeter(levels: StateFlow<Double>) {
+    val dbfs by levels.collectAsState()
     val fraction = levelFraction(dbfs)
     val quiet = dbfs < Ptt.MIN_RMS_DBFS
     Box(
@@ -391,18 +417,22 @@ private fun PttHoldChip(
     modifier: Modifier = Modifier,
 ) {
     val haptics = LocalHapticFeedback.current
+    // Same rule as PttButton: keyed on Unit, callbacks read through updated state.
+    val currentTarget by rememberUpdatedState(target)
+    val currentPress by rememberUpdatedState(onPress)
+    val currentRelease by rememberUpdatedState(onRelease)
     StateChip(
         text = text,
         color = color,
         modifier = modifier
             .heightIn(min = 46.dp)
             .clip(RoundedCornerShape(7.dp))
-            .pointerInput(target) {
+            .pointerInput(Unit) {
                 detectTapGestures(onPress = {
                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                    onPress(target)
+                    currentPress(currentTarget)
                     tryAwaitRelease()
-                    onRelease()
+                    currentRelease()
                 })
             },
     )

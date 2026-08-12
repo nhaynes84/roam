@@ -58,6 +58,7 @@ import com.roam.touch.channels.model.Event
 import com.roam.touch.channels.model.EventKind
 import com.roam.touch.channels.stt.PttState
 import com.roam.touch.channels.stt.PttTarget
+import kotlinx.coroutines.flow.StateFlow
 
 /**
  * One channel's thread.
@@ -74,6 +75,7 @@ fun ThreadScreen(
     nowMs: Long,
     speakingEventId: Long?,
     pttState: PttState,
+    pttLevel: StateFlow<Double>,
     onBack: () -> Unit,
     onExpand: (Event) -> Unit,
     onPlay: (Event) -> Unit,
@@ -146,6 +148,7 @@ fun ThreadScreen(
         // press time — a pane that died while he was talking must say so before Send.
         PttPanel(
             state = pttState,
+            level = pttLevel,
             channelLabel = channel.displayLabel,
             targetLive = channel.live,
             nowMs = nowMs,
