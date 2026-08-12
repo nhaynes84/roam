@@ -99,10 +99,16 @@ the TTS and the panel say the same thing.
 * `body_truncated` — `true` when this payload's `body` was trimmed for bulk
   delivery. Fetch `GET /events/{id}` to expand.
 * `ts` — epoch seconds, UTC, float.
-* `meta` — free-form JSON object; may be `{}`. Never `null`.
-  `meta.truncated_from` appears only for a pathological reply beyond the **256 KiB
-  storage rail** and holds the original character count; the stored body then ends
-  with `… [truncated]`.
+* `meta` — free-form JSON object; may be `{}`. Never `null`. On a hook-posted
+  outcome it carries `session_id`, `prompt_id`, `transcript_path` and:
+  * `answer_source` — `hook_payload` (the answer Claude Code handed the hook;
+    the normal case) or `transcript` (read from the session file).
+  * `transcript_settled` — present when `answer_source` is `transcript`. **`false`
+    means the answer had not reached disk before the wait expired, so the body
+    may be an earlier block of the same turn.** Show such an outcome with a
+    caveat rather than reading it out as the answer.
+  * `truncated_from` — only for a pathological reply beyond the **256 KiB storage
+    rail**; the stored body then ends with `… [truncated]`.
 * `archived` — soft-deleted. Only ever `true` in responses you explicitly asked
   for with `include_archived=true`.
 

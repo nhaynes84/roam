@@ -129,17 +129,41 @@ entry, not replacing it):
 `roam-hub-hook` is in this directory. It reads Claude Code's hook JSON on stdin and
 POSTs to `/events` tagged with `$TMUX_PANE`:
 
-* **outcome** — pulls the assistant's **actual answer** out of `transcript_path`
-  (`transcript.py`) and sends it as the body. "The response finished" on its own is
-  useless; the point of the device is not walking back to the computer to read the
-  answer. Thinking blocks are never included, a turn that was only tool calls walks
-  back to the last one that spoke, and the hub adds the speakable `summary`.
+* **outcome** — sends the assistant's **actual answer**. "The response finished" on
+  its own is useless; the point of the device is not walking back to the computer to
+  read the answer. The answer comes from the hook payload's `last_assistant_message`
+  (Claude Code hands `Stop` the finished text — verified by capturing a real payload
+  from a live turn, `ROAM_HUB_HOOK_DUMP=<file>` does that). If a version ever stops
+  providing it, `transcript.py` reads the session file instead and **waits** for this
+  turn's record to be flushed — see the race note below. Thinking blocks are never
+  included, and the hub adds the speakable `summary`.
 * **receipt** — sends the submitted prompt, so a channel shows real activity even
   when the wearer typed at the desk.
 
 It exits 0 and posts nothing when `$TMUX_PANE` is unset, the token is missing, the
 transcript is unreadable or the hub is unreachable — a hook must never be able to
 break the session it is reporting on.
+
+### ⚠️ The flush race (fixed 2026-08-11, keep this in mind)
+
+The first live outcome stored the wrong text: the turn's opening line instead of its
+answer. The final assistant record carried a timestamp **143 ms before** the hook's
+POST and still was not readable when the hook fired. It did not fail loudly — it
+returned real, plausible prose from the same turn, and on any turn that ends with
+tool calls after a preamble the user would have been read the preamble with nothing
+to indicate anything was wrong. Worse than an empty body, which announces itself.
+
+Two defences, both live:
+
+1. The **hook payload is the authority** — `last_assistant_message` is the finished
+   answer, in memory, before anything is flushed. No disk, no race.
+2. The transcript fallback **waits**: if the newest turn on disk has not spoken yet,
+   poll every 50 ms until it does (hard cap 2 s, early exit once the file goes
+   quiet). If the wait expires it still posts, with `meta.transcript_settled: false`
+   so a wrong block is *detectable*.
+
+Reproduce either behaviour on a real turn with `ROAM_HUB_ANSWER_SOURCE=transcript`
+and `ROAM_HUB_SETTLE_MS=0`.
 
 Verify by hand before installing it:
 

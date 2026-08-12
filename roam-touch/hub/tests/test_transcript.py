@@ -16,10 +16,12 @@ from pathlib import Path
 import pytest
 
 from transcript import (
+    DEFAULT_TAIL_BYTES,
     MAX_BODY_CHARS,
     MAX_SUMMARY_CHARS,
     cap_body,
     last_assistant_text,
+    settled_assistant_text,
     summarise,
 )
 
@@ -195,6 +197,181 @@ def test_non_assistant_records_are_ignored(tmp_path):
         ],
     )
     assert last_assistant_text(path) == "the answer"
+
+
+# ------------------------------------------------------------- the flush race
+#
+# Live incident, 2026-08-11: the Stop hook read the transcript 143 ms *after*
+# the final assistant record's own timestamp and still did not see it, so the
+# extractor walked back and stored the turn's opening line -- real, plausible
+# prose from the same turn, wrong block, no way to tell.
+
+
+def append_records(path: Path, records: list[dict]) -> None:
+    with path.open("a", encoding="utf-8") as fh:
+        for record in records:
+            fh.write(json.dumps(record) + "\n")
+
+
+def flushing_sleeper(path: Path, schedule: dict[int, list[dict]]):
+    """A fake `sleep` that flushes more of the turn on the given polls."""
+    state = {"n": 0}
+
+    def sleeper(_seconds: float) -> None:
+        state["n"] += 1
+        if state["n"] in schedule:
+            append_records(path, schedule[state["n"]])
+
+    return sleeper
+
+
+def test_the_answer_that_lands_on_the_second_read_is_the_one_returned(tmp_path):
+    path = write_jsonl(
+        tmp_path / "t.jsonl",
+        [
+            assistant("m1", text("Backing up first, then merging rather than replacing:")),
+            assistant("m2", tool_use("Edit")),
+        ],
+    )
+    body, settled = settled_assistant_text(
+        path,
+        timeout=2.0,
+        sleep=flushing_sleeper(
+            path, {2: [assistant("m3", text("Installed and validated."))]}
+        ),
+    )
+    assert body == "Installed and validated.", "the preamble is not the answer"
+    assert settled is True
+
+
+def test_an_answer_that_takes_three_reads_is_still_caught(tmp_path):
+    path = write_jsonl(
+        tmp_path / "t.jsonl",
+        [assistant("m1", text("Working on it:")), assistant("m2", tool_use())],
+    )
+    body, settled = settled_assistant_text(
+        path,
+        timeout=2.0,
+        sleep=flushing_sleeper(
+            path,
+            {
+                1: [assistant("m3", thinking("nearly there"))],
+                3: [assistant("m4", text("Done — the suite is green."))],
+            },
+        ),
+    )
+    assert body == "Done — the suite is green."
+    assert settled is True
+
+
+def test_an_already_complete_turn_returns_without_waiting(tmp_path):
+    """The common case must cost nothing: no sleep at all."""
+    path = write_jsonl(tmp_path / "t.jsonl", [assistant("m1", text("The answer."))])
+
+    def must_not_sleep(_seconds: float) -> None:
+        raise AssertionError("a settled transcript must not be polled")
+
+    body, settled = settled_assistant_text(path, sleep=must_not_sleep)
+    assert (body, settled) == ("The answer.", True)
+
+
+def test_the_cap_expires_and_says_so(tmp_path):
+    """The answer never arrives: post the best we have, flagged unsettled."""
+    path = write_jsonl(
+        tmp_path / "t.jsonl",
+        [
+            assistant("m1", text("Here is the plan:")),
+            assistant("m2", tool_use("Edit")),
+        ],
+    )
+    ticks = {"t": 0.0}
+
+    def clock() -> float:
+        return ticks["t"]
+
+    def sleeper(seconds: float) -> None:
+        ticks["t"] += seconds
+        append_records(path, [assistant("m2", tool_use("Edit"))])  # busy, silent
+
+    body, settled = settled_assistant_text(
+        path, timeout=2.0, quiet_after=0, sleep=sleeper, clock=clock
+    )
+    assert body == "Here is the plan:"
+    assert settled is False, "an unsettled body must be detectable, not silent"
+    assert ticks["t"] <= 2.1, "the wait is hard-capped"
+
+
+def test_a_file_that_never_changes_gives_up_early(tmp_path):
+    """A quiet file means nothing is coming -- don't burn the whole window."""
+    path = write_jsonl(
+        tmp_path / "t.jsonl",
+        [assistant("m1", text("An older answer.")), assistant("m2", tool_use())],
+    )
+    ticks = {"t": 0.0}
+
+    def clock() -> float:
+        return ticks["t"]
+
+    def sleeper(seconds: float) -> None:
+        ticks["t"] += seconds
+
+    body, settled = settled_assistant_text(
+        path, timeout=10.0, quiet_after=0.4, sleep=sleeper, clock=clock
+    )
+    assert body == "An older answer."
+    assert settled is False
+    assert ticks["t"] < 1.0, "gave up long before the hard cap"
+
+
+def test_a_turn_that_ends_in_tools_after_the_settle_is_flagged(tmp_path):
+    """Interrupted turn: tool calls keep landing, an answer never does."""
+    path = write_jsonl(
+        tmp_path / "t.jsonl",
+        [assistant("m1", text("Starting.")), assistant("m2", tool_use("Bash"))],
+    )
+    ticks = {"t": 0.0}
+    calls = {"n": 0}
+
+    def sleeper(seconds: float) -> None:
+        ticks["t"] += seconds
+        calls["n"] += 1
+        append_records(path, [assistant(f"m{calls['n'] + 2}", tool_use("Bash"))])
+
+    body, settled = settled_assistant_text(
+        path,
+        timeout=0.3,
+        quiet_after=0,
+        sleep=sleeper,
+        clock=lambda: ticks["t"],
+    )
+    assert body == "Starting.", "the only text there is, and it is flagged"
+    assert settled is False
+    from transcript import _assistant_groups, _ends_with_text
+
+    assert not _ends_with_text(_assistant_groups(path, DEFAULT_TAIL_BYTES))
+
+
+def test_settling_a_missing_file_is_empty_and_unsettled(tmp_path):
+    body, settled = settled_assistant_text(
+        tmp_path / "nope.jsonl", timeout=0.1, quiet_after=0, sleep=lambda s: None
+    )
+    assert body == ""
+    assert settled is False
+
+
+def test_ends_with_text_distinguishes_a_finished_turn(tmp_path):
+    finished = write_jsonl(
+        tmp_path / "a.jsonl",
+        [assistant("m1", tool_use()), assistant("m2", text("done"))],
+    )
+    mid_turn = write_jsonl(
+        tmp_path / "b.jsonl",
+        [assistant("m1", text("about to")), assistant("m2", tool_use())],
+    )
+    from transcript import _assistant_groups, _ends_with_text
+
+    assert _ends_with_text(_assistant_groups(finished, DEFAULT_TAIL_BYTES)) is True
+    assert _ends_with_text(_assistant_groups(mid_turn, DEFAULT_TAIL_BYTES)) is False
 
 
 # ------------------------------------------------------- speech and glance

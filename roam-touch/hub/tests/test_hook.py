@@ -113,6 +113,135 @@ def test_outcome_carries_the_assistants_answer(monkeypatch, hook_env, posted):
     assert posted[0]["url"] == "http://hub.test:8787/events"
 
 
+def test_the_payloads_own_answer_wins_over_the_transcript(monkeypatch, hook_env, posted):
+    """Claude Code hands `Stop` the finished answer -- no disk race to lose.
+
+    Captured from a real live turn on this box (claude-code 2.1.228): the Stop
+    payload carries `last_assistant_message`. The transcript on disk may still
+    be one flush behind, which is exactly how the wrong block got stored once.
+    """
+    path = transcript_with(hook_env, "stale preamble from the same turn")
+    payload = json.dumps(
+        {
+            "hook_event_name": "Stop",
+            "transcript_path": path,
+            "session_id": "s1",
+            "prompt_id": "p1",
+            "last_assistant_message": "Installed and validated. Nothing else to do.",
+        }
+    )
+    run(monkeypatch, ["outcome"], payload)
+    body = posted[0]["body"]
+    assert body["body"] == "Installed and validated. Nothing else to do."
+    assert body["meta"]["answer_source"] == "hook_payload"
+    assert body["meta"]["prompt_id"] == "p1"
+
+
+def test_an_empty_payload_answer_falls_back_to_the_transcript(
+    monkeypatch, hook_env, posted
+):
+    path = transcript_with(hook_env, "the answer from disk")
+    payload = json.dumps({"transcript_path": path, "last_assistant_message": "   "})
+    run(monkeypatch, ["outcome"], payload)
+    assert posted[0]["body"]["body"] == "the answer from disk"
+    assert posted[0]["body"]["meta"]["answer_source"] == "transcript"
+    assert posted[0]["body"]["meta"]["transcript_settled"] is True
+
+
+def test_the_transcript_fallback_waits_for_the_flush(monkeypatch, hook_env, posted):
+    """The fallback must not repeat the original bug."""
+    path = Path(hook_env) / "racy.jsonl"
+    path.write_text(
+        json.dumps(
+            {
+                "type": "assistant",
+                "message": {
+                    "id": "m1",
+                    "content": [{"type": "text", "text": "Backing up first:"}],
+                },
+            }
+        )
+        + "\n"
+        + json.dumps(
+            {
+                "type": "assistant",
+                "message": {
+                    "id": "m2",
+                    "content": [{"type": "tool_use", "id": "t", "name": "Edit", "input": {}}],
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    def flush(_seconds):
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(
+                json.dumps(
+                    {
+                        "type": "assistant",
+                        "message": {
+                            "id": "m3",
+                            "content": [
+                                {"type": "text", "text": "Installed and validated."}
+                            ],
+                        },
+                    }
+                )
+                + "\n"
+            )
+
+    import transcript as transcript_mod
+
+    monkeypatch.setattr(transcript_mod.time, "sleep", flush)
+    monkeypatch.setenv("ROAM_HUB_ANSWER_SOURCE", "transcript")
+    run(monkeypatch, ["outcome"], json.dumps({"transcript_path": str(path)}))
+    assert posted[0]["body"]["body"] == "Installed and validated."
+    assert posted[0]["body"]["meta"]["transcript_settled"] is True
+
+
+def test_an_unsettled_transcript_is_flagged_not_hidden(monkeypatch, hook_env, posted):
+    path = Path(hook_env) / "stuck.jsonl"
+    path.write_text(
+        json.dumps(
+            {
+                "type": "assistant",
+                "message": {
+                    "id": "m1",
+                    "content": [{"type": "text", "text": "Here is the plan:"}],
+                },
+            }
+        )
+        + "\n"
+        + json.dumps(
+            {
+                "type": "assistant",
+                "message": {
+                    "id": "m2",
+                    "content": [{"type": "tool_use", "id": "t", "name": "Edit", "input": {}}],
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ROAM_HUB_ANSWER_SOURCE", "transcript")
+    monkeypatch.setenv("ROAM_HUB_SETTLE_MS", "100")
+    run(monkeypatch, ["outcome"], json.dumps({"transcript_path": str(path)}))
+    meta = posted[0]["body"]["meta"]
+    assert meta["answer_source"] == "transcript"
+    assert meta["transcript_settled"] is False, "a wrong block must be detectable"
+
+
+def test_settling_can_be_switched_off_for_diagnosis(monkeypatch, hook_env, posted):
+    path = transcript_with(hook_env, "whatever is on disk")
+    monkeypatch.setenv("ROAM_HUB_ANSWER_SOURCE", "transcript")
+    monkeypatch.setenv("ROAM_HUB_SETTLE_MS", "0")
+    run(monkeypatch, ["outcome"], json.dumps({"transcript_path": path}))
+    assert posted[0]["body"]["body"] == "whatever is on disk"
+
+
 def test_outcome_never_leaks_thinking(monkeypatch, hook_env, posted):
     path = transcript_with(hook_env, "Here is the answer.")
     run(monkeypatch, ["outcome"], json.dumps({"transcript_path": path}))

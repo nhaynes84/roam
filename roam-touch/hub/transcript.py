@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 import unicodedata
 from pathlib import Path
 from typing import Any, Iterator
@@ -124,24 +125,16 @@ def _text_blocks(content: Any) -> list[str]:
     return out
 
 
-def last_assistant_text(
-    path: str | Path, tail_bytes: int = DEFAULT_TAIL_BYTES
-) -> str:
-    """The text of the last assistant turn that actually said something.
-
-    Returns "" when the transcript is missing, empty, or contains nothing but
-    tool calls and thinking -- a hook must never explode over a missing file.
-    """
-    path = Path(path)
-    if not path.exists():
-        return ""
+def _assistant_groups(
+    path: Path, tail_bytes: int
+) -> list[tuple[str, list[str]]]:
+    """Assistant turns as (message_id, [text blocks]), oldest first."""
+    if not path.exists() or path.is_dir():
+        return []
     try:
         records = list(_iter_records(path, tail_bytes))
     except TranscriptError:
-        return ""
-
-    # Group consecutive assistant records by message id; keep the last group
-    # that yielded any text.
+        return []
     groups: list[tuple[str, list[str]]] = []
     for record in records:
         if record.get("type") != "assistant" or record.get("isSidechain"):
@@ -155,12 +148,102 @@ def last_assistant_text(
             groups[-1][1].extend(texts)
         else:
             groups.append((message_id, list(texts)))
+    return groups
 
+
+def _newest_text(groups: list[tuple[str, list[str]]]) -> str:
+    """The last group that said something, joined."""
     for _, texts in reversed(groups):
         joined = "\n\n".join(t.strip() for t in texts if t.strip()).strip()
         if joined:
             return joined
     return ""
+
+
+def _ends_with_text(groups: list[tuple[str, list[str]]]) -> bool:
+    """Is the *newest* turn a spoken one?
+
+    This is the settle signal. When the newest assistant turn is `tool_use` or
+    `thinking`, the turn's answer has not been flushed to disk yet -- walking
+    back to an older text group at that moment returns the preamble, which is
+    how a wrong-but-plausible answer once reached the user's arm.
+    """
+    if not groups:
+        return False
+    return any(t.strip() for t in groups[-1][1])
+
+
+def last_assistant_text(
+    path: str | Path, tail_bytes: int = DEFAULT_TAIL_BYTES
+) -> str:
+    """The text of the last assistant turn that actually said something.
+
+    Returns "" when the transcript is missing, empty, or contains nothing but
+    tool calls and thinking -- a hook must never explode over a missing file.
+    """
+    return _newest_text(_assistant_groups(Path(path), tail_bytes))
+
+
+def settled_assistant_text(
+    path: str | Path,
+    timeout: float = 2.0,
+    interval: float = 0.05,
+    quiet_after: float = 0.4,
+    tail_bytes: int = DEFAULT_TAIL_BYTES,
+    sleep=None,
+    clock=None,
+) -> tuple[str, bool]:
+    """The answer for *this* Stop, waiting briefly for it to hit the disk.
+
+    Returns `(text, settled)`.
+
+    The race, measured on a live session: the final assistant record carried a
+    timestamp 143 ms *before* the hook's POST and still was not readable when
+    the hook fired. Reading whatever is on disk at that instant returns real,
+    plausible prose from the same turn -- the opening line before the tool
+    calls -- with nothing to indicate it is the wrong block. That is worse than
+    an empty body, which at least announces itself.
+
+    So: if the newest turn on disk already spoke, take it and return
+    immediately (the common case, no delay). Otherwise poll until it does, give
+    up early once the file has gone quiet, and hard-stop at `timeout`.
+    `settled=False` means the wait expired -- the caller must record that, so a
+    wrong block is detectable rather than silent.
+
+    ⚠️ This runs inside a hook. It is bounded on every path: a missed outcome
+    is acceptable, a hung session is not.
+    """
+    # Resolved at call time, not bound as defaults, so a test (or a caller with
+    # its own clock) can substitute them.
+    sleep = sleep or time.sleep
+    clock = clock or time.monotonic
+    path = Path(path)
+    deadline = clock() + max(0.0, timeout)
+    groups = _assistant_groups(path, tail_bytes)
+    if _ends_with_text(groups):
+        return _newest_text(groups), True
+
+    def signature() -> tuple[float, int]:
+        try:
+            stat = path.stat()
+            return (stat.st_mtime, stat.st_size)
+        except OSError:
+            return (0.0, 0)
+
+    last_signature = signature()
+    last_change = clock()
+    while clock() < deadline:
+        sleep(interval)
+        current = signature()
+        if current != last_signature:
+            last_signature = current
+            last_change = clock()
+            groups = _assistant_groups(path, tail_bytes)
+            if _ends_with_text(groups):
+                return _newest_text(groups), True
+        elif quiet_after and clock() - last_change >= quiet_after:
+            break  # nothing more is coming; don't burn the whole window
+    return _newest_text(_assistant_groups(path, tail_bytes)), False
 
 
 # ------------------------------------------------------- display and speech

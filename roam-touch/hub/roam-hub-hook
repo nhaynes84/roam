@@ -38,6 +38,10 @@ sys.path.insert(0, str(HERE))
 
 DEFAULT_URL = "http://100.67.237.109:8787"
 TIMEOUT_S = 3.0
+#: How long the transcript fallback may wait for this turn's answer to be
+#: flushed. The hook's own timeout is 15 s; this plus the POST stays well
+#: inside it. A missed outcome is acceptable, a hung session is not.
+DEFAULT_SETTLE_MS = 2000.0
 
 
 def read_hook_payload() -> dict:
@@ -48,11 +52,63 @@ def read_hook_payload() -> dict:
         raw = sys.stdin.read()
     except (OSError, ValueError):
         return {}
+    dump = os.environ.get("ROAM_HUB_HOOK_DUMP")
+    if dump:
+        # Diagnostics: capture exactly what Claude Code sends. The hook payload
+        # is the only authority on its own schema -- guessing it is what put
+        # the wrong answer on the user's arm once already.
+        try:
+            with open(dump, "a", encoding="utf-8") as fh:
+                fh.write(raw.rstrip("\n") + "\n")
+        except OSError:
+            pass
     try:
         payload = json.loads(raw) if raw.strip() else {}
     except json.JSONDecodeError:
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+def outcome_body(payload: dict, transcript_path: str) -> tuple[str, dict]:
+    """The answer this Stop is about, plus what to record about how we got it.
+
+    **The hook payload is the authority.** Claude Code 2.1.228 hands a `Stop`
+    hook `last_assistant_message` -- the finished answer, in memory, before
+    anything is flushed anywhere (verified by capturing a real payload from a
+    live turn, not from the docs). Using it removes the disk race entirely.
+
+    The transcript path stays as a fallback for any version or event shape that
+    does not provide it, and that fallback *waits* for the record belonging to
+    this turn rather than trusting whatever is on disk at the instant the hook
+    fires -- see `transcript.settled_assistant_text`.
+
+    Diagnostics (both exist so the old, racy behaviour can be reproduced on a
+    live turn rather than argued about):
+      ROAM_HUB_ANSWER_SOURCE=transcript  ignore the payload, read the file
+      ROAM_HUB_SETTLE_MS=0               do not wait for the flush
+    """
+    prefer = os.environ.get("ROAM_HUB_ANSWER_SOURCE", "payload")
+    if prefer != "transcript":
+        message = payload.get("last_assistant_message")
+        if isinstance(message, str) and message.strip():
+            return message.strip(), {"answer_source": "hook_payload"}
+    if not transcript_path:
+        return "", {"answer_source": "none"}
+    try:
+        settle_ms = float(os.environ.get("ROAM_HUB_SETTLE_MS", DEFAULT_SETTLE_MS))
+    except ValueError:
+        settle_ms = DEFAULT_SETTLE_MS
+    try:
+        from transcript import settled_assistant_text
+
+        body, settled = settled_assistant_text(
+            transcript_path, timeout=max(0.0, settle_ms) / 1000.0
+        )
+    except Exception:
+        return "", {"answer_source": "transcript", "transcript_settled": False}
+    # settled=False means the answer never landed inside the window: the body
+    # may be an earlier block of the same turn. Say so, so it is detectable.
+    return body, {"answer_source": "transcript", "transcript_settled": settled}
 
 
 def main() -> int:
@@ -75,28 +131,21 @@ def main() -> int:
     payload = read_hook_payload()
     transcript_path = payload.get("transcript_path") or ""
     body = override
+    meta = {
+        "source": "claude-hook",
+        "host": socket.gethostname().split(".")[0],
+        "session_id": payload.get("session_id", ""),
+        "prompt_id": payload.get("prompt_id", ""),
+        "transcript_path": transcript_path,
+    }
 
-    if not body and kind == "outcome" and transcript_path:
-        try:
-            from transcript import last_assistant_text
-
-            body = last_assistant_text(transcript_path)
-        except Exception:
-            body = ""
+    if not body and kind == "outcome":
+        body, extra = outcome_body(payload, transcript_path)
+        meta.update(extra)
     if not body and kind == "receipt":
         body = str(payload.get("prompt") or "")
 
-    event = {
-        "pane": pane,
-        "kind": kind,
-        "body": body,
-        "meta": {
-            "source": "claude-hook",
-            "host": socket.gethostname().split(".")[0],
-            "session_id": payload.get("session_id", ""),
-            "transcript_path": transcript_path,
-        },
-    }
+    event = {"pane": pane, "kind": kind, "body": body, "meta": meta}
     request = urllib.request.Request(
         os.environ.get("ROAM_HUB_URL", DEFAULT_URL).rstrip("/") + "/events",
         data=json.dumps(event).encode("utf-8"),
