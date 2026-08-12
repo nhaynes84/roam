@@ -49,6 +49,7 @@ class ThreadScreenTest {
         compose.setContent {
             RoamTheme {
                 ThreadScreen(
+                    shell = Shell.Narrow,
                     state = state,
                     channel = channel,
                     nowMs = Fx.NOW_MS,
