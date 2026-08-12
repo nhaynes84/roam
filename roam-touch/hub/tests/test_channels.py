@@ -145,6 +145,28 @@ def test_capture_of_a_dead_pane_raises(fake_tmux):
         channels_mod.capture("%9")
 
 
+def test_screen_digest_changes_only_when_the_screen_changes(fake_tmux):
+    """The liveness signal: tmux 3.7b has no per-pane activity timestamp."""
+    fake_tmux.pane_output["%0"] = "thinking… 12s"
+    first = channels_mod.screen_digest("%0")
+    assert first == channels_mod.screen_digest("%0")
+    fake_tmux.pane_output["%0"] = "thinking… 13s"
+    assert channels_mod.screen_digest("%0") != first
+
+
+def test_screen_digest_reads_the_visible_screen_only(fake_tmux):
+    channels_mod.screen_digest("%0")
+    argv = fake_tmux.argv_for("capture-pane")[0]
+    assert argv == ("capture-pane", "-p", "-t", "%0")
+    assert "-S" not in argv, "scrollback would make this expensive"
+
+
+def test_screen_digest_of_a_dead_pane_is_empty_not_an_error(fake_tmux):
+    fake_tmux.kill_pane("%0")
+    fake_tmux.installed = False
+    assert channels_mod.screen_digest("%0") == ""
+
+
 def test_channel_to_dict_carries_the_label(fake_tmux):
     payload = channels_mod.list_channels()[0].to_dict()
     assert payload["pane_id"] == "%0"

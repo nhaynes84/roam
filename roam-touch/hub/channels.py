@@ -11,6 +11,7 @@ Pane ids are stable for the life of the pane and are never reused by tmux.
 
 from __future__ import annotations
 
+import hashlib
 import socket
 import subprocess
 from dataclasses import dataclass, asdict
@@ -163,6 +164,25 @@ def _paste(pane_id: str, text: str) -> None:
     # -p bracketed paste (the TUI sees one paste, not N keystrokes),
     # -d delete the buffer afterwards so transcripts don't pile up in tmux.
     _tmux("paste-buffer", "-p", "-d", "-b", buf, "-t", pane_id)
+
+
+def screen_digest(pane_id: str) -> str:
+    """A fingerprint of what is currently *visible* in a pane.
+
+    The liveness signal. tmux 3.7b has no per-pane activity timestamp
+    (`pane_activity` does not exist; `window_activity` is per *window*, so it
+    reports pane A's output as pane B's), and hashing the visible screen is the
+    honest substitute: an agent that is working repaints a spinner and an
+    elapsed counter, so its screen changes; one that is wedged does not.
+
+    Visible screen only -- no scrollback -- so this stays a few milliseconds.
+    Returns "" if the pane is gone; callers treat that as "no reading".
+    """
+    try:
+        content = _tmux("capture-pane", "-p", "-t", pane_id)
+    except TmuxError:
+        return ""
+    return hashlib.sha1(content.encode("utf-8", "replace")).hexdigest()
 
 
 def capture(pane_id: str, lines: int = 200) -> str:

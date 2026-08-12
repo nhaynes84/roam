@@ -53,6 +53,23 @@ building a URL and you never have to think about encoding.
 
 ## 2. Objects
 
+### ★ Summary first, details on demand
+
+Every event carries **both** a short `summary` and the full `body`. This is the
+house rule, not an outcome-only special case:
+
+* `summary` is what you **show in the notification / on the strip and hand to
+  Piper**. Always present, always safe to speak, ≤280 characters.
+* `body` is the full text, kept whole. Nothing is ever destroyed to make a
+  summary — expanding is always possible.
+* Bulk payloads (history, `/events`, WebSocket frames) carry the body trimmed to
+  **4096 characters** with `body_truncated: true` and the real length in
+  `body_chars`. `GET /events/{id}` returns the event untrimmed. So a long answer
+  is never a wall of text you must scroll and never a snippet you cannot open.
+
+Do not re-derive the summary client-side: one implementation, one behaviour, and
+the TTS and the panel say the same thing.
+
 ### Event
 
 ```json
@@ -62,6 +79,8 @@ building a URL and you never have to think about encoding.
   "kind": "outcome",
   "body": "Tailscale beats the BLE permission wall — it just worked from here with\nno pairing.\n\nOne thing worth knowing: `roam-msg` returned nothing at all…",
   "summary": "Tailscale beats the BLE permission wall — it just worked from here with no pairing. One thing worth knowing: roam-msg returned nothing at all…",
+  "body_chars": 319,
+  "body_truncated": false,
   "meta": {"source": "claude-hook", "session_id": "44c6d5f1"},
   "ts": 1786511500.066308,
   "archived": false
@@ -71,18 +90,19 @@ building a URL and you never have to think about encoding.
 * `id` — monotonically increasing, never reused, unique across all channels. This
   is the client's catch-up cursor.
 * `body` — the full text. For an `outcome` this is **the assistant's actual
-  answer**, pulled out of the session transcript; markdown intact.
-* `summary` — always present, always safe to speak and to glance at: markdown
-  scaffolding removed, code blocks and tables reduced to `[code, 12 lines]` /
-  `[table, 4 rows]`, decorative symbols and emoji dropped (Piper says nothing for
-  them), cut at a sentence boundary within **280 characters**. **Show `summary` on
-  the strip and hand it to Piper; show `body` in the thread.** Never re-derive it
-  client-side — one implementation, one behaviour.
+  answer**, pulled out of the session transcript; markdown intact. Trimmed only in
+  bulk payloads (see above).
+* `summary` — markdown scaffolding removed, code blocks and tables reduced to
+  `[code, 12 lines]` / `[table, 4 rows]`, decorative symbols and emoji dropped
+  (Piper says nothing for them), cut at a sentence boundary within 280 chars.
+* `body_chars` — the true length of the full body, whatever `body` you were sent.
+* `body_truncated` — `true` when this payload's `body` was trimmed for bulk
+  delivery. Fetch `GET /events/{id}` to expand.
 * `ts` — epoch seconds, UTC, float.
 * `meta` — free-form JSON object; may be `{}`. Never `null`.
-  `meta.truncated_from` appears when the body exceeded the **16 KiB** storage cap
-  and holds the original character count; the body then ends with `… [truncated]`
-  and the untruncated text is still available from `/capture` and the transcript.
+  `meta.truncated_from` appears only for a pathological reply beyond the **256 KiB
+  storage rail** and holds the original character count; the stored body then ends
+  with `… [truncated]`.
 * `archived` — soft-deleted. Only ever `true` in responses you explicitly asked
   for with `include_archived=true`.
 
@@ -114,6 +134,8 @@ rather than dropping it.
   "archived": false,
   "first_seen": 1786511486.69,
   "last_seen": 1786511488.84,
+  "last_output_at": 1786511500.31,
+  "idle_s": 2.4,
   "event_count": 7,
   "last_event": { "...Event, or null..." }
 }
@@ -132,6 +154,31 @@ rather than dropping it.
 * A channel whose pane has died **stays in the list** with its history and its
   last known label. That is deliberate: the outcome you are waiting for may be
   the last thing that pane ever said.
+
+### ★ Liveness: `last_output_at` and `idle_s`
+
+`status` alone cannot answer the question that actually gets asked — *is it stuck,
+should I kill it?* A session thinking hard and a session wedged are both
+`working`. So every live channel also reports when its **visible output last
+changed**:
+
+* `last_output_at` — epoch seconds, or `null` if the hub has not sampled it yet.
+  A dead channel keeps its last reading (that is when it last spoke).
+* `idle_s` — seconds since then, computed server-side at response time. `null`
+  when the pane is dead or unsampled — never a fake zero.
+
+Render it live: "active 2s ago" versus "active 4m ago" next to `working` is the
+whole signal. Age `idle_s` locally between updates using `server_time`, and let
+the `activity` frame reset it.
+
+**What it does and does not mean.** The hub fingerprints each live pane's visible
+screen every 2 s. An agent that is working repaints a spinner and an elapsed
+counter, so its screen changes and `idle_s` stays near zero; a wedged one goes
+quiet and `idle_s` climbs. It measures *"this pane is producing output"*, not
+*"this process is healthy"* — a build that legitimately prints nothing for four
+minutes reads as idle, and a `tail -f` reads as busy forever. Treat a climbing
+`idle_s` as "nothing is coming out", which is exactly the input to "should I kill
+it?", and never as proof of death.
 
 ---
 
@@ -254,6 +301,18 @@ a client that would rather not hold a socket:
 {"events": [ Event, ... ], "latest_event_id": 412}
 ```
 
+Bodies here are trimmed to 4096 chars (`body_truncated`).
+
+### `GET /events/{id}`
+
+One event, **never trimmed** — this is "expand the details" behind a summary.
+
+```json
+{"event": Event}
+```
+
+`404` if there is no such event.
+
 ---
 
 ## 4. WebSocket
@@ -279,6 +338,7 @@ Every frame is a JSON object with a `type`. Ignore unknown types.
 | `event` | `{event: Event}` | one new event, live |
 | `channels` | `{channels: [Channel], server_time}` | the pane set or a pane title changed — replace your list |
 | `channel` | `{channel: Channel}` | one channel changed (archive/restore) |
+| `activity` | `{panes: {"%0": 1786511500.3}, server_time}` | those panes' output just moved — update `last_output_at`, reset `idle_s` to ~0. At most one per 2 s poll, and none at all while everything is quiet. |
 | `history_cleared` | `{pane_id, archived}` | someone soft-cleared a thread |
 | `ping` | `{t}` | app-level heartbeat, every 30 s of silence. No reply needed. |
 | `pong` | `{t}` | reply to a client `ping` |
@@ -304,11 +364,21 @@ Send only JSON objects. A non-JSON frame ends the connection.
 2. Connect `ws://…/ws?since=<cursor>`.
 3. `hello` → replace the channel list (authoritative).
 4. `backlog` → append in order; `cursor = max(cursor, last id)`.
-5. `event` → append to that channel's thread; `cursor = event.id`.
-6. `channels` / `channel` → replace list / patch one entry.
-7. On `desync`, on close, or on any error → reconnect with `?since=<cursor>`,
+5. `event` → append to that channel's thread; `cursor = event.id`. Show
+   `summary`; keep `body` for the expanded view.
+6. `channels` / `channel` → replace list / patch one entry. `activity` → update
+   `last_output_at` for those panes and re-render the live indicator.
+7. When the user expands an event whose `body_truncated` is `true` →
+   `GET /events/{id}`.
+8. On `desync`, on close, or on any error → reconnect with `?since=<cursor>`,
    backing off (1 s, 2 s, 4 s … 30 s). Nothing is lost: the store replays it.
-8. Never poll `GET /channels` on a timer. That is what the socket is for.
+9. Never poll `GET /channels` on a timer. That is what the socket is for.
+
+**The app is a normal Android app**, not a kiosk — the notification shade,
+Settings and recents stay, so the client will be backgrounded, doze-throttled and
+killed like any other app. Design for the socket dropping: reconnect with
+`?since=<cursor>` on resume, or `GET /events?since=` once on wake. Nothing on the
+hub assumes the panel is the only thing on screen or that a client is connected.
 
 ---
 

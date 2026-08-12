@@ -92,13 +92,40 @@ def test_an_explicit_summary_is_kept(store: Store):
     assert event.summary == "short thing"
 
 
-def test_a_giant_answer_is_capped_and_the_original_size_recorded(store: Store):
+def test_a_long_answer_is_stored_whole(store: Store):
+    """Expandable details only work if the details survive."""
+    long_answer = "sentence. " * 3000  # 30 KB, well past any display limit
+    event = store.append("%0", EventKind.OUTCOME, long_answer)
+    assert event.body == long_answer
+    assert store.history("%0")[-1].body == long_answer
+    assert store.get_event(event.id).body == long_answer
+
+
+def test_a_pathological_body_is_railed_and_the_original_size_recorded(store: Store):
     huge = "z" * (MAX_BODY_CHARS + 5000)
     event = store.append("%0", EventKind.OUTCOME, huge)
     assert len(event.body) == MAX_BODY_CHARS
     assert event.body.endswith("… [truncated]")
     assert event.meta["truncated_from"] == MAX_BODY_CHARS + 5000
     assert store.history("%0")[-1].body == event.body
+
+
+def test_to_dict_trims_only_when_asked_and_says_so(store: Store):
+    event = store.append("%0", EventKind.OUTCOME, "x" * 9000)
+    full = event.to_dict()
+    assert len(full["body"]) == 9000
+    assert full["body_truncated"] is False and full["body_chars"] == 9000
+    inline = event.to_dict(4096)
+    assert len(inline["body"]) == 4096
+    assert inline["body_truncated"] is True
+    assert inline["body_chars"] == 9000, "the real size is always reported"
+    assert inline["summary"] == full["summary"]
+
+
+def test_get_event_returns_the_whole_thing(store: Store):
+    written = store.append("%0", EventKind.OUTCOME, "the full answer")
+    assert store.get_event(written.id).body == "the full answer"
+    assert store.get_event(9999) is None
 
 
 def test_capping_preserves_other_meta(store: Store):
@@ -201,6 +228,46 @@ def test_known_channels_sorted_by_last_seen(store: Store):
     store.remember_channel("%0", "older", "main", ts=100.0)
     store.remember_channel("%1", "newer", "aug", ts=200.0)
     assert [c.pane_id for c in store.known_channels()] == ["%1", "%0"]
+
+
+def test_channel_activity_is_recorded_and_survives_a_restart(tmp_path):
+    path = tmp_path / "hub.sqlite"
+    with Store(path) as st:
+        st.remember_channel("%0", "a channel", "main")
+        assert st.get_channel("%0").last_output_at is None, "unknown, not zero"
+        st.set_channel_activity("%0", 1786500000.0)
+        assert st.get_channel("%0").last_output_at == 1786500000.0
+    with Store(path) as st:
+        assert st.get_channel("%0").last_output_at == 1786500000.0
+
+
+def test_remembering_a_channel_does_not_reset_its_heartbeat(store: Store):
+    store.remember_channel("%0", "a channel", "main")
+    store.set_channel_activity("%0", 1786500000.0)
+    store.remember_channel("%0", "retitled", "main")
+    assert store.get_channel("%0").last_output_at == 1786500000.0
+
+
+def test_a_v2_database_gains_the_heartbeat_column(tmp_path):
+    path = tmp_path / "v2.sqlite"
+    db = sqlite3.connect(path)
+    db.executescript(
+        """
+        CREATE TABLE channels (
+            pane_id TEXT PRIMARY KEY, label TEXT NOT NULL DEFAULT '',
+            session TEXT NOT NULL DEFAULT '', first_seen REAL NOT NULL,
+            last_seen REAL NOT NULL, archived INTEGER NOT NULL DEFAULT 0);
+        INSERT INTO channels VALUES('%0', 'old channel', 'main', 1.0, 2.0, 0);
+        """
+    )
+    db.commit()
+    db.close()
+    with Store(path) as st:
+        channel = st.get_channel("%0")
+        assert channel.label == "old channel"
+        assert channel.last_output_at is None
+        st.set_channel_activity("%0", 3.0)
+        assert st.get_channel("%0").last_output_at == 3.0
 
 
 def test_get_channel_missing_is_none(store: Store):

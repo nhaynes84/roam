@@ -12,20 +12,22 @@ from fastapi.testclient import TestClient
 
 import hub as hub_mod
 from store import EventKind, Store
+from transcript import INLINE_BODY_CHARS, MAX_BODY_CHARS
 from conftest import TOKEN
 
 
-def next_frame(ws, want: str, limit: int = 12) -> dict:
-    """Read frames until one of type `want` shows up.
+def next_frame(ws, want: str, limit: int = 12, where=None) -> dict:
+    """Read frames until one of type `want` (and matching `where`) shows up.
 
-    The poller emits `channels` frames on its own schedule, so a test that
-    demands frame #1 be its event would be testing the scheduler.
+    The poller emits `channels` and `activity` frames on its own schedule, and
+    a frame published between connecting and acting is a normal race -- a test
+    that demands frame #1 be its own would be testing the scheduler.
     """
     for _ in range(limit):
         frame = ws.receive_json()
-        if frame["type"] == want:
+        if frame["type"] == want and (where is None or where(frame)):
             return frame
-    raise AssertionError(f"no {want!r} frame in {limit} frames")
+    raise AssertionError(f"no matching {want!r} frame in {limit} frames")
 
 
 def wait_for(predicate, timeout: float = 3.0):
@@ -305,15 +307,41 @@ def test_an_outcome_carries_the_answer_and_a_speakable_summary(client, auth):
     assert "```" not in event["summary"]
 
 
-def test_a_giant_outcome_is_capped_before_it_hits_the_database(client, auth):
-    resp = client.post(
+def test_a_long_answer_is_kept_whole_and_only_trimmed_in_bulk_payloads(client, auth):
+    """Summary first, details expandable -- the details must still be there."""
+    answer = "The plan. " + ("detail sentence. " * 2000)
+    posted = client.post(
+        "/events", json={"pane": "%0", "kind": "outcome", "body": answer}, headers=auth
+    ).json()["event"]
+    assert posted["body"] == answer, "the single-event response is never trimmed"
+    assert posted["body_chars"] == len(answer)
+    assert posted["body_truncated"] is False
+    assert posted["summary"].startswith("The plan.")
+
+    listed = client.get("/channels/0/history", headers=auth).json()["events"][-1]
+    assert len(listed["body"]) == 4096, "list payloads carry a bounded body"
+    assert listed["body_truncated"] is True
+    assert listed["body_chars"] == len(answer)
+    assert listed["summary"] == posted["summary"]
+
+    whole = client.get(f"/events/{posted['id']}", headers=auth).json()["event"]
+    assert whole["body"] == answer, "expanding always returns everything"
+    assert whole["body_truncated"] is False
+
+
+def test_a_pathological_body_is_railed_at_the_storage_limit(client, auth):
+    monstrous = "q" * (MAX_BODY_CHARS + 10000)
+    event = client.post(
         "/events",
-        json={"pane": "%0", "kind": "outcome", "body": "q" * 40000},
+        json={"pane": "%0", "kind": "outcome", "body": monstrous},
         headers=auth,
-    )
-    event = resp.json()["event"]
-    assert len(event["body"]) == 16384
-    assert event["meta"]["truncated_from"] == 40000
+    ).json()["event"]
+    assert event["body_chars"] == MAX_BODY_CHARS
+    assert event["meta"]["truncated_from"] == MAX_BODY_CHARS + 10000
+
+
+def test_an_unknown_event_id_is_404(client, auth):
+    assert client.get("/events/999999", headers=auth).status_code == 404
 
 
 def test_every_event_shape_has_a_summary_field(client, auth):
@@ -424,7 +452,12 @@ def test_websocket_announces_a_pane_that_appears(client, auth, fake_tmux):
     with client.websocket_connect("/ws", headers=auth) as ws:
         ws.receive_json()
         fake_tmux.add_pane("%5", session="new", title="a fresh claude")
-        frame = next_frame(ws, "channels", limit=30)
+        frame = next_frame(
+            ws,
+            "channels",
+            limit=30,
+            where=lambda f: "%5" in {c["pane_id"] for c in f["channels"]},
+        )
         assert "%5" in {c["pane_id"] for c in frame["channels"]}
 
 
@@ -433,7 +466,14 @@ def test_websocket_announces_a_pane_that_dies(client, auth, fake_tmux, store):
     with client.websocket_connect("/ws", headers=auth) as ws:
         ws.receive_json()
         fake_tmux.kill_pane("%1")
-        frame = next_frame(ws, "channels", limit=30)
+        frame = next_frame(
+            ws,
+            "channels",
+            limit=30,
+            where=lambda f: any(
+                c["pane_id"] == "%1" and not c["live"] for c in f["channels"]
+            ),
+        )
         dead = next(c for c in frame["channels"] if c["pane_id"] == "%1")
         assert dead["live"] is False and dead["status"] == "dead"
     closed = wait_for(
@@ -449,6 +489,88 @@ def test_history_cleared_is_broadcast(client, auth):
         client.delete("/channels/0/history", headers=auth)
         frame = next_frame(ws, "history_cleared")
         assert frame["pane_id"] == "%0"
+
+
+# --------------------------------------------------------- liveness heartbeat
+
+
+def test_a_channel_reports_when_its_output_last_moved(client, auth, store):
+    """`working` and `wedged` look identical without this."""
+    wait_for(lambda: store.get_channel("%0") is not None)
+    channel = wait_for(
+        lambda: (
+            c := client.get("/channels/0", headers=auth).json()["channel"]
+        )
+        and c["last_output_at"]
+        and c
+    )
+    assert channel["idle_s"] is not None and channel["idle_s"] >= 0
+
+
+def test_idle_seconds_grow_while_a_pane_says_nothing(client, auth, fake_tmux):
+    wait_for(
+        lambda: client.get("/channels/0", headers=auth).json()["channel"]["idle_s"]
+        is not None
+    )
+    first = client.get("/channels/0", headers=auth).json()["channel"]["idle_s"]
+    time.sleep(0.4)
+    later = client.get("/channels/0", headers=auth).json()["channel"]["idle_s"]
+    assert later > first, "a silent pane must look increasingly stale"
+
+
+def test_output_resets_the_heartbeat(client, auth, fake_tmux):
+    wait_for(
+        lambda: client.get("/channels/0", headers=auth).json()["channel"]["idle_s"]
+        is not None
+    )
+    time.sleep(0.3)
+    stale = client.get("/channels/0", headers=auth).json()["channel"]["idle_s"]
+    fake_tmux.pane_output["%0"] = "the agent printed something new"
+    fresher = wait_for(
+        lambda: (
+            v := client.get("/channels/0", headers=auth).json()["channel"]["idle_s"]
+        )
+        < stale
+        and v
+    )
+    assert fresher < stale
+
+
+def test_a_dead_pane_reports_no_idle_time(client, auth, fake_tmux):
+    wait_for(
+        lambda: client.get("/channels/0", headers=auth).json()["channel"]["idle_s"]
+        is not None
+    )
+    fake_tmux.kill_pane("%0")
+    dead = wait_for(
+        lambda: (
+            c := client.get("/channels/0", headers=auth).json()["channel"]
+        )
+        and not c["live"]
+        and c
+    )
+    assert dead["idle_s"] is None, "a dead pane is not 'idle for 3 seconds'"
+    assert dead["last_output_at"] is not None, "but we remember when it last spoke"
+
+
+def test_activity_is_pushed_over_the_websocket(client, auth, fake_tmux):
+    with client.websocket_connect("/ws", headers=auth) as ws:
+        ws.receive_json()
+        fake_tmux.pane_output["%1"] = "fresh output on the augment channel"
+        frame = next_frame(
+            ws, "activity", limit=40, where=lambda f: "%1" in f["panes"]
+        )
+        assert frame["panes"]["%1"] <= frame["server_time"]
+
+
+def test_activity_polling_can_be_turned_off(settings, store, fake_tmux, auth):
+    quiet = settings.model_copy(update={"activity_polling": False})
+    with TestClient(hub_mod.create_app(settings=quiet, store=store)) as c:
+        wait_for(lambda: store.get_channel("%0") is not None)
+        time.sleep(0.2)
+        channel = c.get("/channels/0", headers=auth).json()["channel"]
+        assert channel["last_output_at"] is None
+        assert channel["idle_s"] is None
 
 
 # ------------------------------------------------------------------- poller

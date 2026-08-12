@@ -22,10 +22,18 @@ roam-hub-hook  the Claude Code hook that posts receipts and outcomes
 tests/         pytest; tmux faked at channels._run, network at urlopen
 ```
 
-Every event carries the full `body` and a short, speakable `summary` (≤280 chars,
-markdown and emoji stripped, code blocks and tables noted rather than read out).
-Bodies are capped at 16 KiB, with `meta.truncated_from` recording the original
-length — so one enormous reply can never bloat the database.
+**Summary first, details on demand.** Every event carries a short, speakable
+`summary` (≤280 chars, markdown and emoji stripped, code and tables noted rather
+than read out) *and* the full `body`. Bulk payloads trim the body to 4 KiB and say
+so (`body_truncated`, `body_chars`); `GET /events/{id}` returns it whole. Nothing
+is destroyed to make a summary. A 256 KiB storage rail bounds a pathological reply
+and records `meta.truncated_from` when it bites.
+
+**Liveness.** Every live channel reports `last_output_at` / `idle_s`, sampled by
+fingerprinting each pane's visible screen every poll. `working` plus a climbing
+`idle_s` is the "is it stuck?" answer a bare status can never give — it measures
+"this pane is producing output", not process health. Set
+`ROAM_HUB_ACTIVITY_POLLING=false` to switch the sampling off.
 
 ## Running it
 

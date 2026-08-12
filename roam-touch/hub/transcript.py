@@ -34,12 +34,18 @@ import unicodedata
 from pathlib import Path
 from typing import Any, Iterator
 
-#: Hard cap on a stored event body: 16 KiB of text. That is ~2,500 words --
-#: far past anything anyone reads on an arm panel or listens to, while still
-#: keeping essentially every real answer whole. Beyond it the body is cut and
-#: `meta.truncated_from` records the original length; the untruncated text is
-#: still in the pane (`/capture`) and in the transcript file.
-MAX_BODY_CHARS = 16384
+#: Storage rail: 256 KiB of text per event. The full answer is always kept --
+#: "summary first, expandable details" only works if the details still exist --
+#: so this is not a display limit, it is the backstop against a pathological
+#: reply (a dumped log, a runaway loop) bloating the database. Beyond it the
+#: body is cut and `meta.truncated_from` records the original length.
+MAX_BODY_CHARS = 262144
+
+#: How much body travels inline in a *list* or stream response (history,
+#: /events, WebSocket frames). The full text is always one fetch away at
+#: `GET /events/{id}`, so this only bounds the size of a bulk payload on a
+#: phone -- it never destroys anything.
+INLINE_BODY_CHARS = 4096
 
 #: The short form: one or two sentences. Long enough to be an answer, short
 #: enough to read at a glance and to speak without a wait.

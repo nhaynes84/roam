@@ -42,6 +42,7 @@ from starlette.concurrency import run_in_threadpool
 import channels as channels_mod
 from channels import Channel, TmuxError
 from store import DEFAULT_DB_PATH, EventKind, Store, StoredChannel
+from transcript import INLINE_BODY_CHARS
 
 HUB_DIR = Path(__file__).resolve().parent
 HUB_VERSION = "1.0.0"
@@ -76,6 +77,9 @@ class Settings(BaseSettings):
     token: str | None = None
     #: How often the hub re-reads the live pane list (seconds).
     poll_interval: float = 2.0
+    #: Fingerprint each live pane's screen every poll, to answer "is it stuck?".
+    #: One small capture-pane per pane per poll; off means `idle_s` stays null.
+    activity_polling: bool = True
     capture_lines: int = 200
     history_limit: int = 200
     log_level: str = "info"
@@ -215,6 +219,10 @@ def channel_view(
     """One merged channel: whatever tmux says now, plus whatever we remember."""
     last = store.last_event(pane_id)
     label = live.label if live else (stored.label if stored else pane_id)
+    last_output_at = stored.last_output_at if stored else None
+    idle_s = None
+    if live is not None and last_output_at is not None:
+        idle_s = round(max(0.0, time.time() - last_output_at), 1)
     return {
         "pane_id": pane_id,
         "label": label or pane_id,
@@ -227,8 +235,13 @@ def channel_view(
         "archived": bool(stored.archived) if stored else False,
         "first_seen": stored.first_seen if stored else None,
         "last_seen": stored.last_seen if stored else None,
+        # The heartbeat: when this pane's screen last changed, and how long ago.
+        # `working` with idle_s climbing past a minute is the "is it stuck?"
+        # answer that a bare status can never give.
+        "last_output_at": last_output_at,
+        "idle_s": idle_s,
         "event_count": store.event_count(pane_id),
-        "last_event": last.to_dict() if last else None,
+        "last_event": last.to_dict(INLINE_BODY_CHARS) if last else None,
     }
 
 
@@ -315,7 +328,9 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
         app.state.broadcaster.publish(message)
 
     def _publish_event(event) -> None:
-        _publish({"type": "event", "event": event.to_dict()})
+        # Stream frames carry the summary and a bounded body; the full text is
+        # one fetch away at GET /events/{id}.
+        _publish({"type": "event", "event": event.to_dict(INLINE_BODY_CHARS)})
 
     async def _live_channels() -> list[Channel]:
         try:
@@ -450,7 +465,7 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
         )
         return {
             "pane_id": pane_id,
-            "events": [e.to_dict() for e in events],
+            "events": [e.to_dict(INLINE_BODY_CHARS) for e in events],
             "latest_event_id": st.latest_event_id(),
         }
 
@@ -542,9 +557,23 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
         st = _store()
         events = st.events_since(since, limit)
         return {
-            "events": [e.to_dict() for e in events],
+            "events": [e.to_dict(INLINE_BODY_CHARS) for e in events],
             "latest_event_id": st.latest_event_id(),
         }
+
+    @app.get(
+        "/events/{event_id}", tags=["events"], dependencies=[Depends(require_auth)]
+    )
+    async def get_event(event_id: int = PathParam(..., ge=1)) -> dict[str, Any]:
+        """One event, whole. This is "expand the details".
+
+        Summaries and list payloads are bounded; this never is. Nothing the
+        client shows is ever the only copy of the answer.
+        """
+        event = _store().get_event(event_id)
+        if event is None:
+            raise HTTPException(404, detail=f"no such event: {event_id}")
+        return {"event": event.to_dict()}
 
     # ----------------------------------------------------------- websocket
 
@@ -589,7 +618,7 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
                     {
                         "type": "backlog",
                         "since": since,
-                        "events": [e.to_dict() for e in backlog],
+                        "events": [e.to_dict(INLINE_BODY_CHARS) for e in backlog],
                     }
                 )
                 if backlog:
@@ -646,6 +675,32 @@ def _remember_all(store: Store, live: list[Channel]) -> None:
         store.remember_channel(ch.pane_id, ch.label, ch.session)
 
 
+def _sample_activity(
+    store: Store, live: list[Channel], digests: dict[str, str], now: float
+) -> dict[str, float]:
+    """Hash every live pane's screen; record the ones that changed.
+
+    Runs in a worker thread -- one small `capture-pane` per pane per poll.
+    Returns `{pane_id: timestamp}` for panes whose output moved, which is what
+    gets pushed as the liveness heartbeat.
+    """
+    moved: dict[str, float] = {}
+    for ch in live:
+        digest = channels_mod.screen_digest(ch.pane_id)
+        if not digest:
+            continue
+        previous = digests.get(ch.pane_id)
+        digests[ch.pane_id] = digest
+        # A pane we have never sampled counts as active now: it is the best
+        # reading available, and claiming "idle for hours" would be a lie.
+        if previous is None or previous != digest:
+            store.set_channel_activity(ch.pane_id, now)
+            moved[ch.pane_id] = now
+    for pane_id in set(digests) - {c.pane_id for c in live}:
+        digests.pop(pane_id, None)
+    return moved
+
+
 async def _poll_forever(app: FastAPI) -> None:
     """Watch tmux so clients never have to.
 
@@ -658,6 +713,7 @@ async def _poll_forever(app: FastAPI) -> None:
     store: Store = app.state.store
     broadcaster: Broadcaster = app.state.broadcaster
     known: dict[str, str] | None = None  # pane_id -> label
+    digests: dict[str, str] = {}  # pane_id -> last screen fingerprint
     while True:
         try:
             try:
@@ -697,6 +753,19 @@ async def _poll_forever(app: FastAPI) -> None:
                         broadcaster.publish(
                             {"type": "event", "event": event.to_dict()}
                         )
+
+            if settings.activity_polling and live:
+                moved = await run_in_threadpool(
+                    _sample_activity, store, live, digests, time.time()
+                )
+                if moved:
+                    broadcaster.publish(
+                        {
+                            "type": "activity",
+                            "panes": moved,
+                            "server_time": time.time(),
+                        }
+                    )
 
             if changed:
                 broadcaster.publish(

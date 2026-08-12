@@ -34,7 +34,7 @@ from transcript import MAX_BODY_CHARS, cap_body, summarise
 
 DEFAULT_DB_PATH = Path(__file__).with_name("hub.sqlite")
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 class EventKind(str, Enum):
@@ -62,19 +62,32 @@ class Event:
     kind: str
     body: str
     #: Short, speakable, glanceable form of `body`. Always present; the client
-    #: shows this on the strip and speaks it, and shows `body` in the thread.
+    #: shows this on the strip and speaks it, and shows `body` when expanded.
     summary: str = ""
     meta: dict[str, Any] = field(default_factory=dict)
     ts: float = 0.0
     archived: bool = False
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self, inline_limit: int | None = None) -> dict[str, Any]:
+        """Summary always; body in full unless this is a bulk payload.
+
+        `inline_limit` trims the body carried inside a list or stream frame.
+        The event is never stored that way and `GET /events/{id}` always
+        returns it whole -- the client expands, it does not lose.
+        """
+        body = self.body
+        truncated = False
+        if inline_limit is not None and len(body) > inline_limit:
+            body = body[:inline_limit]
+            truncated = True
         return {
             "id": self.id,
             "pane_id": self.pane_id,
             "kind": self.kind,
-            "body": self.body,
             "summary": self.summary,
+            "body": body,
+            "body_chars": len(self.body),
+            "body_truncated": truncated,
             "meta": self.meta,
             "ts": self.ts,
             "archived": self.archived,
@@ -91,6 +104,9 @@ class StoredChannel:
     first_seen: float
     last_seen: float
     archived: bool = False
+    #: When this pane's visible output last changed. The liveness heartbeat:
+    #: "working" and "hung" look identical without it.
+    last_output_at: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -100,6 +116,7 @@ class StoredChannel:
             "first_seen": self.first_seen,
             "last_seen": self.last_seen,
             "archived": self.archived,
+            "last_output_at": self.last_output_at,
         }
 
 
@@ -125,6 +142,7 @@ def _row_to_channel(row: sqlite3.Row) -> StoredChannel:
         first_seen=row["first_seen"],
         last_seen=row["last_seen"],
         archived=bool(row["archived"]),
+        last_output_at=row["last_output_at"],
     )
 
 
@@ -162,12 +180,13 @@ class Store:
             CREATE INDEX IF NOT EXISTS events_pane_idx ON events(pane_id, id);
 
             CREATE TABLE IF NOT EXISTS channels (
-                pane_id    TEXT PRIMARY KEY,
-                label      TEXT NOT NULL DEFAULT '',
-                session    TEXT NOT NULL DEFAULT '',
-                first_seen REAL NOT NULL,
-                last_seen  REAL NOT NULL,
-                archived   INTEGER NOT NULL DEFAULT 0
+                pane_id        TEXT PRIMARY KEY,
+                label          TEXT NOT NULL DEFAULT '',
+                session        TEXT NOT NULL DEFAULT '',
+                first_seen     REAL NOT NULL,
+                last_seen      REAL NOT NULL,
+                archived       INTEGER NOT NULL DEFAULT 0,
+                last_output_at REAL
             );
 
             CREATE TABLE IF NOT EXISTS schema_meta (
@@ -176,6 +195,15 @@ class Store:
             );
             """
         )
+        # v2 -> v3: channels gained the liveness heartbeat. Unknown until the
+        # poller next sees output, which is honest -- NULL means "don't know",
+        # not "idle forever".
+        channel_columns = {
+            r["name"] for r in self._db.execute("PRAGMA table_info(channels)")
+        }
+        if "last_output_at" not in channel_columns:
+            self._db.execute("ALTER TABLE channels ADD COLUMN last_output_at REAL")
+
         # v1 -> v2: events gained `summary`. Existing rows are backfilled so a
         # client never meets an event without one.
         columns = {r["name"] for r in self._db.execute("PRAGMA table_info(events)")}
@@ -300,6 +328,14 @@ class Store:
             row = self._db.execute("SELECT MAX(id) AS m FROM events").fetchone()
         return int(row["m"] or 0)
 
+    def get_event(self, event_id: int) -> Event | None:
+        """One event, whole -- what "expand the details" fetches."""
+        with self._lock:
+            row = self._db.execute(
+                "SELECT * FROM events WHERE id = ?", (int(event_id),)
+            ).fetchone()
+        return _row_to_event(row) if row else None
+
     def last_event(self, pane_id: str) -> Event | None:
         with self._lock:
             row = self._db.execute(
@@ -367,6 +403,15 @@ class Store:
                 "SELECT * FROM channels WHERE pane_id = ?", (pane_id,)
             ).fetchone()
         return _row_to_channel(row)
+
+    def set_channel_activity(self, pane_id: str, ts: float) -> None:
+        """Record that this pane's visible output changed at `ts`."""
+        with self._lock:
+            self._db.execute(
+                "UPDATE channels SET last_output_at = ? WHERE pane_id = ?",
+                (float(ts), pane_id),
+            )
+            self._db.commit()
 
     def get_channel(self, pane_id: str) -> StoredChannel | None:
         with self._lock:
