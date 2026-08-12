@@ -21,7 +21,7 @@ m.fix_normals()
 FLOOR, POCK_D, LIP_H = 2.2, 8.8, 2.4
 OUT_W, OUT_L, OUT_H = 75.1, 147.0, 13.4
 POCK_W, WING_T = 70.3, 4.0
-GAP, SAG = 4.0, 16.38
+GAP, SAG = 4.0, 15.05
 WING_X0 = OUT_W / 2
 
 Z_FACE = FLOOR + POCK_D          # phone front face

@@ -25,8 +25,14 @@ a ~75 mm wide flat tray on a 90 mm diameter forearm has ~20 mm of sagitta.
 That wedge is unavoidable for a rigid slab; the ribs carry it instead of a
 solid block, which saves the weight and gives the phone a cooling gap.
 
-ARM_R is the tuning knob. Measure the forearm circumference where you'll wear
-it and set ARM_R = circumference / (2*pi).
+ARM_R is nominal, NOT critical, and that is deliberate. Every rib face is cut
+FOAM (4 mm) proud of where skin would be, for closed-cell foam or stick-on TPU.
+A forearm is not a cylinder -- it tapers, and its cross-section reconfigures as
+you pronate, because the radius crosses the ulna. A shell fitted rigidly to one
+arm position binds in another. So: rigid only under the phone, where the screen
+must stay flat; compliant at the skin, where the shape moves. The pad absorbs
+several mm of error, which is why nobody has to measure anything precisely.
+If you do want it closer: ARM_R = forearm circumference / (2*pi).
 """
 
 from build123d import *
@@ -49,8 +55,9 @@ LIP_SIDE = 2.5       # front lip over the long bezels
 LIP_END = 4.0        # front lip at the hand end
 LIP_H = 2.4          # lip height above the phone face (also screen standoff)
 
-ARM_R = 45.0         # forearm radius, mm (90 mm dia) -- THE tuning knob
-GAP = 4.0            # air gap between arm and tray underside
+ARM_R = 45.0         # nominal forearm radius, mm (90 mm dia)
+GAP = 4.0            # air gap between arm and tray underside, at the crown
+FOAM = 4.0           # compliant pad thickness on EVERY rib face -- see below
 RIB_W = 62.0         # rib span across the arm
 RIB_T = 14.0         # rib thickness along the arm
 RIB_Y = (34.0, 112.0)  # rib centres, from the elbow (open) end
@@ -73,8 +80,17 @@ OUT_W = POCK_W + 2 * WALL          # tray outer width
 OUT_L = POCK_L + WALL              # closed at the hand end, open at the elbow
 OUT_H = FLOOR + POCK_D + LIP_H
 
+# The rib faces are carved by a cylinder FOAM larger than the arm, about an
+# axis dropped by the same amount -- so every rib face stands FOAM proud of
+# where skin would be, uniformly, while the crown still clears by GAP.
+# That gap is for closed-cell foam or stick-on TPU, and it is what makes
+# ARM_R approximate rather than critical: ~4 mm of squish absorbs the error,
+# and a forearm changes cross-section as it pronates anyway.
+ARM_CUT_R = ARM_R + FOAM
+ARM_AXIS_Z = -(ARM_R + GAP + FOAM)
+
 # how far the ribs hang below the tray at their outer tips
-SAG = GAP + ARM_R - math.sqrt(ARM_R ** 2 - (RIB_W / 2) ** 2)
+SAG = -(ARM_AXIS_Z + math.sqrt(ARM_CUT_R ** 2 - (RIB_W / 2) ** 2))
 
 WING_X0 = OUT_W / 2                # wings run from the tray wall outward
 WING_X1 = OUT_W / 2 + WING
@@ -99,9 +115,9 @@ part += bbox(WING_X0, WING_X1, 0, OUT_L, 0, WING_T)
 for y in RIB_Y:
     part += bbox(-RIB_W / 2, RIB_W / 2, y - RIB_T / 2, y + RIB_T / 2, -SAG, 0)
 
-# Carve the forearm out of the ribs. Cylinder axis along Y, tangent at z = -GAP.
-arm = Pos(0, OUT_L / 2, -(ARM_R + GAP)) * Rot(90, 0, 0) * Cylinder(
-    ARM_R, OUT_L + 60
+# Carve the forearm (plus the foam allowance) out of the ribs.
+arm = Pos(0, OUT_L / 2, ARM_AXIS_Z) * Rot(90, 0, 0) * Cylinder(
+    ARM_CUT_R, OUT_L + 60
 )
 part -= arm
 
