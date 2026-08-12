@@ -45,8 +45,12 @@ probes = [
     ("open span between ribs",       (0, 73, -2.0), False),
     # Strap now runs in a channel under each rib instead of through side
     # flanges, so the device is tray-width. The bars bridge that channel.
-    ("strap channel under rib",      (10.0, 34, -4.0), False),
-    ("retaining bar across channel", (20.0, 34, -7.0), True),
+    # ⚠️ Depths are asymmetric now: TILT drops the +X side, so the same
+    # feature sits at very different Z on each side. Probed, not assumed.
+    ("strap channel is open, +X",    (14.0, 34, -13.5), False),
+    ("retaining bar fills it, +X",   (20.0, 34, -13.5), True),
+    ("strap channel is open, -X",    (-14.0, 34, -4.2), False),
+    ("retaining bar fills it, -X",   (-20.0, 34, -4.2), True),
     ("no flange where wings were",   (40.0, 34, 2.0), False),
     ("retaining lip over bezel",     (34.0, 70, Z_FACE + 1.0), True),
     ("screen window (clear)",        (0, 70, Z_FACE + 1.0), False),

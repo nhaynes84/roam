@@ -67,7 +67,7 @@ LIP_H = 2.4          # lip height above the phone face (also screen standoff)
 TILT = 20.0          # degrees
 
 ARM_R = 45.0         # nominal forearm radius, mm (90 mm dia)
-GAP = 4.0            # air gap between arm and tray underside, at the crown
+GAP = 8.0            # air gap between arm and tray underside, at the crown
 FOAM = 4.0           # compliant pad thickness on EVERY rib face -- see below
 RIB_W = 62.0         # rib span across the arm
 RIB_T = 28.0         # rib thickness along the arm -- wide enough to host the
