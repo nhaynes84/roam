@@ -925,19 +925,33 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
         `push: true` means "queued for the phone", not "it buzzed".
         """
         st = _store()
+        live = None
         if payload.pane is None:
             pane_id = HOST_CHANNEL_ID
-            if st.get_channel(pane_id) is None:
-                st.remember_channel(pane_id, HOST_CHANNEL_LABEL, socket.gethostname())
         else:
             pane_id = normalise_pane_id(payload.pane)
-            if st.get_channel(pane_id) is None:
+        created = st.get_channel(pane_id) is None
+        if created:
+            if pane_id == HOST_CHANNEL_ID:
+                st.remember_channel(pane_id, HOST_CHANNEL_LABEL, socket.gethostname())
+            else:
                 live = await run_in_threadpool(channels_mod.get, pane_id)
                 st.remember_channel(
                     pane_id,
                     live.label if live else pane_id,
                     live.session if live else "",
                 )
+            # Announce it before the event that made it exist. A subscriber
+            # that has never heard of this channel would otherwise label the
+            # notification with a raw id until the next poll -- and the first
+            # notification from a new channel is exactly the one that has to
+            # say who is speaking.
+            _publish(
+                {
+                    "type": "channel",
+                    "channel": channel_view(st, pane_id, live, st.get_channel(pane_id)),
+                }
+            )
         meta = {**payload.meta, "source": payload.source}
         event = st.append(pane_id, EventKind.NOTICE, payload.text, meta)
         _publish_event(event)

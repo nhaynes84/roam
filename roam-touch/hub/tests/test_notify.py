@@ -166,6 +166,26 @@ def test_a_notice_is_pushed_to_websocket_clients_like_any_event(client, auth):
     assert frame["event"]["body"] == "deploy done"
 
 
+def test_a_channel_nobody_has_heard_of_is_announced_before_its_first_notice(
+    client, auth, fake_tmux
+):
+    """The bridge labels a notification with the channel name -- which it only
+    has if it has been told about the channel. Without this, the first message
+    from a new channel reads `@host: …` instead of `⌁ talos: …`, and the first
+    one is the one that most needs to say who is speaking."""
+    from test_api import next_frame
+
+    with client.websocket_connect("/ws", headers=auth) as ws:
+        ws.receive_json()  # hello
+        notify(client, auth, "from cron")
+        frame = next_frame(
+            ws, "channel", where=lambda f: f["channel"]["pane_id"] == HOST_CHANNEL_ID
+        )
+        assert frame["channel"]["label"]
+        event = next_frame(ws, "event", where=lambda f: f["event"]["kind"] == "notice")
+        assert event["event"]["pane_id"] == HOST_CHANNEL_ID
+
+
 def test_who_sent_it_is_recorded(client, auth):
     body = notify(client, auth, "hi", pane="0", source="roam-msg", meta={"host": "talos"}).json()
     assert body["event"]["meta"]["source"] == "roam-msg"
