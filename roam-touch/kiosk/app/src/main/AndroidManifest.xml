@@ -7,10 +7,16 @@
         android:supportsRtl="true"
         android:theme="@android:style/Theme.DeviceDefault">
 
+        <!--
+          singleTop is load-bearing, not cosmetic: a device-owner package cannot be
+          force-stopped, so this activity stays resident and `am start` would otherwise
+          just re-front the task and drop the clear_device_owner extra. See MainActivity.
+        -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:label="@string/app_name">
+            android:label="@string/app_name"
+            android:launchMode="singleTop">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -36,7 +42,7 @@
 
         <!--
           The device-admin component. `dpm set-device-owner` names exactly this:
-              io.ironclan.roam.kiosk/.KioskDeviceAdminReceiver
+              com.roam.touch/.KioskDeviceAdminReceiver
           BIND_DEVICE_ADMIN is mandatory — without it the system refuses the
           component outright.
         -->

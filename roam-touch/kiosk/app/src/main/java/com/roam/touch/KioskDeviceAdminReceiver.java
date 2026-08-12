@@ -1,4 +1,4 @@
-package io.ironclan.roam.kiosk;
+package com.roam.touch;
 
 import android.app.admin.DeviceAdminReceiver;
 import android.content.Context;

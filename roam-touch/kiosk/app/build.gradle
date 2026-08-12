@@ -3,11 +3,11 @@ plugins {
 }
 
 android {
-    namespace 'io.ironclan.roam.kiosk'
+    namespace 'com.roam.touch'
     compileSdk 34
 
     defaultConfig {
-        applicationId "io.ironclan.roam.kiosk"
+        applicationId "com.roam.touch"
         minSdk 26
         //noinspection ExpiredTargetSdkVersion,OldTargetApi
         targetSdk 29
