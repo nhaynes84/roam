@@ -181,41 +181,124 @@ def test_it_says_when_the_hub_suppressed_the_push(hub):
 # ------------------------------------------------------------- the fallback
 
 
-def test_an_unreachable_hub_drops_the_message_loudly(hub, monkeypatch, tmp_path):
-    """★ The fallback decision: **drop, never go direct.**
+@pytest.fixture
+def ledger(monkeypatch, tmp_path):
+    """A ledger of its own, so the fallback is exercised for real."""
+    path = tmp_path / "hub.sqlite"
+    monkeypatch.setattr(msg, "LEDGER", path)
+    return path
 
-    A direct path would only ever fire while the hub is down -- which is
-    exactly when the bridge is down too, so every real outcome is stalling
-    silently. Agent chatter arriving on the phone at that moment says the
-    pipeline is healthy when it is not. So the message is dropped, spooled for
-    the record, and the failure is stated on stderr.
+
+def rows(path):
+    from store import Store
+
+    with Store(path) as st:
+        return st.events_since(0)
+
+
+def test_a_hub_that_is_not_running_writes_to_the_ledger_instead(hub, ledger):
+    """★ The fallback: **the ledger, never the device, never a file.**
+
+    The hub is a local service on the same box as everything that talks to it,
+    so "unreachable" only ever means "the process is not running" -- and then
+    the bridge is not running either and nothing could deliver anyway. A direct
+    adb push at that moment would be the one thing on the wrist still working,
+    which reads as a healthy pipeline while every real outcome is stalled.
+
+    So the message goes into the ledger flagged `pending`, and the hub adopts
+    and pushes it the moment it is back.
     """
-    monkeypatch.setattr(msg, "SPOOL", tmp_path / "undelivered.log")
     hub.error = urllib.error.URLError("connection refused")
-    code, out, err = run(["the hub is down"])
-    assert code == 1
-    assert "not delivered" in err.lower()
-    assert "the hub is down" in (tmp_path / "undelivered.log").read_text()
+    code, out, err = run(["the hub was down"], env={"TMUX_PANE": "%2"})
+    assert code == 0  # it is recorded and it will be delivered
+    (event,) = rows(ledger)
+    assert event.kind == "notice"
+    assert event.pane_id == "%2"
+    assert event.body == "the hub was down"
+    assert event.pending is True
+    assert event.meta["offline"] is True
+    assert "ledger" in out.lower()
 
 
-def test_a_hub_that_answers_with_an_error_is_also_a_drop(hub, monkeypatch, tmp_path):
-    monkeypatch.setattr(msg, "SPOOL", tmp_path / "undelivered.log")
+def test_the_channel_is_remembered_so_the_row_is_not_an_orphan(hub, ledger):
+    from store import Store
+
+    hub.error = urllib.error.URLError("down")
+    run(["hi"])
+    with Store(ledger) as st:
+        assert st.get_channel("@host") is not None
+
+
+def test_a_hub_that_answers_with_an_error_is_recorded_the_same_way(hub, ledger):
     hub.error = urllib.error.HTTPError(
         "http://hub.test:8787/notify", 401, "Unauthorized", {}, None
     )
     code, _, err = run(["hi"])
-    assert code == 1
+    assert code == 0
     assert "401" in err
+    assert rows(ledger)[0].meta["offline_reason"].endswith("401")
 
 
-def test_a_missing_token_drops_rather_than_finding_another_way(monkeypatch, tmp_path):
-    monkeypatch.setattr(msg, "SPOOL", tmp_path / "undelivered.log")
+def test_the_offline_path_is_bounded(hub, ledger, monkeypatch):
+    """Nothing on this box grows forever. Past the cap the message is dropped
+    and said to be dropped -- an agent in a loop with the hub down must not be
+    able to write until the disk fills."""
+    monkeypatch.setattr(msg, "MAX_PENDING", 2)
+    hub.error = urllib.error.URLError("down")
+    assert run(["one"])[0] == 0
+    assert run(["two"])[0] == 0
+    code, _, err = run(["three"])
+    assert code == 1
+    assert "dropped" in err.lower()
+    assert len(rows(ledger)) == 2
+
+
+def test_a_locked_ledger_is_a_drop_not_a_hang(hub, ledger, monkeypatch):
+    """Two writers on one SQLite file is fine in WAL -- until it is not. Handle
+    it rather than assuming; a status line must never wedge its caller."""
+    import sqlite3
+
+    def locked(*_args, **_kwargs):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(msg, "open_ledger", locked)
+    hub.error = urllib.error.URLError("down")
+    code, _, err = run(["hi"])
+    assert code == 1
+    assert "not recorded" in err.lower()
+
+
+def test_a_missing_token_is_recorded_rather_than_finding_another_way(ledger, monkeypatch):
     monkeypatch.setattr(
         msg, "read_token", lambda _s: (_ for _ in ()).throw(OSError("no token"))
     )
     code, _, err = run(["hi"])
-    assert code == 1
+    assert code == 0
     assert "token" in err.lower()
+    assert rows(ledger)[0].pending is True
+
+
+def test_the_caller_is_told_what_is_still_waiting(hub):
+    """The hub counts what never reached the push path; the next successful
+    call is when he is most likely to see it."""
+    hub.reply = {
+        "event": {"id": 9, "pane_id": "%0", "kind": "notice"},
+        "push": True,
+        "reason": "unknown",
+        "pending": 3,
+    }
+    _, out, _ = run(["hi"])
+    assert "3" in out and "pending" in out.lower()
+
+
+def test_there_is_no_dead_letter_file_anywhere(hub, ledger, tmp_path):
+    """⚠️ The ledger is the only store of record. If a second one grows back,
+    it will be invisible to every client and to the search index."""
+    hub.error = urllib.error.URLError("down")
+    run(["hi"])
+    assert [p.name for p in tmp_path.iterdir()] != []
+    assert not any(p.suffix == ".log" for p in tmp_path.rglob("*"))
+    assert "SPOOL" not in python_code(ROAM_MSG)
 
 
 # ------------------------------------ ⚠️ no second route, no second policy

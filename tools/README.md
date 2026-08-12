@@ -42,11 +42,15 @@ traffic doesn't go through it..."*
 * Prints what the hub decided — `%3 — no push (covered by tmux-input)` — so a
   silent send is never indistinguishable from a broken one.
 * Lands in the ledger either way. `memsearch "…" --source ledger` finds it later.
-* **If the hub is unreachable the message is dropped, not sent direct**, logged
-  on stderr and appended to `~/.local/state/roam/undelivered.log`. A direct path
-  would only ever fire while the hub is down — which is when the bridge is down
-  too, so every real outcome is silently stalling. Chatter arriving on his wrist
-  at that moment would say the pipeline is healthy when it is not.
+* **If the hub process is not running the message goes into the ledger**, not to
+  the device and not to a file. Everything here is one box, so an unreachable
+  hub is a stopped process — and a stopped hub is a deaf bridge, so nothing
+  could deliver anyway; an adb push at that moment would be the only thing
+  still arriving on his wrist, reading as a healthy pipeline while every real
+  outcome is stalled. The row lands in `hub.sqlite` flagged `pending`
+  (`meta.offline: true`), and the hub adopts and pushes it on its next poll. So
+  the message arrives late rather than never, from one store of record.
+  Bounded: past `MAX_PENDING` (200) waiting messages it is dropped and says so.
 * Env: `ROAM_HUB`, `ROAM_HUB_TOKEN_FILE`, `ROAM_HUB_TIMEOUT`.
 
 ## `roam-notify` — fire and forget

@@ -35,7 +35,7 @@ from transcript import MAX_BODY_CHARS, cap_body, summarise
 
 DEFAULT_DB_PATH = Path(__file__).with_name("hub.sqlite")
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 #: Where a channel's last inbound message came from. This is the whole
 #: notification rule: **reply where the last message came from.**
@@ -89,6 +89,11 @@ class Event:
     meta: dict[str, Any] = field(default_factory=dict)
     ts: float = 0.0
     archived: bool = False
+    #: ⚠️ This event was written straight to the ledger because the hub was
+    #: not running, so it never went through the push path. Transient: the hub
+    #: adopts it (`claim_pending`) the moment it is up and the flag clears. In
+    #: steady state nothing is pending -- it is a fault signal, not a history.
+    pending: bool = False
     #: Was he already looking at this channel **when this landed**? Frozen at
     #: creation, because by the time a sleeping phone reconnects, live presence
     #: answers a different question. Governs notification only -- never whether
@@ -157,7 +162,9 @@ class StoredChannel:
 def _row_to_event(row: sqlite3.Row) -> Event:
     raw_meta = row["meta"]
     raw_coverage = row["coverage"]
+    keys = row.keys()
     return Event(
+        pending=bool(row["pending"]) if "pending" in keys else False,
         coverage=json.loads(raw_coverage) if raw_coverage else dict(UNKNOWN_COVERAGE),
         id=row["id"],
         pane_id=row["pane_id"],
@@ -223,7 +230,8 @@ class Store:
                 meta     TEXT,
                 coverage TEXT,
                 ts       REAL    NOT NULL,
-                archived INTEGER NOT NULL DEFAULT 0
+                archived INTEGER NOT NULL DEFAULT 0,
+                pending  INTEGER NOT NULL DEFAULT 0
             );
             CREATE INDEX IF NOT EXISTS events_pane_idx ON events(pane_id, id);
 
@@ -259,10 +267,20 @@ class Store:
             self._db.execute("ALTER TABLE channels ADD COLUMN last_input_source TEXT")
             self._db.execute("ALTER TABLE channels ADD COLUMN last_input_at REAL")
 
+        columns = {r["name"] for r in self._db.execute("PRAGMA table_info(events)")}
+
+        # v5 -> v6: events gained `pending` -- written straight to the ledger
+        # while the hub process was down, so never pushed. Existing rows are 0:
+        # they went through the hub, which is exactly what "not pending" means.
+        if "pending" not in columns:
+            self._db.execute(
+                "ALTER TABLE events ADD COLUMN pending INTEGER NOT NULL DEFAULT 0"
+            )
+            columns.add("pending")
+
         # v3 -> v4: events gained `coverage`. Existing rows stay NULL, which
         # reads back as "unknown" -- so anything replayed from before this
         # existed notifies rather than being silently swallowed.
-        columns = {r["name"] for r in self._db.execute("PRAGMA table_info(events)")}
         if "coverage" not in columns:
             self._db.execute("ALTER TABLE events ADD COLUMN coverage TEXT")
             columns.add("coverage")
@@ -308,6 +326,7 @@ class Store:
         ts: float | None = None,
         summary: str | None = None,
         coverage: dict[str, Any] | None = None,
+        pending: bool = False,
     ) -> Event:
         """Write one event and return it, with its assigned id.
 
@@ -332,8 +351,9 @@ class Store:
         payload = json.dumps(meta) if meta else None
         with self._lock:
             cur = self._db.execute(
-                "INSERT INTO events(pane_id, kind, body, summary, meta, coverage, ts) "
-                "VALUES(?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO events"
+                "(pane_id, kind, body, summary, meta, coverage, ts, pending) "
+                "VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     pane_id,
                     kind_value,
@@ -342,6 +362,7 @@ class Store:
                     payload,
                     json.dumps(coverage),
                     stamp,
+                    1 if pending else 0,
                 ),
             )
             self._db.commit()
@@ -356,6 +377,7 @@ class Store:
             coverage=coverage,
             ts=stamp,
             archived=False,
+            pending=pending,
         )
 
     def _coverage_for(self, pane_id: str) -> dict[str, Any]:
@@ -437,6 +459,45 @@ class Store:
         with self._lock:
             row = self._db.execute(sql, (pane_id,)).fetchone()
         return int(row["n"])
+
+    # ------------------------------------------------- the offline path
+
+    def pending_count(self) -> int:
+        """How many events never reached the push path.
+
+        Nonzero means the hub was not running when something tried to tell him
+        about it. `GET /status` reports it and `roam-msg` says it on its next
+        successful call: a count nobody reads is the same failure as the
+        dead-letter file this replaced.
+        """
+        with self._lock:
+            row = self._db.execute(
+                "SELECT COUNT(*) AS n FROM events WHERE pending = 1"
+            ).fetchone()
+        return int(row["n"])
+
+    def claim_pending(self, limit: int = 100) -> list[Event]:
+        """Take the events written while the hub was down, once.
+
+        Read and clear in one transaction, so an event cannot be adopted twice
+        and buzz twice. The rows stay exactly where they are -- only the flag
+        moves, which is why this is a column and not a queue table.
+        """
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT * FROM events WHERE pending = 1 ORDER BY id ASC LIMIT ?",
+                (max(0, int(limit)),),
+            ).fetchall()
+            if not rows:
+                return []
+            ids = [int(r["id"]) for r in rows]
+            self._db.execute(
+                "UPDATE events SET pending = 0 WHERE id IN "
+                f"({','.join('?' * len(ids))})",
+                ids,
+            )
+            self._db.commit()
+        return [_row_to_event(r) for r in rows]
 
     def archive_history(self, pane_id: str) -> int:
         """Soft-clear a thread. Rows stay; they just stop being served."""

@@ -278,8 +278,14 @@ expects and warn loudly rather than silently losing a field.
 ```json
 {"ok": true, "version": "1.0.0", "protocol": 1, "uptime_s": 3600.0,
  "tmux_ok": true, "live_channels": 3, "known_channels": 9,
- "latest_event_id": 412, "subscribers": 1, "db_path": "/Users/talos/.../hub.sqlite"}
+ "latest_event_id": 412, "pending_events": 0, "subscribers": 1,
+ "db_path": "/Users/talos/.../hub.sqlite"}
 ```
+
+`pending_events` — events written straight into the ledger while this process
+was **not running**, and not yet adopted. See `POST /notify`. In steady state
+it is `0`; anything else means the hub was stopped while something was trying
+to tell the wearer about itself. Surface it rather than hiding it.
 
 ### `GET /channels`
 
@@ -420,7 +426,8 @@ every agent and hook on this box calls, and it does nothing but this.
 Response `201`:
 
 ```json
-{"event": Event, "push": true, "reason": "not covered (last input: app)"}
+{"event": Event, "push": true, "reason": "not covered (last input: app)",
+ "pending": 0}
 ```
 
 * `push` — whether the bridge will deliver this to the phone, decided by the
@@ -428,6 +435,19 @@ Response `201`:
   `true` means *queued*, not *delivered*: the bridge does that, rate-limited.
 * `reason` — human-readable, for the CLI to print. `covered by tmux-input`,
   `covered by roam-app`, `nothing recorded -- unknown means push`.
+* `pending` — how many events are still waiting to be adopted (below). Normally
+  `0`; a client that gets a non-zero should say so.
+
+**When the hub is not running.** The hub, the agents, `roam-msg` and the bridge
+are all one box, so an unreachable hub is a stopped *process*, never a network
+partition — and a stopped hub means a deaf bridge, so nothing could deliver
+anyway. `roam-msg` therefore writes the notice **straight into `hub.sqlite`**
+(same file, WAL, `store.py`) with an internal `pending` flag and
+`meta.offline: true`. On its next poll the hub claims those rows, publishes
+them as ordinary `event` frames and clears the flag, so they take the normal
+push path a few seconds late instead of being lost. Read-and-clear happens in
+one transaction: an adopted event can never buzz twice. There is no
+dead-letter file and no second store of record.
 
 ⚠️ **This is the only way in.** Notifications used to be posted straight to the
 device with `adb ... cmd notification post`, which meant the hub's policy

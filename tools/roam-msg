@@ -21,14 +21,23 @@ he sat two feet from the screen it was about. Owner: *"what's the point of a
 copy of the policy, in a client, free to drift from the hub's. There is one
 copy, it lives in the hub, and this program holds no opinion whatsoever.
 
-★ **If the hub is unreachable the message is dropped, not sent direct.** A
-direct path would only ever fire while the hub is down -- which is exactly when
-the bridge is down too, so every real outcome is silently stalling. Agent
-chatter arriving on his wrist at that moment says the pipeline is healthy when
-it is not, and that is a worse failure than a lost status line. The message is
-spooled to `~/.local/state/roam/undelivered.log` and the failure is stated on
-stderr. `tools/roam-push` is the deliberate, marked exception: it is the
-bridge's transport, it holds no policy, and nothing else calls it.
+★ **If the hub is not running the message goes into the ledger, never to the
+device and never to a file.** The hub is a *local* service and everything that
+talks to it -- Claude Code, the agents, this script, the bridge -- is this one
+box (owner: *"if talos is down, how the fuck am i talking to you, lol"*). So
+"unreachable" only ever means the process is stopped, and then the bridge is
+stopped too and nothing could deliver anyway; an adb push at that moment would
+be the only thing still arriving on his wrist, which reads as a healthy
+pipeline while every real outcome is stalled.
+
+`hub.sqlite` is on the same disk and is open in WAL mode, so the row goes
+straight into the ledger flagged `pending`, and the hub adopts and pushes it on
+its first poll. One store of record, no dead-letter file (owner: *"you have a
+DB for messages, why would we use a DL file"*), and the message actually
+arrives -- late -- instead of being lost.
+
+`tools/roam-push` is the deliberate, marked exception: it is the bridge's
+transport, it holds no policy, and nothing else calls it.
 
 Env:
   ROAM_HUB             hub base URL. Default: the tailnet address of talos.
@@ -41,23 +50,26 @@ from __future__ import annotations
 import json
 import os
 import socket
+import sqlite3
 import sys
-import time
 import urllib.error
 import urllib.request
 from pathlib import Path
 
+HUB_DIR = Path.home() / "Projects/roam/roam-touch/hub"
 DEFAULT_HUB = "http://100.67.237.109:8787"
-DEFAULT_TOKEN_FILE = Path.home() / "Projects/roam/roam-touch/hub/hub-token.txt"
+DEFAULT_TOKEN_FILE = HUB_DIR / "hub-token.txt"
 DEFAULT_TIMEOUT_S = 4.0
 
 HOSTNAME = socket.gethostname().split(".")[0]
 
-#: Where a message goes when the hub could not take it. Not a queue -- nothing
-#: replays it -- but a dropped message that leaves no trace is indistinguishable
-#: from one that was never sent, and "did that ever go out?" is answerable in
-#: two seconds with a file.
-SPOOL = Path.home() / ".local/state/roam/undelivered.log"
+#: The ledger itself -- the same file the hub writes, not a copy of it.
+LEDGER = HUB_DIR / "hub.sqlite"
+
+#: ⚠️ The rail on the offline path. Nothing on this box grows forever, and an
+#: agent in a loop with the hub stopped must not be able to write until the
+#: disk fills. Past this, messages are dropped and said to be dropped.
+MAX_PENDING = 200
 
 
 def read_token(env) -> str:
@@ -86,16 +98,64 @@ def resolve_pane(explicit: str | None, env) -> str | None:
     return pane or None
 
 
-def spool(text: str, pane: str | None, why: str) -> None:
-    """Leave a trace of what was dropped. Best effort: a failure to record a
-    failure must not become a second failure."""
+def open_ledger():
+    """The hub's own `Store`, opened on the hub's own database.
+
+    Imported rather than reimplemented: the summary, the body rail and the
+    schema are the hub's, and a client with its own copy of them is a client
+    whose rows drift from everyone else's.
+    """
+    if str(HUB_DIR) not in sys.path:
+        sys.path.insert(0, str(HUB_DIR))
+    from store import Store
+
+    return Store(LEDGER)
+
+
+def record_offline(text: str, pane: str | None, why: str) -> tuple[bool, str]:
+    """Write the message into the ledger, flagged as never having been pushed.
+
+    Returns `(recorded, pane_id_or_reason)`. Never raises: a status line must
+    not be able to take down the agent that sent it.
+
+    ⚠️ Two writers on one SQLite file is fine in WAL and still has to be
+    handled rather than assumed. sqlite3 waits out a busy lock for 5 s and then
+    raises; that is a drop, said out loud, not a hang.
+    """
     try:
-        SPOOL.parent.mkdir(parents=True, exist_ok=True)
-        stamp = time.strftime("%Y-%m-%dT%H:%M:%S")
-        with SPOOL.open("a", encoding="utf-8") as fh:
-            fh.write(f"{stamp}\t{pane or '-'}\t{why}\t{text}\n")
-    except OSError:
-        pass
+        store = open_ledger()
+        from store import EventKind, HOST_CHANNEL_ID
+    except sqlite3.OperationalError as exc:
+        return False, f"the ledger is locked ({exc})"
+    except Exception as exc:  # a missing hub dir, a schema too new to open
+        return False, f"cannot open the ledger at {LEDGER} ({exc})"
+    try:
+        waiting = store.pending_count()
+        if waiting >= MAX_PENDING:
+            return False, f"{waiting} messages already waiting for the hub"
+        pane_id = pane or HOST_CHANNEL_ID
+        if store.get_channel(pane_id) is None:
+            store.remember_channel(pane_id, pane_id, HOSTNAME)
+        store.append(
+            pane_id,
+            EventKind.NOTICE,
+            text,
+            {
+                "source": "roam-msg",
+                "host": HOSTNAME,
+                "offline": True,
+                "offline_reason": why,
+            },
+            pending=True,
+        )
+        return True, pane_id
+    except sqlite3.OperationalError as exc:
+        return False, f"the ledger is locked ({exc})"
+    finally:
+        try:
+            store.close()
+        except Exception:
+            pass
 
 
 def post_notice(hub: str, token: str, payload: dict, timeout: float) -> dict:
@@ -155,25 +215,14 @@ def main(argv=None, env=None, stdout=None, stderr=None) -> int:
     try:
         token = read_token(env)
     except OSError as exc:
-        spool(text, pane, "no token")
-        print(f"roam-msg: NOT DELIVERED — cannot read the hub token ({exc})", file=err)
-        return 1
+        return offline(text, pane, f"no hub token ({exc})", out, err)
 
     try:
         answer = post_notice(hub, token, payload, timeout)
     except urllib.error.HTTPError as exc:
-        spool(text, pane, f"hub {exc.code}")
-        print(f"roam-msg: NOT DELIVERED — hub answered {exc.code} {exc.reason}", file=err)
-        return 1
+        return offline(text, pane, f"hub answered {exc.code}", out, err)
     except (urllib.error.URLError, OSError, ValueError, json.JSONDecodeError) as exc:
-        spool(text, pane, "hub unreachable")
-        print(
-            f"roam-msg: NOT DELIVERED — no hub at {hub} ({exc}). "
-            f"Dropped on purpose: the bridge is down too, so a direct push "
-            f"would fake a working pipeline. Spooled to {SPOOL}.",
-            file=err,
-        )
-        return 1
+        return offline(text, pane, f"no hub at {hub} ({exc})", out, err)
 
     event = answer.get("event") or {}
     where = event.get("pane_id") or "?"
@@ -181,7 +230,33 @@ def main(argv=None, env=None, stdout=None, stderr=None) -> int:
         print(f"roam-msg: {where} — push queued ({answer.get('reason', '')})", file=out)
     else:
         print(f"roam-msg: {where} — no push ({answer.get('reason', '')})", file=out)
+    waiting = answer.get("pending") or 0
+    if waiting:
+        # Said on the way past, because this is the moment he is listening.
+        print(
+            f"roam-msg: ⚠️ {waiting} pending message(s) went around the hub "
+            f"while it was down; it will push them on its next poll.",
+            file=out,
+        )
     return 0
+
+
+def offline(text: str, pane: str | None, why: str, out, err) -> int:
+    """The hub process is not running. Put it in the ledger and say so."""
+    recorded, detail = record_offline(text, pane, why)
+    if recorded:
+        print(f"roam-msg: hub down ({why})", file=err)
+        print(
+            f"roam-msg: {detail} — recorded in the ledger, pending; "
+            f"the hub pushes it when it is back",
+            file=out,
+        )
+        return 0
+    print(
+        f"roam-msg: DROPPED — hub down ({why}) and not recorded: {detail}",
+        file=err,
+    )
+    return 1
 
 
 if __name__ == "__main__":

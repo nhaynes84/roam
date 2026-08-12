@@ -612,6 +612,10 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
             "live_channels": len(app.state.live_channels),
             "known_channels": len(st.known_channels(include_archived=True)),
             "latest_event_id": st.latest_event_id(),
+            # ⚠️ Nonzero means something told him about itself while this
+            # process was not running, and nothing has adopted it yet. In
+            # steady state it is 0 -- it is a fault signal, not a backlog.
+            "pending_events": st.pending_count(),
             "subscribers": app.state.broadcaster.subscriber_count,
             "db_path": str(st.path),
             "build": app.state.build,
@@ -963,7 +967,15 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
             reason = f"not covered (last input: {coverage.get('last_input')})"
         else:
             reason = "nothing recorded -- unknown means push"
-        return {"event": event.to_dict(), "push": not covered, "reason": reason}
+        return {
+            "event": event.to_dict(),
+            "push": not covered,
+            "reason": reason,
+            # What is still sitting in the ledger unadopted. Almost always 0;
+            # a successful call is the moment the caller is most able to say
+            # "an earlier message went around the hub" out loud.
+            "pending": st.pending_count(),
+        }
 
     @app.get("/events", tags=["events"], dependencies=[Depends(require_auth)])
     async def get_events(
@@ -1135,6 +1147,24 @@ async def _poll_forever(app: FastAPI) -> None:
     digests: dict[str, str] = {}  # pane_id -> last screen fingerprint
     while True:
         try:
+            # ★ Adopt anything written straight to the ledger while this process
+            # was not running. Nothing pushed those: the bridge subscribes to
+            # this hub, so when the hub is down the bridge is deaf. Publishing
+            # them now puts them on the ordinary push path, and clearing the
+            # flag in the same claim means they can never buzz twice.
+            #
+            # Ahead of the tmux call on purpose -- a box without tmux still owes
+            # him the message.
+            for orphan in store.claim_pending():
+                log.warning(
+                    "adopting a %s written while the hub was down: %s",
+                    orphan.kind,
+                    orphan.summary or orphan.body[:80],
+                )
+                broadcaster.publish(
+                    {"type": "event", "event": orphan.to_dict(INLINE_BODY_CHARS)}
+                )
+
             try:
                 live = await run_in_threadpool(channels_mod.list_channels)
                 app.state.tmux_ok = True
