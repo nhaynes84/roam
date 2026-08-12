@@ -28,25 +28,56 @@ channel loads from the USB end, so cards are reachable; and charging while
 worn pulls at the wrist rather than across the elbow.
 
 Form: the phone housing (pocket, screen aperture, sensor holes, print-in-place
-buttons, jack notch) is a frozen tray. Around and under it sits a FACETED OUTER
-HULL -- one low-poly prism running the length of the arm, flush with the tray
-sides at the belt line and flaring out below it, hollowed to a 2 mm skin with
-the arm saddle cut through its underside. V1 left the tilt wedge open on two
-ribs and read as a tray on stilts.
+buttons, jack notch) is a frozen tray. Around and under it sits a LOW-POLY
+TESSELLATED HULL: a rounded, chunky body approximated by planar facets.
 
-★★ THE HULL FOLLOWS ITS CONTENTS, NOT THE WEDGE (2026-08-12). It used to run
-the deep flank down to where the tilt plane met it and close it with a keel,
-which wrapped 26 mm of curtain and a corner around a volume that holds nothing:
-the pack stops at Z -15.6 and the arm cut has left the section by X -30. The
-owner read it straight off the model -- "you added a corner and a bunch of
-material at the bottom where nothing sits", "cantilevered over the edge for no
-reason" -- and it was 30 cm3 of enclosed air inside a 2 mm skin, which is the
-same wrong silhouette as a solid one. Now the deep flank stops one wall below
-the payload and ONE CHINE facet closes it onto the arm at DEEP_WRAP. The tilt
-wedge is a CONSEQUENCE of angling a flat tray on a round arm; it is not a
-volume that has to be filled OR enclosed. 72.1 mm tall -> 58.0, 83 wide -> 80,
-147 g -> 130. verify_bracer.py measures it now (dead-structure pass) so the
-next one cannot come back in unnoticed.
+★★ 2026-08-12 -- WHAT "LOW POLY" MEANS, because this file had it wrong from the
+start and the owner finally said so: "we didn't even hit low poly, I just
+stopped saying it." It had been read here as "few large flat faces, no curves",
+which is a PRINTABILITY constraint, and the result was a chamfered box with two
+big flat flanks -- "we still have hard cuts sides". The references in
+ref/lowpoly-*.png (a printed hand, polygon owls, a faceted bulb) settle it:
+
+    LOW POLY IS A SCULPTURAL STYLE. A rounded form approximated by MANY visible
+    planar facets of varying size and angle, each catching the light
+    differently. Sharp creases, no chamfers, deliberately irregular.
+
+So the form gets ROUNDER and is then chorded into flats -- the opposite of
+rounding the corners of a slab. And it is how the two references stop fighting:
+★ THE PIP-BOY GIVES THE BONES (proportion, chunk, the sunken visor, a cuff on
+the forearm); LOW POLY GIVES THE SURFACE. A wrist device with Pip-Boy bones,
+rendered in facets. Nothing is split down the middle.
+
+How the shell is built, and why this construction rather than a mesh:
+  * ONE section polygon, stated as ARCS (the flanks bow FLANK_BULGE proud, the
+    chine bows, the cuff follows the forearm) and delivered as chords -- facet
+    angle is (arc angle / chords), ~22 deg here, so it is a number you set;
+  * swept through STATION_N stations, each a UNIFORM SCALE of that section plus
+    an offset, walked rather than jittered independently;
+  * ruled-lofted between consecutive stations.
+★ Uniform-scale-plus-offset is the whole trick: for an edge (A,B), the quad
+(s0*A, s0*B, s1*B, s1*A) is planar exactly when s1*(B-A) is parallel to
+s0*(B-A). Any other per-station change makes the lateral faces ruled surfaces,
+which are not flat and are not low poly. So every hull face is a PLANE, and it
+exports as a plane in the STEP.
+★★ And it is why it still prints. Standing on the jack end maps model +Y to
+print -Z, so a facet's ny IS its downward component; ny ~ dR/dY, and with the
+station amplitude an order of magnitude under the station spacing the worst
+facet is a few degrees off vertical. verify_bracer.py measures it.
+
+★★ THE UNDERBELLY IS A CUFF (2026-08-12). Owner: "a weird underbelly", it is
+"cut off flat beneath it". It was: the deep flank wrapped the arm to 40 deg and
+closed on a chine, while the SHALLOW flank simply ran into the cylinder wherever
+the two happened to cross -- 25.3 deg -- and terminated on a zero-thickness
+razor. Sliced on one side, wrapped on the other. Now both sides leave the arm at
+the SAME wrap angle and close on a radial HEM CUFF_T thick, so the shell
+embraces the forearm symmetrically even though the tray on top of it is tilted
+25 deg. It costs width (80 -> 96 mm) and no height. Over each strap band the
+cuff is slotted right through, so the webbing leaves through a slot instead of
+under a 0.8 mm flap -- which also breaks the cuff into three plates.
+
+The ribs and the louvres that used to decorate the chine are both gone. There
+is no blank facet left for them to fix.
 
 The END CAP is part of the same body, not a collar bolted to it: the hull's
 nose steps in by the cap's wall thickness below the belt line, so the cap's
@@ -65,13 +96,18 @@ is the blank keel they moved off.
 WORN ON THE RIGHT FOREARM, ON TOP. TILT is positive for that and the reasoning
 is written out at the parameter -- do not flip it back.
 
-Every major crease is bevelled 3 mm, in the SECTION polygons rather than with
-OCCT's chamfer(), which refused most of them. verify_bracer.py audits what is
-left sharp and classifies it, so the exceptions are on record.
+⚠️ The section bevel is GONE. Chamfering a facet crease is exactly what made
+this read as a chamfered box, and the low-poly references have no chamfers
+anywhere -- the creases between facets ARE the surface. CHAMFER survives only on
+the visor rim and the cap's face, where it is relief on a frozen feature.
+verify_bracer.py audits every sharp exterior crease and classifies it, and its
+FACET CENSUS is the regression test for the flat-slab flank: no single facet on
+the hull skin may exceed 900 mm2 (the old flank was ~2900).
 
-★ Every hull facet is a plane PARALLEL TO THE ARM AXIS. That is what makes the
-low-poly styling free: stood on end, the entire outer body is vertical, so it
-needs no support and there is nothing curved to tessellate.
+★ Every hull facet is a PLANE, and nearly parallel to the arm axis -- the
+station scaling tilts each one by a few degrees and no more. Stood on end the
+outer body is therefore effectively vertical: no support anywhere on it, and
+nothing curved for the exporter to tessellate.
 
 Print orientation: STANDING ON THE HAND END, on a brim. Measured, not guessed --
 verify_bracer.py scores five orientations by unsupported face area, and the
@@ -247,19 +283,83 @@ HULL_BELT = -5.0     # Z of the widest crease -- also the end cap's top edge
 # flank on one straight chine. The shallow flank needs no equivalent -- the arm
 # is only ~21 mm below the belt on that side and the flank reaches it directly.
 DEEP_WRAP = 40.0     # degrees from the arm crown, deep side
-# ★ Raised ribs, replacing the cut louvres. The reference object builds its
-# side panels out of PROUD ribs, not slots, and a rib is also the honest
-# feature here: it is prismatic along the arm, so it prints support-free, and
-# it stiffens the biggest blank face on the part.
-# ⚠️ They sit on the CHINE now, not on the deep flank. The flank is 12.6 mm
-# tall since the section was cut back and cannot carry them; the chine is the
-# 29 mm facet that replaced the blank keel, and it is what the underside note
-# ("32 mm across, full length, lazy") was about.
-FIN_N = 2
-FIN_H = 3.5          # rib height, along the facet
-FIN_GAP = 3.0        # between ribs
-FIN_PROUD = 1.5      # how far it stands off the flank
-FIN_CH = 1.0         # 45 deg chamfer on the rib's own outer corners
+# ★★ ...AND THE SAME ON THE SHALLOW SIDE, since 2026-08-12. Until then the
+# shallow flank simply ran into the arm cylinder wherever the two happened to
+# cross -- 25.3 deg of wrap against the deep side's 40 -- so the shell was
+# sliced off by the arm on one side and wrapped round it on the other. Owner:
+# "a weird underbelly", "it's cut off flat beneath it". EQUAL WRAP is what
+# makes the underside read as a CUFF: both edges of the arm opening leave the
+# arm at the same angle from its crown, so the shell embraces the forearm
+# symmetrically even though the tray on top of it is tilted 25 deg. It costs
+# width and nothing else -- the height is unchanged, because the deep toe was
+# already the deepest point on the part.
+SHAL_WRAP = DEEP_WRAP
+# ★ The cuff: below the flanks the outer surface is CONCENTRIC with the arm,
+# CUFF_T thick, and its end face is RADIAL -- so the arm opening is bounded by
+# a CUFF_T-thick hem on each side instead of the zero-thickness razor the flank
+# used to leave where it happened to cross the cylinder.
+# ⚠️ CUFF_T must stay under WALL_OUT + WALL_ARM = 4.0 or the shell cavity
+# reappears inside the cuff as a sliver: the cavity is this section inset by
+# WALL_OUT and then cut by the arm + WALL_ARM, and at 3.0 the inset lands at
+# R 50 while the cut clears everything under R 51. The cuff comes out solid,
+# with 1 mm of margin rather than a coincident face.
+CUFF_T = 3.0
+
+# ------------------------------------------------------------- ★★ LOW POLY
+# ⚠️⚠️ WHAT LOW POLY ACTUALLY MEANS -- and it is not what this file assumed
+# until 2026-08-12. It was read as "few large flat faces, no curves", which is
+# a printability constraint, and the result was a chamfered box. Owner:
+# "we didn't even hit low poly, I just stopped saying it." The references in
+# ref/lowpoly-*.png settle it:
+#
+#   LOW POLY IS A SCULPTURAL STYLE -- a rounded form approximated by MANY
+#   visible planar facets of varying size and angle, each catching the light
+#   differently. Sharp facet creases, no chamfers, deliberately irregular.
+#
+# So the form has to get ROUNDER first and then be tessellated. That is also
+# how it stops fighting the Pip-Boy reference rather than splitting the
+# difference: ★ THE PIP-BOY GIVES THE BONES -- proportion, chunk, the sunken
+# visor, the cuff on the forearm. LOW POLY GIVES THE SURFACE. A wrist device
+# with Pip-Boy bones, rendered in facets.
+#
+# How it is built, and why this construction and not a mesh:
+#   * ONE irregular section polygon, generated by rounding the corners of a
+#     coarse outline into arcs and then chording those arcs -- so the facet
+#     sizes and angles vary by construction instead of by noise;
+#   * swept along the arm through STATION_N stations, each an affine copy of
+#     that section (UNIFORM scale about a fixed centre, plus an offset);
+#   * lofted ruled between consecutive stations.
+# ★ Uniform-scale-plus-offset is the whole trick. For any edge (A,B) of the
+# section, the quad (s0*A, s0*B, s1*B, s1*A) is PLANAR exactly when s1*(B-A)
+# is parallel to s0*(B-A) -- i.e. when the two stations differ by a uniform
+# scale and a translation. Any other per-station shape change makes the lateral
+# faces ruled (bilinear) surfaces, which are not flat and are not low poly.
+# So every face on this hull is a plane, it exports as a plane in the STEP, and
+# nothing has to be tessellated by the exporter.
+# ★★ AND IT IS WHY IT STILL PRINTS. A facet's normal is (nx, ny, nz); standing
+# on the jack end maps model +Y to print -Z, so ny IS the downward component.
+# A prismatic hull has ny = 0 everywhere. Here ny ~ dR/dY, so the overhang
+# angle is set by (scale change x radius) / (station spacing). With SEC_JIT
+# at 1.2 % over ~14 mm of station the worst facet is ~4 deg off vertical --
+# an order of magnitude inside the 45 deg limit, and verify_bracer.py measures
+# it rather than trusting this note.
+SEC_JIT = 0.42       # how much the arc chording is skewed, 0 = even chords
+STATION_N = 6        # sections along the arm
+# ⚠️ These two are bounded from BOTH sides and neither bound is taste.
+#   * too small and the body is a prism with a texture -- the first attempt at
+#     this ran 1.2 % and the render came back looking smooth;
+#   * too large and two things break. The facet's downward component is
+#     (scale change x radius + offset) / station spacing, which has to stay
+#     inside 45 deg -- at 2.2 % over ~13 mm the worst facet is ~21 deg, and the
+#     harness measures it. And the section's top must stay INSIDE the frozen
+#     tray wall at every station or the hull starts standing outboard of the
+#     button bores at Z 4.6 and buries the plungers. P_TOP_* is placed so the
+#     surface crosses X = OUT_W/2 at Z ~ 3.1 even at the widest station.
+STATION_AMP = 0.030  # +/- uniform scale, cumulative (random walk)
+STATION_OFF = 1.5    # +/- mm of section offset, cumulative
+SEED = 20260812      # the tessellation is RANDOM but REPEATABLE. Do not drop
+                     # this: an unseeded shell would differ on every run and no
+                     # probe in the harness could ever be trusted again.
 WALL_OUT = 2.0       # outer skin thickness
 # ⚠️ Two arm-face wall thicknesses, not one. A single generous value leaves the
 # shallow flank almost solid -- that flank is only 5-13 mm deep, so 4.5 mm of
@@ -479,20 +579,31 @@ def arm_z(x, r=None):
 # SD is the sign of the DEEP side in model X. Needed here, before the section.
 SD = 1.0 if TILT >= 0 else -1.0
 
+R_CUFF = ARM_CUT_R + CUFF_T          # the cuff's outer surface
+R_INNER = ARM_CUT_R - 6.0            # the closing chord, safely inside the arm
+
+
+def cuff_pt(theta, r=None):
+    """Point on a circle concentric with the arm cut, `theta` degrees round
+    from the ARM'S OWN CROWN. Positive theta runs toward the DEEP flank, so the
+    sign follows TILT the same way SD does and the section stays handed."""
+    r = R_CUFF if r is None else r
+    t = math.radians(theta)
+    return (ARM_CX + SD * r * math.sin(t), ARM_CZ + r * math.cos(t))
+
+
 # ★ Deep flank: it stops one wall below the payload. Nothing is carried below
 # PAYLOAD_Z, so nothing is enclosed below it either.
 HULL_Z_DEEP = PAYLOAD_Z - WALL_OUT
-# ★ ...and the chine runs from the flank's bottom to the point where the arm's
-# own surface has turned through DEEP_WRAP. Beyond that toe the shell is off
-# the arm and holds nothing, so the shell simply stops there.
-_W = math.radians(DEEP_WRAP)
-TOE_X = ARM_CX + SD * ARM_CUT_R * math.sin(_W)
-TOE_Z = ARM_CZ + ARM_CUT_R * math.cos(_W)
-# Shallow flank: run it just past where the arm cut will form the edge, so the
-# cylinder makes that chine rather than a stray sliver of blank.
-_shallow = arm_z(-SD * HULL_HW)
-HULL_Z_SHAL = (_shallow - 1.5) if _shallow is not None else TOE_Z
-SAG = -min(HULL_Z_DEEP, HULL_Z_SHAL, TOE_Z)   # how far the hull hangs below
+# The shallow flank runs down until it meets the cuff's own circle; from there
+# the cuff carries it round to SHAL_WRAP. Solved, not guessed, so TILT stays a
+# real knob.
+SHAL_FOOT_TH = math.degrees(math.asin((-SD * HULL_HW - ARM_CX) / (SD * R_CUFF)))
+HULL_Z_SHAL = cuff_pt(SHAL_FOOT_TH)[1]
+TOE_X, TOE_Z = cuff_pt(DEEP_WRAP)    # outer corner of the deep hem
+# ★ The deepest point that SURVIVES is where the hem meets the arm, not the
+# closing chord (which is inside the cylinder and gets carved away).
+SAG = -(ARM_CZ + ARM_CUT_R * math.cos(math.radians(max(DEEP_WRAP, SHAL_WRAP))))
 
 
 # --------------------------------------- SVG face coords -> model coords
@@ -604,6 +715,54 @@ def bevel(pts, d, skip=()):
     return out
 
 
+def arc_chords(p0, p1, bulge, n, rng, include_first=True):
+    """★ THE TESSELLATOR. A circular arc from p0 to p1, bulging `bulge` mm
+    proud of the chord, delivered as `n` STRAIGHT CHORDS of irregular length.
+
+    This is the whole low-poly construction and it is deliberately the other way
+    round from the last attempt. Rounding the corners of a slab gave a slab with
+    rounded corners; what the references (ref/lowpoly-*.png) show is a ROUNDED
+    FORM chorded into flats. So the form is stated as arcs -- the flanks bulge,
+    the chine bows, the cuff follows the arm -- and every arc is then replaced by
+    a handful of planes. Facet angle comes out as (arc angle / n), so it is a
+    number you set rather than a hope: ~13 deg per crease on the flanks here.
+
+    ⚠️ The chord lengths are JITTERED. Even chords on a circular arc give a
+    regular fan and a regular fan reads as a badly-rendered fillet, not as a
+    sculpt -- every reference is irregular everywhere. `rng` is seeded (SEED)
+    so the irregularity is fixed geometry, not noise that moves between runs.
+    """
+    x0, z0 = p0
+    x1, z1 = p1
+    dx, dz = x1 - x0, z1 - z0
+    L = math.hypot(dx, dz)
+    pts = []
+    if abs(bulge) < 1e-6 or n < 2:
+        ks = [0.0] + sorted(rng.uniform(0, 1) for _ in range(n - 1)) + [1.0]
+        for k in ks[0 if include_first else 1:]:
+            pts.append((x0 + dx * k, z0 + dz * k))
+        return pts
+    # outward normal of the chord; `bulge` is signed along it
+    nx, nz = -dz / L, dx / L
+    R = (L * L / 4.0 + bulge * bulge) / (2.0 * bulge)
+    cx = (x0 + x1) / 2.0 - nx * (R - bulge)
+    cz = (z0 + z1) / 2.0 - nz * (R - bulge)
+    a0 = math.atan2(z0 - cz, x0 - cx)
+    a1 = math.atan2(z1 - cz, x1 - cx)
+    while a1 - a0 > math.pi:
+        a1 -= 2 * math.pi
+    while a0 - a1 > math.pi:
+        a1 += 2 * math.pi
+    ks = [0.0] + sorted(
+        min(0.97, max(0.03, (j + 1) / n + rng.uniform(-SEC_JIT, SEC_JIT) / n))
+        for j in range(n - 1)) + [1.0]
+    rad = abs(R)
+    for k in ks[0 if include_first else 1:]:
+        th = a0 + (a1 - a0) * k
+        pts.append((cx + rad * math.cos(th), cz + rad * math.sin(th)))
+    return pts
+
+
 def prism(pts, y0, y1):
     """Extrude an (X, Z) polygon from y0 to y1.
 
@@ -648,15 +807,55 @@ part = bbox(-OUT_W / 2, OUT_W / 2, 0, OUT_L, 0, OUT_H)
 # a keel there would be a second skin around a surface that is already the
 # outside of the part. It only reappears as the chine, outboard of the toe,
 # where the cylinder has left the section.
-HULL_SEC = [
-    (-SD * OUT_W / 2,  HULL_SHOULDER),   # leaves the tray wall here
-    (-SD * HULL_HW,    HULL_BELT),       # shallow shoulder crease
-    (-SD * HULL_HW,    HULL_Z_SHAL),     # shallow flank's foot, inside the arm
-    ( TOE_X,           TOE_Z),           # toe: the arm saddle ends here
-    ( SD * HULL_HW,    HULL_Z_DEEP),     # chine: back up to the deep flank
-    ( SD * HULL_HW,    HULL_BELT),       # deep flank -- 12.6 mm, not 36
-    ( SD * OUT_W / 2,  HULL_SHOULDER),
-]
+# ★★ THE SECTION, STATED AS ARCS AND THEN CHORDED. Read the arc_chords note
+# first. The form is now genuinely ROUND -- the flanks bulge FLANK_BULGE proud
+# of the straight line from the shoulder to the cuff, the chine bows, the cuff
+# follows the forearm -- and each of those arcs is delivered as a handful of
+# planes. That is what makes the sides stop reading as "hard cuts": there is no
+# 20 mm flat plane on the flank any more, there are five planes at 13 deg to
+# each other, and each one takes the light differently.
+#
+# ⚠️ THE TOP TWO POINTS ARE BURIED INSIDE THE FROZEN TRAY. The hull is unioned
+# with the tray box, so anything the section does inboard of OUT_W/2 above Z=0
+# is invisible -- and, far more to the point, cannot reach the pocket, the
+# button bores or the plungers. That is how the tessellation is kept off the
+# frozen housing: not clipped away afterwards, it never gets there. The station
+# scaling is sized so this stays true at every station (see STATION_AMP).
+# ⚠️ The bulge is bounded by the DEAD-STRUCTURE check, not by taste: the
+# payload is 30.6 mm half width and the harness allows 13 mm of standoff, so a
+# flank that bows past ~43.5 is material standing off everything it could hold.
+# 4.0 puts the widest point at 42.5. That is the ceiling on this knob.
+FLANK_BULGE = 4.0    # how far the flank bows out past shoulder->cuff
+CHINE_BULGE = 3.5    # ...and the chine past hem->flank foot
+# ★ THREE chords, not five. Facet angle is (arc angle / chords), and at five it
+# came out at 13 deg -- adjacent facets differed by so little tone that the
+# render came back looking smooth. At three it is ~22 deg and the creases read.
+FLANK_CHORDS = 3
+CHINE_CHORDS = 3
+_rng = __import__("random").Random(SEED)
+
+P_TOP_S = (-SD * (OUT_W / 2 - 9.0), HULL_SHOULDER + 3.0)   # buried in the tray
+P_SHO_S = (-SD * (OUT_W / 2 - 0.5), HULL_SHOULDER - 0.5)   # leaves the tray wall
+P_CUF_S = cuff_pt(SHAL_FOOT_TH)                            # cuff picks it up
+P_HEM_SO = cuff_pt(-SHAL_WRAP)                             # shallow hem, outer
+P_HEM_SI = cuff_pt(-SHAL_WRAP, R_INNER)                    # (inside the arm)
+P_HEM_DI = cuff_pt(DEEP_WRAP, R_INNER)
+P_HEM_DO = (TOE_X, TOE_Z)                                  # deep hem, outer
+P_CHI_D = (SD * HULL_HW, HULL_Z_DEEP)                      # deep flank's foot
+P_SHO_D = (SD * (OUT_W / 2 - 0.5), HULL_SHOULDER - 0.5)
+P_TOP_D = (SD * (OUT_W / 2 - 9.0), HULL_SHOULDER + 3.0)
+
+HULL_SEC = [P_TOP_S]
+HULL_SEC += arc_chords(P_TOP_S, P_SHO_S, 0.0, 1, _rng, False)
+HULL_SEC += arc_chords(P_SHO_S, P_CUF_S, FLANK_BULGE, FLANK_CHORDS, _rng, False)
+# the cuff itself: concentric with the forearm, two flats
+for _k in (1, 2):
+    HULL_SEC.append(cuff_pt(SHAL_FOOT_TH
+                            + (-SHAL_WRAP - SHAL_FOOT_TH) * _k / 2.0))
+HULL_SEC += [P_HEM_SI, P_HEM_DI, P_HEM_DO]   # hem, closing chord, hem
+HULL_SEC += arc_chords(P_HEM_DO, P_CHI_D, CHINE_BULGE, CHINE_CHORDS, _rng, False)
+HULL_SEC += arc_chords(P_CHI_D, P_SHO_D, FLANK_BULGE, FLANK_CHORDS, _rng, False)
+HULL_SEC += [P_TOP_D]
 
 # ★★ The nose is a TENON, not a stub. V1 stopped the hull 13 mm short so the
 # old rectangular cap could collar the bare tray -- which left the cap reading
@@ -673,23 +872,95 @@ TEN_D = CAP_W + CAP_CLR              # how far the tenon steps in
 _above = bbox(-80, 80, -1, CAP_D + 1, HULL_BELT, 80)
 _below = bbox(-80, 80, -1, CAP_D + 1, -80, HULL_BELT)
 
-# ★ Bevel the section before anything is built from it. Skip the two top
-# vertices: those are where the hull meets the frozen tray wall, a 167 deg
-# crease that is not a crease.
-HULL_SEC = bevel(HULL_SEC, CHAMFER, skip=(0, len(HULL_SEC) - 1))
+# ★ NO SECTION BEVEL any more, and that is the point. Bevelling a facet crease
+# is what turned this into a chamfered box; on a low-poly sculpt the creases
+# between facets ARE the surface, and the references have no chamfers anywhere.
+# CHAMFER survives only for the visor rim and the cap's face, where it is
+# relief on a frozen feature rather than styling.
 
-hull = prism(HULL_SEC, CAP_D, OUT_L)
+# The arm, and the concentric cylinders derived from it. Defined here because
+# the hull's tenon needs one of them.
+_pivot = -(GAP + FOAM)          # crown contact, on the tray centre line
+_tilt = Pos(0, 0, _pivot) * Rot(0, TILT, 0) * Pos(0, 0, -_pivot)
+
+
+def arm_cyl(r, length=None, yc=None):
+    """A cylinder coaxial with the forearm, radius r."""
+    length = OUT_L + 60 if length is None else length
+    yc = OUT_L / 2 if yc is None else yc
+    return _tilt * (Pos(0, yc, ARM_AXIS_Z) * Rot(90, 0, 0) * Cylinder(r, length))
+
+
+arm = arm_cyl(ARM_CUT_R)
+
+# ------------------------------------------------- stations along the arm
+# ★ The second direction of the tessellation. Each station is a UNIFORM scale
+# of HULL_SEC about SEC_C plus an offset -- see the LOW POLY note for why it
+# has to be uniform (any other per-station change makes the lateral faces
+# ruled surfaces instead of planes).
+# ⚠️ Station 0 sits at Y = CAP_D at scale 1.0 with no offset, because that is
+# where the cap's tenon ends: the collar is machined to the BASE section, so
+# the body may only start varying once the cap is behind it.
+SEC_C = (0.0, -6.0)
+STATION_Y = [CAP_D]
+_span = OUT_L - CAP_D
+for _i in range(1, STATION_N):
+    _f = _i / (STATION_N - 1)
+    STATION_Y.append(CAP_D + _span * _f
+                     + (0.0 if _i in (0, STATION_N - 1)
+                        else _rng.uniform(-0.28, 0.28) * _span / (STATION_N - 1)))
+# ⚠️ A RANDOM WALK, not white noise, and that is not a detail. Independent
+# per-station values make consecutive stations alternate high-low-high, and a
+# long body full of alternating stations reads as CORRUGATION -- the first
+# render of this looked like the flank had sagged. A walk gives each stretch a
+# direction, so the body comes out as a handful of large planes leaning
+# different ways, which is what the printed hand in ref/ actually looks like.
+STATION_S = [(1.0, 0.0, 0.0)]
+_s, _dx, _dz = 1.0, 0.0, 0.0
+for _ in range(STATION_N - 1):
+    _s = min(1.0 + STATION_AMP, max(1.0 - STATION_AMP,
+                                    _s + _rng.uniform(-1.0, 1.0) * STATION_AMP))
+    _dx = min(STATION_OFF, max(-STATION_OFF,
+                               _dx + _rng.uniform(-1.0, 1.0) * STATION_OFF))
+    _dz = min(STATION_OFF, max(-STATION_OFF,
+                               _dz + _rng.uniform(-1.0, 1.0) * STATION_OFF * 0.6))
+    STATION_S.append((_s, _dx, _dz))
+
+
+def sec_at(base, i):
+    s, dx, dz = STATION_S[i]
+    return [((x - SEC_C[0]) * s + SEC_C[0] + dx,
+             (z - SEC_C[1]) * s + SEC_C[1] + dz) for x, z in base]
+
+
+def sec_face(pts, y):
+    return Pos(0, y, 0) * (Plane.XZ * Polygon(*pts, align=None))
+
+
+def tessellated(base):
+    """Ruled loft of `base` through every station -- the faceted body."""
+    return loft([sec_face(sec_at(base, i), STATION_Y[i])
+                 for i in range(STATION_N)], ruled=True)
+
+
+hull = tessellated(HULL_SEC)
+# The nose stays PRISMATIC over the cap's length: the collar is a machined fit
+# and a varying section under it would either bind or rattle.
 hull += prism(HULL_SEC, 0, CAP_D) & _above
-hull += prism(inset(HULL_SEC, TEN_D), 0, CAP_D) & _below
+# ⚠️⚠️ NO TENON INSIDE THE CUFF. The cuff is CUFF_T = 3.0 thick and its inner
+# face is the arm cylinder, which cannot move -- so stepping it in by TEN_D
+# leaves 0.7 mm, well under MIN_WALL, and the wall check would (correctly)
+# fail. The cuff therefore runs THROUGH the joint at full section and the cap's
+# collar stops on its shoulder. That also reads better than the alternative:
+# the cuff is one continuous band from nose to tail and the cap is a collar
+# sitting on it, which is exactly how the reference object is assembled.
+_cuff_zone = arm_cyl(R_CUFF)
+hull += prism(HULL_SEC, 0, CAP_D) & _below & _cuff_zone
+hull += (prism(inset(HULL_SEC, TEN_D), 0, CAP_D) & _below) - _cuff_zone
 
 part += hull
 
 # Carve the forearm (plus the foam allowance) out of the hull.
-_pivot = -(GAP + FOAM)          # crown contact, on the tray centre line
-_tilt = Pos(0, 0, _pivot) * Rot(0, TILT, 0) * Pos(0, 0, -_pivot)
-arm = _tilt * (Pos(0, OUT_L / 2, ARM_AXIS_Z) * Rot(90, 0, 0) * Cylinder(
-    ARM_CUT_R, OUT_L + 60
-))
 part -= arm
 
 # Strap channel: a second, larger cylinder over just a band of the arm face
@@ -697,9 +968,34 @@ part -= arm
 # and wraps the forearm -- no flanges, no threading. On the deep side the arm
 # has already fallen below the keel by X ~= 25, so the strap walks out into
 # open air under the hull rather than needing a slot cut for it.
+# ⚠️ CLIPPED on the shallow side. The groove is cut to 51.2 and the shallow
+# flank runs nearly TANGENT to that cylinder as it comes down to the cuff, so
+# out past ~26 deg the groove was skimming the flank and leaving 0.8 mm of
+# skin -- the wall check found it twice, at two different stations. The groove
+# now stops at 26 deg and the slot below takes over from 21, so the two overlap
+# and neither can leave a feather between them.
+def _wedge(t0, t1, r, y0, y1, n=6):
+    return prism([(ARM_CX, ARM_CZ)]
+                 + [cuff_pt(t0 + (t1 - t0) * k / n, r) for k in range(n + 1)],
+                 y0, y1)
+
+
 for y in STRAP_Y:
-    part -= _tilt * (Pos(0, y, ARM_AXIS_Z) * Rot(90, 0, 0) * Cylinder(
-        ARM_CUT_R + STRAP_D, STRAP_W))
+    _y0, _y1 = y - STRAP_W / 2, y + STRAP_W / 2
+    part -= (arm_cyl(ARM_CUT_R + STRAP_D, STRAP_W, y)
+             - _wedge(-26.0, -75.0, 90.0, _y0 - 1, _y1 + 1))
+# ⚠️⚠️ ...AND THROUGH THE CUFF, not into it. The groove is cut to
+# ARM_CUT_R + STRAP_D = 51.2 and the cuff's outer surface is at 52, so out where
+# the shell has become the cuff the groove leaves a 0.8 mm flap -- under
+# MIN_WALL, and a flap you could tear off with a fingernail. The webbing has to
+# leave the shell somewhere in any case, so it leaves through a SLOT: over each
+# strap band the cuff is removed outright between the flank's foot and past the
+# hem. That is also what makes the cuff read as three plates with two strap
+# slots rather than one extruded band.
+_CUFF_SLOT_R = R_CUFF + 0.5
+for y in STRAP_Y:
+    for _t0, _t1 in ((-21.0, -SHAL_WRAP - 4.0), (DEEP_WRAP - 7.0, DEEP_WRAP + 4.0)):
+        part -= _wedge(_t0, _t1, _CUFF_SLOT_R, y - STRAP_W / 2, y + STRAP_W / 2)
 
 # Retaining bars across the channel so the strap cannot fall out when it is
 # off your arm. Trimmed back to the arm surface by re-cutting the arm after.
@@ -723,7 +1019,12 @@ part -= arm
 # leaves 2.8 mm under the strap channel) and left OPEN at the nose -- a closed
 # cavity would put an unsupported roof across the whole section at the top of
 # the print, and an open one is also the intake for the floor vents.
-cav = prism(inset(HULL_SEC, WALL_OUT), CAP_D, OUT_L - CAV_Y1)
+# ⚠️ TESSELLATED TOO, through the same stations. The cavity has to breathe with
+# the body or the skin thickness would swing by the station amplitude -- inset
+# the BASE section and put it through the same affine maps and every facet is
+# exactly WALL_OUT thick, measured perpendicular to itself, at every station.
+cav = tessellated(inset(HULL_SEC, WALL_OUT)) \
+    & bbox(-90, 90, CAP_D - 1, OUT_L - CAV_Y1, -90, 90)
 # Over the tenon the skin has to be measured off the STEPPED-IN face, or the
 # cavity would sit outside it and the tenon wall would come out negative.
 cav += prism(inset(HULL_SEC, WALL_OUT), -1.0, CAP_D) & _above
@@ -732,11 +1033,22 @@ cav += prism(inset(HULL_SEC, TEN_D + WALL_OUT), -1.0, CAP_D) & _below
 # now, so the section's top edge insets to Z=2.5 -- above the pocket floor.
 # Unclamped the cavity eats the floor and leaves 0.6 mm of it.
 cav &= bbox(-90, 90, -30, OUT_L + 30, -90, 0.0)
-cav -= _tilt * (Pos(0, OUT_L / 2, ARM_AXIS_Z) * Rot(90, 0, 0) * Cylinder(
-    ARM_CUT_R + WALL_ARM, OUT_L + 60))
+cav -= arm_cyl(ARM_CUT_R + WALL_ARM)
+# ⚠️⚠️ AND THE CUFF STAYS SOLID. The cavity's arm-face boundary is
+# ARM_CUT_R + WALL_ARM = 51 and the cuff's outer surface is at 52, so just above
+# the flank's foot -- where the flank is running nearly tangent to the cylinder
+# -- the skin between them came out at 0.95 mm, and 0.75 at a station scaled
+# down. The wall check found it; no render would have. Clearing the cavity out
+# of the cuff's own wedge fixes it at the cause instead of thickening WALL_ARM
+# everywhere (which would be ~30 g of arm-face skin and would re-open the
+# membrane question under the card channel).
+for _t0, _t1 in ((SHAL_FOOT_TH + 6.0, -SHAL_WRAP - 6.0),
+                 (DEEP_WRAP - 12.0, DEEP_WRAP + 6.0)):
+    _w = [(ARM_CX, ARM_CZ)] + [
+        cuff_pt(_t0 + (_t1 - _t0) * k / 5.0, R_CUFF + 3.0) for k in range(6)]
+    cav -= prism(_w, -2.0, OUT_L + 2.0)
 for y in STRAP_Y:
-    cav -= _tilt * (Pos(0, y, ARM_AXIS_Z) * Rot(90, 0, 0) * Cylinder(
-        ARM_CUT_R + WALL_ARM_STRAP, STRAP_W + 2 * STRAP_BAND))
+    cav -= arm_cyl(ARM_CUT_R + WALL_ARM_STRAP, STRAP_W + 2 * STRAP_BAND, y)
 
 # ------------------------------------------------------------- card slots
 # ★ ID-1 cards (ISO/IEC 7810: 85.60 x 53.98 x 0.76) in the dead volume.
@@ -812,70 +1124,12 @@ part -= bbox(CARD_X1 + CARD_RAIL, CABLE_X1,
              -1.0, 17.0, PACK_Z1 - 2.0, FLOOR + 4.0)   # runs out to the mouth,
              # or a 1 mm rib of floor is left standing between slot and face
 
-# ★ Ribs, not louvres. The five canted slots that used to be here are gone.
-# They were doing a little real work -- the floor vents ducted into the cavity
-# and exhausted through them -- but that duct was already half-dead once the
-# card channel moved into it, and they read as damage rather than design.
-# ⚠️ Consequence, stated rather than hidden: with the cap on, the shell cavity
-# is now a SEALED void. The floor vents still let the phone's heat out of the
-# pocket into ~50 cm3 of air and the whole shell's surface area, which is most
-# of the benefit, but there is no through-flow. If that ever matters the right
-# place for the opening is the cap, which is the removable part.
-#
-# The ribs run the full length, so they have no ends to overhang, and they are
-# added to the CAP as well as the hull -- same X/Z profile, so they read as one
-# continuous rib from the nose to the tail.
-# ★ ON THE CHINE, not the flank. The chine is the facet that replaced the blank
-# keel and it is now the biggest unbroken face on the body -- 29 mm across the
-# section, the full 147 mm long. That is exactly the surface the owner called
-# out as lazy, and a rib stack is the same answer the reference object gives.
-# The deep flank is 12.6 mm tall now and cannot carry them.
-_CH_P0, _CH_P1 = (TOE_X, TOE_Z), (SD * HULL_HW, HULL_Z_DEEP)
-_ch_ex, _ch_ez = _CH_P1[0] - _CH_P0[0], _CH_P1[1] - _CH_P0[1]
-CHINE_L = math.hypot(_ch_ex, _ch_ez)
-_ch_ux, _ch_uz = _ch_ex / CHINE_L, _ch_ez / CHINE_L
-_ch_nx, _ch_nz = _ch_uz, -_ch_ux                  # one of the two normals...
-_sec_cx = sum(p[0] for p in HULL_SEC) / len(HULL_SEC)
-_sec_cz = sum(p[1] for p in HULL_SEC) / len(HULL_SEC)
-if ((_CH_P0[0] + _ch_ex / 2 - _sec_cx) * _ch_nx
-        + (_CH_P0[1] + _ch_ez / 2 - _sec_cz) * _ch_nz) < 0:
-    _ch_nx, _ch_nz = -_ch_nx, -_ch_nz             # ...make it the OUTWARD one
-
-
-def _on_chine(v, u):
-    """Facet-local (proud, along-facet) -> model (X, Z)."""
-    return (_CH_P0[0] + u * _ch_ux + v * _ch_nx,
-            _CH_P0[1] + u * _ch_uz + v * _ch_nz)
-
-
-# Keep clear of the bevel at each end of the facet, plus a land.
-_fl_u0, _fl_u1 = CHAMFER + 1.0, CHINE_L - CHAMFER - 1.0
-_fin_c = (_fl_u0 + _fl_u1) / 2
-FIN_U = [_fin_c + (i - (FIN_N - 1) / 2) * (FIN_H + FIN_GAP) for i in range(FIN_N)]
-assert FIN_U[0] - FIN_H / 2 > _fl_u0 and FIN_U[-1] + FIN_H / 2 < _fl_u1, \
-    "ribs do not fit inside the flat part of the chine"
-
-
-def fins(y0, y1):
-    """The chine rib stack, as a solid, over a Y range. Each rib carries its own
-    bevel in section, so the ribs are printable, chamfered and on the cap
-    without a single OCCT chamfer."""
-    out = None
-    for uc in FIN_U:
-        u0, u1 = uc - FIN_H / 2, uc + FIN_H / 2
-        b = prism([_on_chine(-1.0, u0),                    # rooted inside
-                   _on_chine(FIN_PROUD - FIN_CH, u0),
-                   _on_chine(FIN_PROUD, u0 + FIN_CH),
-                   _on_chine(FIN_PROUD, u1 - FIN_CH),
-                   _on_chine(FIN_PROUD - FIN_CH, u1),
-                   _on_chine(-1.0, u1)], y0, y1)
-        out = b if out is None else out + b
-    return out
-
-
-# ⚠️ From CAP_D, not 0. The cap carries the ribs over its own length; running
-# them from 0 as well put 131 mm3 of the hull inside the cap.
-part += fins(CAP_D, OUT_L)
+# ★★ THE RIBS AND THE LOUVRES ARE BOTH GONE. They were two successive
+# attempts to stop the chine reading as one lazy blank face -- first cut
+# slots, then proud ribs. The tessellation retires the problem instead of
+# decorating it: there IS no 29 mm blank facet any more, because the chine is
+# now a chorded knee of five or six planes that each catch the light
+# differently. Applique on top of that would fight it.
 
 # ------------------------------------------------------------------ visor
 # ★ Built BEFORE the apertures, so the screen loft, the earpiece slot, the
@@ -1117,22 +1371,45 @@ FACE_DEPTH = 2.5           # how far the panel sinks
 # the hull. So it takes nothing out of the 4 mm compliant-pad relief -- its
 # arm-side edges lie exactly on the hull's own saddle.
 CAP_SEC_IN = inset(HULL_SEC, CAP_W)      # bore; TEN_D - CAP_W = CAP_CLR clear
+
+
+def sec_x(z, side):
+    """★ Where the SECTION actually is at height z, on `side` (+1 = the +X
+    half of the model). Everything about the snap -- dimple, nose, relief slot
+    -- used to be written against HULL_HW, which was fine while the flank was a
+    flat plane at exactly that X. The flank now BOWS OUT to FLANK_BULGE proud of
+    it, so a dome placed at HULL_HW sits buried 2.4 mm inside the wall: the cap
+    came out in three pieces and the fit check found 8.85 mm3 of interference.
+    Read the flank off the polygon instead."""
+    best = None
+    n = len(HULL_SEC)
+    for i in range(n):
+        (x0, z0), (x1, z1) = HULL_SEC[i], HULL_SEC[(i + 1) % n]
+        if (z0 - z) * (z1 - z) > 0 or abs(z1 - z0) < 1e-9:
+            continue
+        x = x0 + (x1 - x0) * (z - z0) / (z1 - z0)
+        if x * side <= 0:
+            continue
+        if best is None or x * side > best * side:
+            best = x
+    return HULL_HW * side if best is None else best
 _cap_below = bbox(-80, 80, -CAP_T - 1, CAP_D + 1, -80, HULL_BELT)
 
 # Flank Z spans, per side. ⚠️ HANDED -- the shallow flank is ~9 mm tall and the
 # deep one ~12, so the snap features are placed per flank, never mirrored.
-_sh_bot = arm_z(-SD * HULL_HW)
-if _sh_bot is None:
-    _sh_bot = HULL_Z_SHAL
+# ⚠️ The shallow flank now ends where it meets the CUFF, not where it happens
+# to cross the arm -- and the corner is a chorded knee, so the flat part of the
+# flank stops a good few mm above HULL_Z_SHAL. The dome has to sit on the flat.
+_sh_bot = HULL_Z_SHAL + 5.0
 # ⚠️ Midpoint of the FLAT flank, not of the whole flank: the belt's 3 mm bevel
 # eats the top of it, and a dome centred on the raw midpoint would sit half in
 # the bevel face.
 # ⚠️ ...and on the deep side, of the flank ABOVE the relief slot, because the
 # slot is what turns that flank into a cantilever. Below it the collar is stiff.
-DEEP_SLOT_Z0 = HULL_Z_DEEP + CHAMFER      # bottom of the flat deep flank
+DEEP_SLOT_Z0 = HULL_Z_DEEP + 6.0          # bottom of the flat deep flank
 DEEP_SLOT_Z1 = DEEP_SLOT_Z0 + CAP_SLOT_W
-FLANKS = ((-SD, (HULL_BELT - CHAMFER + _sh_bot) / 2),
-          (SD, (HULL_BELT - CHAMFER + DEEP_SLOT_Z1) / 2))
+FLANKS = ((-SD, (HULL_BELT - 5.0 + _sh_bot) / 2),
+          (SD, (HULL_BELT - 5.0 + DEEP_SLOT_Z1) / 2))
 
 # Dimples in the TENON's flanks now, not the tray's. TRUNCATED CONES, not
 # cylinders and not spheres: a cylinder presents a sharp edge square to the
@@ -1141,13 +1418,21 @@ FLANKS = ((-SD, (HULL_BELT - CHAMFER + _sh_bot) / 2),
 # -- removing the spheres took both parts from 378 broken faces to zero).
 for _sd, _zc in FLANKS:
     _sx = 1 if _sd > 0 else -1
-    part -= Pos(_sx * (HULL_HW - TEN_D + 0.2), CAP_BUMP_Y, _zc) \
+    # ⚠️ Rooted 1.2 mm OUTBOARD of the tenon face, not 0.2. The flank is a
+    # bowed curve now, so a cone whose base plane sits just off that curve
+    # grazes it tangentially a millimetre up and leaves a feather -- the wall
+    # check read 0.04 mm there. Start the cut clear of the surface entirely.
+    part -= Pos(sec_x(_zc, _sx) - _sx * (TEN_D - 1.2), CAP_BUMP_Y, _zc) \
         * Rot(0, -90 * _sx, 0) \
-        * Cone(CAP_BUMP_R, CAP_BUMP_R * 0.55, CAP_DIMPLE_D + 0.2,
+        * Cone(CAP_BUMP_R, CAP_BUMP_R * 0.55, CAP_DIMPLE_D + 1.2,
                align=(Align.CENTER, Align.CENTER, Align.MIN))
 
 # Collar: the wall between the tenon and the full section, below the belt.
-cap = (prism(HULL_SEC, 0.0, CAP_D) & _cap_below) \
+# ⚠️ ...and the collar STOPS ON THE CUFF, for the same reason the tenon does:
+# there is no room for a 2 mm wall plus a 2.3 mm rebate inside a 3 mm cuff. The
+# hull carries the cuff straight through the joint and the collar lands on its
+# shoulder with CAP_CLR of relief.
+cap = ((prism(HULL_SEC, 0.0, CAP_D) & _cap_below) - arm_cyl(R_CUFF + CAP_CLR)) \
     - prism(CAP_SEC_IN, -EPS, CAP_D + EPS)
 # End plate: the whole face -- hull section below, tray section above.
 cap += prism(HULL_SEC, -CAP_T, 0.0)
@@ -1157,7 +1442,6 @@ cap += bbox(-OUT_W / 2, OUT_W / 2, -CAP_T, 0.0, 0.0, OUT_H)
 # tray face and the guard grows out from behind it. That also retires the
 # height mismatch at the joint that his demo file still has.
 # ...and the deep-flank ribs, same profile as the hull's so they line through.
-cap += fins(-CAP_T, CAP_D)
 # ⚠️ The saddle runs through the cap too. Without this the plate would close
 # off the USB end of the arm channel and sit on the forearm.
 cap -= arm
@@ -1236,8 +1520,9 @@ cap -= bbox(-CABLE_W / 2, CABLE_X1, -CABLE_H - 1.0, EPS,
 # The deep side does need one slot -- there the collar wraps the flank into the
 # chine, and that fold is stiff enough to resist the 0.3 mm the dome has to
 # ride, so this frees the flank from it. It sits at the foot of the flat flank.
-cap -= bbox(SD * (HULL_HW - CAP_W) - 0.2 if SD > 0 else SD * HULL_HW - 0.2,
-            SD * HULL_HW + 0.2 if SD > 0 else SD * (HULL_HW - CAP_W) + 0.2,
+_slot_x = sec_x((DEEP_SLOT_Z0 + DEEP_SLOT_Z1) / 2, SD)
+cap -= bbox(min(_slot_x, _slot_x - SD * CAP_W) - 0.4,
+            max(_slot_x, _slot_x - SD * CAP_W) + 0.4,
             CAP_SLOT_ROOT, CAP_D + EPS,
             DEEP_SLOT_Z0, DEEP_SLOT_Z1)
 
@@ -1247,7 +1532,7 @@ cap -= bbox(SD * (HULL_HW - CAP_W) - 0.2 if SD > 0 else SD * HULL_HW - 0.2,
 # as long as the collar allows -- the strain at the root goes as 1/L^2.
 for _sd, _zc in FLANKS:
     _sx = 1 if _sd > 0 else -1
-    cap += Pos(_sx * (HULL_HW - CAP_W / 2), CAP_BUMP_Y, _zc) \
+    cap += Pos(sec_x(_zc, _sx) - _sx * (CAP_W / 2), CAP_BUMP_Y, _zc) \
         * Rot(0, -90 * _sx, 0) \
         * Cone(CAP_BUMP_R, CAP_BUMP_R * 0.5, CAP_W / 2 + 0.6,
                align=(Align.CENTER, Align.CENTER, Align.MIN))
@@ -1412,6 +1697,19 @@ _bb = part.bounding_box()
 print(f"outer      {_bb.size.X:.1f} W x {_bb.size.Y:.1f} L x {_bb.size.Z:.1f} H mm")
 print(f"tray       {OUT_W:.1f} x {OUT_L:.1f} x {OUT_H:.1f}")
 print(f"pocket     {POCK_W:.1f} x {POCK_L:.1f} x {POCK_D:.1f}")
+# ★ The section is now generated, not typed, so print what it came out as --
+# verify_bracer.py's probes are placed against these numbers and they have to
+# be readable without running a debugger.
+print(f"section    {len(HULL_SEC)} facets, widest |X| "
+      f"{max(abs(x) for x, _ in HULL_SEC):.2f}, "
+      f"deep {min(x for x, _ in HULL_SEC):.2f}, shallow "
+      f"{max(x for x, _ in HULL_SEC):.2f}")
+print(f"           shallow foot {SHAL_FOOT_TH:.1f} deg at "
+      f"({P_CUF_S[0]:.1f},{P_CUF_S[1]:.1f})  deep hem "
+      f"({TOE_X:.1f},{TOE_Z:.1f})  chine top ({P_CHI_D[0]:.1f},{P_CHI_D[1]:.1f})")
+for _z in (-8.0, -11.0, -14.0, -17.0):
+    print(f"           flank X at Z {_z:6.1f}:  deep {sec_x(_z, SD):7.2f}   "
+          f"shallow {sec_x(_z, -SD):7.2f}")
 print(f"hull drop  {SAG:.2f} mm deep side, {-HULL_Z_SHAL:.2f} shallow "
       f"(TILT={TILT}, ARM_R={ARM_R}, GAP={GAP})")
 print(f"volume     {part.volume/1000:.1f} cm3  ~= {part.volume/1000*1.27:.0f} g PETG")

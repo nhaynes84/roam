@@ -29,6 +29,7 @@ FLOOR, POCK_D, LIP_H = 2.2, 8.8, 2.4
 OUT_W, OUT_L, OUT_H = 75.1, 147.0, 13.4
 POCK_W = 70.3
 HULL_HW, TEN_D, HULL_BELT = 40.0, 2.3, -5.0
+SAG = 30.25
 GUARD_H, GUARD_HW = 15.0, 40.0
 PACK_T, PACK_W, PACK_L = 10.0, 54.0, 85.6
 PACK_Z1, PACK_Z0 = -3.62, -14.02
@@ -93,6 +94,10 @@ probes = [
     ("hand-end wall at centre",      (0.0, 145.8, FLOOR + 4), True),
     ("headphone jack notch",         (22.0, 145.8, FLOOR + 4), False),
     ("USB end open for insertion",   (0, 1.0, FLOOR + 4), False),
+    # ⚠️ Still empty, and it still matters: the button bore runs Z 4.6..8.6
+    # out to the tray wall, so hull standing outboard of it here would bury
+    # the plungers. The tessellated section is built with its top two points
+    # BURIED INSIDE the tray for exactly this reason.
     ("no hull above the belt line",  (39.0, 60.0, 6.0), False),
 
     # ------------------------------------------------------------ outer hull
@@ -104,12 +109,26 @@ probes = [
     # stands where 26 mm of curtain and a corner used to be, and it must stay
     # empty. That is the whole of the owner's "material at the bottom where
     # nothing sits" defect, expressed as a point.
-    ("hull skin, deep flank",        (-39.0, 60.0, -10.0), True),
-    ("outside the deep flank",       (-42.0, 60.0, -10.0), False),
+    # ★★ 2026-08-12, the low-poly/cuff pass. The flanks BOW OUT (FLANK_BULGE)
+    # and are chorded into planes, and the underside is a CUFF: the shell now
+    # leaves the arm at the same wrap angle on both sides instead of being
+    # sliced off by the cylinder on the shallow one. So these moved, and the
+    # ones that matter are the last four -- they are the owner's two complaints
+    # ("hard cuts sides", "a weird underbelly") written as points.
+    ("hull skin, deep flank",        (-42.5, 60.0, -10.0), True),
+    ("outside the deep flank",       (-45.0, 60.0, -10.0), False),
+    ("hull skin, shallow flank",     (40.5, 60.0, -10.0), True),
     ("★ old dead corner stays gone", (-38.0, 60.0, -30.0), False),
-    ("chine skin",                   (-35.5, 60.0, -19.2), True),
-    ("outside the chine",            (-34.5, 60.0, -22.5), False),
-    ("nothing below the toe",        (-12.5, 60.0, -33.0), False),
+    ("chine skin",                   (-38.0, 60.0, -19.0), True),
+    ("outside the chine",            (-42.0, 60.0, -19.0), False),
+    # ★ THE CUFF. The shallow side used to stop at 25 deg of wrap where the
+    # flank happened to cross the cylinder; it now carries on round to
+    # SHAL_WRAP = DEEP_WRAP and closes on a hem. If this reads empty the
+    # underside has gone back to being cut off flat.
+    ("★ shallow cuff wraps the arm",  (46.0, 60.0, -25.0), True),
+    ("nothing outboard of the cuff", (53.0, 60.0, -25.0), False),
+    ("cuff is solid, not shelled",   (45.0, 60.0, -24.0), True),
+    ("nothing below the hem",        (-12.5, 60.0, -33.0), False),
     ("hull cavity behind the flank", (-33.0, 60.0, -10.0), False),
     ("hull cavity, over the arm",    (0.0, 60.0, -18.0), False),
     ("arm-face skin under cavity",   (0.0, 60.0, -21.5), True),
@@ -136,10 +155,10 @@ probes = [
     # The nose steps IN by TEN_D below the belt so the cap's collar lands
     # flush. If the step is missing the cap stands proud again; if it is too
     # deep the collar rattles. Probed either side of the tenon's flank face.
-    ("tenon flank, deep side",       (-37.2, 3.0, -8.0), True),
-    ("collar space outside tenon",   (-39.0, 3.0, -8.0), False),
-    ("snap dimple in tenon flank",   (-37.4, 7.0, -10.61), False),
-    ("full section above the belt",  (-38.5, 3.0, -1.0), True),
+    ("tenon flank, deep side",       (-39.5, 3.0, -8.0), True),
+    ("collar space outside tenon",   (-41.5, 3.0, -8.0), False),
+    ("snap dimple in tenon flank",   (-40.6, 7.0, -10.11), False),
+    ("full section above the belt",  (-37.0, 3.0, -1.0), True),
 
     # ------------------------------------------------------- card slots
     ("card channel, mid",            (0.0, 40.0, -1.0), False),
@@ -153,9 +172,6 @@ probes = [
     # ⚠️ They live on the CHINE now, not the deep flank -- so they are neither
     # vertical nor at |X| = HULL_HW, and the probes have to be taken on the
     # facet. Points computed off TOE + u*(along) + v*(outward).
-    ("chine rib",                    (-23.6, 60.0, -26.0), True),
-    ("gap between the ribs",         (-26.6, 60.0, -24.6), False),
-    ("nothing beyond the ribs",      (-24.3, 60.0, -27.6), False),
     # The high guard: three-sided, screen sunk deep inside it.
     ("guard wall, deep/outboard",    (-39.0, 73.0, OUT_H + 6.0), True),
     ("guard wall near the crest",    (-37.5, 73.0, OUT_H + 12.6), True),
@@ -384,6 +400,80 @@ _where = "" if _p is None else f"  at ({_p[0]:6.1f},{_p[1]:6.1f},{_p[2]:6.1f})"
 print(f"  {'ok  ' if _dead_ok else 'FAIL'}  bracer shell                "
       f"{_d:5.1f} mm  (max {DEAD_BUDGET}){_where}")
 
+# ---------------------------------------------------- ★★ facet census
+# THE CHECK THIS PART DID NOT HAVE, and the one that encodes the owner's first
+# complaint -- "we still have hard cuts sides" -- as a number instead of an
+# opinion. A hard cut side IS a single large planar facet: the old flank was one
+# plane roughly 20 x 147 mm, about 2900 mm2, and no amount of chamfering its
+# edges changed what it read as. Low poly (ref/lowpoly-*.png) is the opposite
+# property: MANY planes, none of them dominant.
+#
+# So: cluster the outer-hull triangles into coplanar facets and assert
+#   * there are at least FACET_MIN of them -- the shell is tessellated at all;
+#   * none exceeds FACET_MAX_A -- no facet has grown back into a slab face.
+# ⚠️ Restricted to the HULL SKIN (below the belt, outside the payload box), so
+# the frozen tray face, the screen bezel and the visor cannot flatter or spoil
+# the count. Those are supposed to be flat.
+FACET_MIN = 40
+FACET_MAX_A = 900.0      # mm2 -- the old flank was ~2900
+
+
+def facets(mesh, keep):
+    """Coplanar-triangle clusters (area, normal, centroid) over a face filter."""
+    tri = mesh.triangles
+    cen = tri.mean(axis=1)
+    sel = keep(cen)
+    n = np.round(mesh.face_normals[sel], 3)
+    d = np.round(np.einsum("ij,ij->i", n, cen[sel]), 2)
+    key = {}
+    ar = mesh.area_faces[sel]
+    for i in range(len(n)):
+        k = (n[i][0], n[i][1], n[i][2], d[i])
+        e = key.setdefault(k, [0.0, n[i], np.zeros(3), 0.0])
+        e[0] += ar[i]
+        e[2] += cen[sel][i] * ar[i]
+    return [(v[0], v[1], v[2] / v[0]) for v in key.values()]
+
+
+print("\n=== facet census (the outer hull is a low-poly shell) ===")
+_hull_keep = lambda c: (c[:, 2] < HULL_BELT - 0.5) & (
+    (np.abs(c[:, 0]) > PAYLOAD_HW + 4.0) | (c[:, 2] < PAYLOAD_Z - 1.0))
+_fs = [f for f in facets(_parts[0], _hull_keep) if f[0] >= 12.0]
+_fs.sort(key=lambda f: -f[0])
+_n_ok = len(_fs) >= FACET_MIN
+_a_ok = (not _fs) or _fs[0][0] <= FACET_MAX_A
+bad += not _n_ok
+bad += not _a_ok
+print(f"  {'ok  ' if _n_ok else 'FAIL'}  facets over 12 mm2        {len(_fs):4d}  "
+      f"(min {FACET_MIN})")
+if _fs:
+    print(f"  {'ok  ' if _a_ok else 'FAIL'}  largest hull facet      {_fs[0][0]:6.0f} mm2  "
+          f"(max {FACET_MAX_A:.0f})  at "
+          f"({_fs[0][2][0]:6.1f},{_fs[0][2][1]:6.1f},{_fs[0][2][2]:6.1f})")
+    print(f"        median facet {np.median([f[0] for f in _fs]):6.0f} mm2, "
+          f"total skin {sum(f[0] for f in _fs)/100:5.1f} cm2")
+
+# ------------------------------------------------- ★ cuff wrap symmetry
+# The second complaint -- "a weird underbelly" -- was the shell being sliced off
+# by the arm at 25 deg on one side and wrapped round it to 40 on the other. The
+# fix is that both edges of the arm opening now leave the arm at the SAME angle,
+# so measure the angle rather than trusting the source. Taken off the mesh: the
+# outermost surface point on each side of the arm's crown, below the belt.
+print("\n=== cuff wrap (the underside embraces the arm) ===")
+WRAP_TARGET, WRAP_TOL = 40.0, 6.0
+_pts, _ = trimesh.sample.sample_surface_even(_parts[0], 40000)
+_pts = _pts[_pts[:, 2] < PAYLOAD_Z]
+_r = np.hypot(_pts[:, 0] - ARM_CX, _pts[:, 2] - ARM_CZ)
+_th = np.degrees(np.arctan2(_pts[:, 0] - ARM_CX, _pts[:, 2] - ARM_CZ))
+_near = np.abs(_r - ARM_CUT_R) < 1.5          # on the arm saddle itself
+for _name, _sgn in (("deep (outboard)", -1), ("shallow (inboard)", 1)):
+    _sel = _near & (np.sign(_th) == _sgn)
+    _w = np.percentile(np.abs(_th[_sel]), 99.0) if _sel.any() else 0.0
+    _ok = abs(_w - WRAP_TARGET) <= WRAP_TOL
+    bad += not _ok
+    print(f"  {'ok  ' if _ok else 'FAIL'}  {_name:<20} {_w:5.1f} deg of wrap "
+          f"(target {WRAP_TARGET:.0f} +/- {WRAP_TOL:.0f})")
+
 # ------------------------------------------------------- chamfer audit
 # ★ "Find the edges that got missed" -- systematically, off the mesh, rather
 # than by eye off a render. Every exterior CONVEX crease sharper than
@@ -437,6 +527,8 @@ def classify(mid, part_name):
             return "strap channel / arm face"
         if abs(z + 0.4) < 0.35:
             return "card channel mouth + rails"
+        if abs(z) < 0.35 and abs(abs(x) - OUT_W / 2) < 1.5:
+            return "tray/hull waist seam -- frozen wall meets the shell"
         if abs(z - FLOOR) < 0.3:
             return "floor vent rims (inside the pocket)"
         if abs(x) > 34.0 and z < 0.0:
@@ -571,6 +663,7 @@ bad += not path_ok
 print(f"  {'ok  ' if path_ok else 'FAIL'}  worst on the slide path {worst:6.2f} mm3 "
       f"at y{worst_at:+.1f}  (budget {DOME_BUDGET})")
 
+UNSUPPORTED_BUDGET = 40.0    # cm2, standing on the jack end
 print("\n=== print orientation study (45 deg support threshold) ===")
 orients = {
     "pocket up (as modelled)": np.eye(4),
@@ -599,6 +692,15 @@ for name, T in orients.items():
     print(f"  {name:<26} unsupported {a[need].sum()/100:7.1f} cm2   "
           f"bed contact {bed_area/100:5.1f} cm2   "
           f"height {q.bounds[1][2]-zmin:5.1f} mm")
+    if name.startswith("standing on jack"):
+        # ★ ASSERTED, not just printed. A tessellated shell can only stay
+        # support-free while the station-to-station radius change is small next
+        # to the station spacing; this is the number that would move if that
+        # ever stopped being true.
+        _u_ok = a[need].sum() / 100 <= UNSUPPORTED_BUDGET
+        bad += not _u_ok
+        print(f"  {'ok  ' if _u_ok else 'FAIL'}  unsupported area within budget "
+              f"({UNSUPPORTED_BUDGET:.0f} cm2)")
     if name.startswith("standing on jack") and need.any():
         # ★ Name the worst face, not just the total. "27 cm2 of overhang" is
         # not actionable; "the guard's hand ramp, 4.9 cm2 at 44 deg" is.
