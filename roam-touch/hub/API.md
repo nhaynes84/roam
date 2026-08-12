@@ -1,6 +1,6 @@
 # ROAM Touch hub — client contract
 
-Version `1.2.0`, protocol `1`. This document is the contract the Android client is
+Version `1.3.0`, protocol `1`. This document is the contract the Android client is
 built against. If the code and this file disagree, that is a bug in one of them —
 say so rather than guessing.
 
@@ -121,6 +121,7 @@ the TTS and the panel say the same thing.
     caveat rather than reading it out as the answer.
   * `truncated_from` — only for a pathological reply beyond the **256 KiB storage
     rail**; the stored body then ends with `… [truncated]`.
+  * `echo_of` — **receipts only.** See below.
 * `archived` — soft-deleted. Only ever `true` in responses you explicitly asked
   for with `include_archived=true`.
 
@@ -130,7 +131,7 @@ rather than dropping it.
 | kind | meaning |
 |---|---|
 | `sent` | the wearer sent this text to the channel (`body` = the text) |
-| `receipt` | a prompt was submitted (`body` = the prompt, when the hook knows it) |
+| `receipt` | a prompt was submitted (`body` = the prompt, when the hook knows it). `meta.echo_of` marks the ones that are your own `sent` coming back — see below |
 | `outcome` | the agent finished (`body` = **what it said**, not "finished") |
 | `notice` | a tool said something to the wearer (`POST /notify`; `body` = the message). Not part of the conversation: it never makes a channel `working` and never moves `last_input_source`. |
 | `opened` | the hub first saw this pane (`body` = its label) |
@@ -138,6 +139,37 @@ rather than dropping it.
 | `note` | free-form note |
 | `control` | an interrupt was issued (`body` = `escape` \| `interrupt`) |
 | `error` | a send failed (`meta.attempted` = what was not typed) |
+
+### ★ `meta.echo_of`: one thing he said, one entry
+
+`POST /channels/{pane}/send` types the text into the tmux pane, and typing into
+the pane is exactly what fires `UserPromptSubmit`. So every message sent from
+ROAM comes back a moment later as a `receipt` with the same body — the same
+sentence, twice, one second apart.
+
+The hub recognises that echo (a `sent` on this pane with matching text, inside
+`ROAM_HUB_ECHO_WINDOW_S`, default 60 s) and stamps the receipt with the id of
+the `sent` it duplicates:
+
+```json
+{"id": 341, "kind": "receipt", "body": "Not done yet.",
+ "meta": {"source": "claude-hook", "echo_of": 340}}
+```
+
+* **`echo_of` present** — this is not a new message. It is the confirmation
+  that event `echo_of` reached the pane. Render the `sent` **once**, moved to a
+  delivered state; do not draw a second row. `echo_of` always names a `sent` on
+  the same channel, and always an id lower than this event's.
+* **`echo_of` absent** — he typed this at the keyboard. ⚠️ The receipt is then
+  the *only* record that the message exists, so it must render as a message in
+  its own right. **Never suppress receipts as a class.**
+
+If the referenced `sent` is not in the thread you hold (a window that starts
+after it), fall back to rendering the receipt on its own — a message shown
+twice is a nuisance, a message shown zero times is a lie.
+
+The same mark keeps the search index honest: an echo is the sentence the ledger
+already stores as a `sent`, so it is indexed once.
 
 ### Channel
 
@@ -261,9 +293,9 @@ because it read 13.2 hours idle while he was actively typing over SSH.
 ### `GET /health` — no auth
 
 ```json
-{"ok": true, "service": "roam-hub", "version": "1.2.0", "protocol": 1,
+{"ok": true, "service": "roam-hub", "version": "1.3.0", "protocol": 1,
  "uptime_s": 2.15,
- "build": {"version": "1.2.0", "protocol": 1, "commit": "6229cdb", "schema": 5,
+ "build": {"version": "1.3.0", "protocol": 1, "commit": "6229cdb", "schema": 5,
            "code_mtime": 1786520867.4}}
 ```
 
@@ -404,6 +436,9 @@ something into a channel thread.
   `summary` and applies the 16 KiB cap itself; do not send a `summary`.
 * Returns `201` with `{"event": Event}` and pushes it to every WebSocket client.
 * If the pane is unknown to the hub, the channel is created first.
+* A `receipt` that matches a recent `send` on this pane is the hub's own typing
+  coming back; the stored event carries `meta.echo_of` (see *Event*). Post the
+  prompt text and let the hub decide — do not try to filter echoes yourself.
 
 ### ★ `POST /notify` — "tell the wearer this"
 

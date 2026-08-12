@@ -712,6 +712,60 @@ def test_the_hook_echo_of_an_app_message_does_not_steal_the_conversation(
     assert outcome["coverage"]["covered"] is False
 
 
+def test_the_echo_receipt_says_which_send_it_duplicates(client, auth):
+    """One thing he said, one entry -- so the echo has to name its original.
+
+    The hub already recognises the echo; without saying so on the event, every
+    consumer renders the same sentence twice ("YOU" and "PROMPT") and the
+    search index carries it twice.
+    """
+    sent = client.post(
+        "/channels/0/send", json={"text": "deploy it"}, headers=auth
+    ).json()["event"]
+    receipt = client.post(
+        "/events",
+        json={"pane": "%0", "kind": "receipt", "body": "deploy it"},
+        headers=auth,
+    ).json()["event"]
+    assert receipt["meta"]["echo_of"] == sent["id"]
+
+
+def test_a_prompt_typed_at_the_keyboard_is_nobody_s_echo(client, auth):
+    """⚠️ The only record that this message exists. It is never an echo."""
+    client.post("/channels/0/send", json={"text": "deploy it"}, headers=auth)
+    receipt = client.post(
+        "/events",
+        json={"pane": "%0", "kind": "receipt", "body": "actually, hold on"},
+        headers=auth,
+    ).json()["event"]
+    assert "echo_of" not in receipt["meta"]
+
+
+def test_an_echo_outside_the_window_is_a_prompt_he_retyped(client, auth, settings):
+    """Same text, but long after the send -- he typed it himself this time."""
+    client.post("/channels/0/send", json={"text": "again"}, headers=auth)
+    settings.echo_window_s = 0.0
+    receipt = client.post(
+        "/events", json={"pane": "%0", "kind": "receipt", "body": "again"}, headers=auth
+    ).json()["event"]
+    assert "echo_of" not in receipt["meta"]
+
+
+def test_the_echo_mark_survives_into_history(client, auth):
+    """The client collapses on a stored field, not on a live stream frame."""
+    sent = client.post(
+        "/channels/0/send", json={"text": "deploy it"}, headers=auth
+    ).json()["event"]
+    client.post(
+        "/events",
+        json={"pane": "%0", "kind": "receipt", "body": "deploy it"},
+        headers=auth,
+    )
+    events = client.get("/channels/0/history", headers=auth).json()["events"]
+    echo = [e for e in events if e["kind"] == "receipt"][-1]
+    assert echo["meta"]["echo_of"] == sent["id"]
+
+
 def test_a_channel_switches_source_mid_conversation(client, auth, store):
     """He answers from the laptop; the conversation moves back to tmux."""
     client.post("/channels/0/send", json={"text": "from the phone"}, headers=auth)

@@ -57,7 +57,7 @@ from store import (
 from transcript import INLINE_BODY_CHARS
 
 HUB_DIR = Path(__file__).resolve().parent
-HUB_VERSION = "1.2.0"
+HUB_VERSION = "1.3.0"
 PROTOCOL_VERSION = 1
 
 #: WebSocket frames a subscriber may fall behind by before we cut it loose and
@@ -505,7 +505,7 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
     def _publish(message: dict[str, Any]) -> None:
         app.state.broadcaster.publish(message)
 
-    def _note_prompt_origin(st: Store, pane_id: str, prompt: str) -> None:
+    def _note_prompt_origin(st: Store, pane_id: str, prompt: str) -> int | None:
         """A prompt was submitted in this pane. Was it him, or was it us?
 
         The `UserPromptSubmit` hook fires either way -- when he types at the
@@ -516,6 +516,15 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
 
         So: a receipt whose text matches the message we just sent is that echo,
         and changes nothing. Anything else is him typing.
+
+        ★ Returns **the id of the `sent` it echoes**, or None when he typed it.
+        That answer is the same question two other places were asking badly:
+        the thread drew the sentence twice (`YOU`, then `PROMPT`) and the
+        search index would have embedded it twice. Deciding it once, here, and
+        stamping it on the event (`meta.echo_of`) means one thing he said is
+        one entry everywhere -- and, crucially, a receipt with **no** mark is
+        still the only record that a keyboard prompt happened, so it keeps
+        rendering. Nothing suppresses receipts as a class.
 
         Edge case, accepted: typing the *same text by hand* within the echo
         window keeps the channel on `app` and produces one redundant
@@ -528,9 +537,12 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
             if event.kind != EventKind.SENT.value or event.ts < cutoff:
                 continue
             if not typed or event.body.strip() == typed:
-                return  # our own send coming back; the conversation stays put
+                # Our own send coming back: the conversation stays put, and the
+                # event names the message it duplicates.
+                return event.id
             break
         st.set_channel_input(pane_id, INPUT_TMUX)
+        return None
 
     def _coverage_for(pane_id: str) -> dict[str, Any]:
         """Should an event on this channel reach his arm? Decided **now**, and
@@ -896,9 +908,12 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
                 live.label if live else pane_id,
                 live.session if live else "",
             )
+        meta = payload.meta
         if payload.kind == EventKind.RECEIPT.value:
-            _note_prompt_origin(st, pane_id, payload.body)
-        event = st.append(pane_id, payload.kind, payload.body, payload.meta)
+            echo_of = _note_prompt_origin(st, pane_id, payload.body)
+            if echo_of is not None:
+                meta = {**(meta or {}), "echo_of": echo_of}
+        event = st.append(pane_id, payload.kind, payload.body, meta)
         _publish_event(event)
         return {"event": event.to_dict()}
 

@@ -138,7 +138,12 @@ missed, pass over what he watched arrive. Coverage governs **notification only**
 
 Sending from the app types into the pane, which fires the same hook, so the hub
 recognises that echo (same text, inside `ROAM_HUB_ECHO_WINDOW_S`) and does not
-let it flip the channel back to the keyboard.
+let it flip the channel back to the keyboard. It also **says so on the event**:
+the receipt carries `meta.echo_of` = the id of the `sent` it duplicates, so the
+thread draws one entry for one thing he said and the search index embeds the
+sentence once. ⚠️ A receipt *without* that mark is a prompt he typed at the
+keyboard and the only record it exists — receipts are never suppressed as a
+class.
 
 ⚠️ **No recorded source means notify.** A fresh pane, an agent that speaks first,
 a failed lookup — a missed message is worse than a redundant one.

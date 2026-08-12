@@ -35,7 +35,9 @@ LEDGER_DB = HUB_DIR / "hub.sqlite"
 SESSION_DIR = Path.home() / ".claude/projects/-Users-talos"
 
 #: Event kinds worth indexing. `opened`/`closed` are bookkeeping and `receipt`
-#: duplicates the prompt that the session transcript already carries.
+#: duplicates the prompt that the session transcript already carries -- and an
+#: echo receipt (`meta.echo_of`, see API.md) duplicates the `sent` in this very
+#: table, so the sentence would be embedded twice out of one utterance.
 LEDGER_KINDS = ("sent", "outcome", "error", "note", "notice")
 
 #: Minimum characters before a chunk is worth indexing.
