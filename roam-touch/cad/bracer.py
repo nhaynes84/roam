@@ -59,12 +59,18 @@ ARM_R = 45.0         # nominal forearm radius, mm (90 mm dia)
 GAP = 4.0            # air gap between arm and tray underside, at the crown
 FOAM = 4.0           # compliant pad thickness on EVERY rib face -- see below
 RIB_W = 62.0         # rib span across the arm
-RIB_T = 14.0         # rib thickness along the arm
+RIB_T = 28.0         # rib thickness along the arm -- wide enough to host the
+                     # strap channel, and more contact area is more comfortable
 RIB_Y = (34.0, 112.0)  # rib centres, from the elbow (open) end
 
-WING = 8.0           # strap-anchor flange, each side
-WING_T = 4.0
-SLOT_L, SLOT_W = 26.0, 3.6   # for 25 mm webbing
+CAP_D = 10.0         # end-cap slip depth
+# Strap runs in a channel on the UNDERSIDE of each rib, not on side flanges.
+# Flanges made the device 91 mm wide for no structural reason and were also
+# what the end cap collided with. This keeps the whole thing tray-width.
+STRAP_W = 26.0       # channel width along the arm, for 25 mm webbing
+STRAP_D = 2.2        # channel depth into the rib's arm face
+BAR_X = 20.0         # retaining bars, either side of centre
+BAR_W = 6.0
 
 JACK_W = 22.0        # 3.5 mm jack notch (sailfish jack is on the TOP edge)
 
@@ -118,8 +124,6 @@ ARM_AXIS_Z = -(ARM_R + GAP + FOAM)
 # how far the ribs hang below the tray at their outer tips
 SAG = -(ARM_AXIS_Z + math.sqrt(ARM_CUT_R ** 2 - (RIB_W / 2) ** 2))
 
-WING_X0 = OUT_W / 2                # wings run from the tray wall outward
-WING_X1 = OUT_W / 2 + WING
 
 # --------------------------------------- SVG face coords -> model coords
 # The phone sits with its TOP edge (headphone jack) at the hand end.
@@ -145,9 +149,6 @@ def bbox(x0, x1, y0, y1, z0, z1):
 # Tray body: Y = 0 at the elbow (open) end, Y = OUT_L at the hand end.
 part = bbox(-OUT_W / 2, OUT_W / 2, 0, OUT_L, 0, OUT_H)
 
-# Strap wings, both sides, full length
-part += bbox(-WING_X1, -WING_X0, 0, OUT_L, 0, WING_T)
-part += bbox(WING_X0, WING_X1, 0, OUT_L, 0, WING_T)
 
 # Saddle ribs
 for y in RIB_Y:
@@ -157,6 +158,22 @@ for y in RIB_Y:
 arm = Pos(0, OUT_L / 2, ARM_AXIS_Z) * Rot(90, 0, 0) * Cylinder(
     ARM_CUT_R, OUT_L + 60
 )
+part -= arm
+
+# Strap channel: a second, larger cylinder over just the rib's centre band
+# carves a groove into each rib's arm-facing face. The webbing lies in there,
+# between rib and arm, and wraps the forearm -- no flanges, no threading.
+for y in RIB_Y:
+    part -= Pos(0, y, ARM_AXIS_Z) * Rot(90, 0, 0) * Cylinder(
+        ARM_CUT_R + STRAP_D, STRAP_W)
+
+# Retaining bars across the channel so the strap cannot fall out when it is
+# off your arm. Trimmed back to the arm surface by re-cutting the arm after.
+for y in RIB_Y:
+    for sx in (-1, 1):
+        part += bbox(sx * BAR_X - BAR_W / 2, sx * BAR_X + BAR_W / 2,
+                     y - STRAP_W / 2, y + STRAP_W / 2,
+                     -SAG - 1, 0)
 part -= arm
 
 # Phone pocket -- runs out the elbow end so the phone slides in
@@ -236,15 +253,6 @@ for (yc, ln) in ((73.0, 50.0), (135.0, 18.0)):
     vent = extrude(RectangleRounded(52.0, ln, VENT_R), amount=FLOOR + 4)
     part -= Pos(0, yc, -2) * vent
 
-# Strap slots, one pair per rib
-for y in RIB_Y:
-    for sx in (-1, 1):
-        cx = sx * (WING_X0 + WING / 2)
-        part -= bbox(
-            cx - SLOT_W / 2, cx + SLOT_W / 2,
-            y - SLOT_L / 2, y + SLOT_L / 2,
-            -2, WING_T + 2,
-        )
 
 # ------------------------------------------------------- elbow end cap
 # The phone slides in at the elbow end, so without this it can slide out --
@@ -256,36 +264,81 @@ for y in RIB_Y:
 # ⚠️ USB-C is on this same end, so the cap carries a cable aperture. Without
 # it you would unclip the cap every time you charged, which is how a
 # removable part becomes a lost part.
-CAP_D = 10.0         # how far it slips over the tray
 CAP_W = 2.0          # cap side wall
 CAP_T = 2.4          # cap end plate
 CAP_CLR = 0.30       # slip fit over the tray
-CAP_BUMP = 0.6       # snap bump / dimple depth
-CAP_BUMP_Y = 6.5     # bump centre, measured into the cap
+CAP_BUMP_R = 1.6     # snap dome radius
+CAP_DIMPLE_D = 0.7   # how deep the dome sinks into the tray wall
+CAP_BUMP_Y = 5.0     # dome centre. ⚠️ Must sit clear of the slot ends (7.5) --
+# a dome overrunning the slot end makes a non-manifold shell there.
+# The cap walls are stiff (2 mm PETG, braced by the end plate), so the domes
+# have to sit on cantilever TONGUES or nothing can flex and the cap will not
+# go on -- which is exactly what the first version got wrong.
+CAP_TONGUE_H = 7.0   # tongue height, Z
+CAP_SLOT_W = 1.4     # relief slot around it
 USB_W, USB_H = 13.0, 6.5   # clears a plug's overmould, not just the shell
+# ★ Flare the cable aperture out on the OUTER face and taper it down to size.
+# The end plate is only CAP_T thick, so a plain rectangular hole means only a
+# slim cable head ever reaches the port -- a funnel lets fat overmoulds seat,
+# and it reads as a designed feature instead of a punched hole.
+USB_FLARE = 4.0
 
-# dimples in the tray's outer side walls for the cap to snap into
+# Dimples in the tray's outer side walls. TRUNCATED CONES, not cylinders and
+# not spheres: a cylinder presents a sharp edge square to the travel direction
+# and will not go on at all, while a sphere rams a curved surface into a flat
+# one and OCCT emits a non-manifold shell there (verified -- removing the
+# spheres took both parts from 378 broken faces to zero). A cone gives the
+# same camming ramp out of faces the kernel handles cleanly.
 for _sx in (-1, 1):
-    part -= Pos(_sx * OUT_W / 2, CAP_BUMP_Y, OUT_H / 2) * Rot(0, 90, 0) * Cylinder(
-        3.2, 2 * CAP_BUMP, align=(Align.CENTER, Align.CENTER, Align.CENTER)
-    )
+    part -= Pos(_sx * (OUT_W / 2 + 0.2), CAP_BUMP_Y, OUT_H / 2) \
+        * Rot(0, -90 * _sx, 0) \
+        * Cone(1.8, 1.0, CAP_DIMPLE_D + 0.2,
+               align=(Align.CENTER, Align.CENTER, Align.MIN))
 
 cap = bbox(-(OUT_W / 2 + CAP_CLR + CAP_W), OUT_W / 2 + CAP_CLR + CAP_W,
            -CAP_T, CAP_D, -CAP_CLR, OUT_H + CAP_CLR + CAP_W)
 # hollow it out to a U that slides over the tray
 cap -= bbox(-(OUT_W / 2 + CAP_CLR), OUT_W / 2 + CAP_CLR,
             -EPS, CAP_D + EPS, -CAP_CLR - EPS, OUT_H + CAP_CLR)
-# cable aperture through the end plate
+# cable aperture through the end plate, plus the outer flare
 cap -= bbox(-USB_W / 2, USB_W / 2, -CAP_T - EPS, CAP_D + EPS,
             FLOOR - 1.0, FLOOR - 1.0 + USB_H)
-# finger notches so it can be pulled off
+_taper = math.degrees(math.atan(USB_FLARE / CAP_T))
+cap -= Pos(0, -CAP_T - EPS, FLOOR - 1.0 + USB_H / 2) * Rot(-90, 0, 0) * extrude(
+    Rectangle(USB_W + 2 * USB_FLARE, USB_H + 2 * USB_FLARE),
+    amount=CAP_T + 2 * EPS, taper=_taper)
+# No finger notches. The first attempt put them at the open end on the centre
+# line, which is exactly where the tongues root -- they cut the tongues clean
+# off and the cap came out as five loose pieces. They are not needed either:
+# the snap domes stand proud on the OUTSIDE too, so the grip point and the
+# press-here-to-release point are the same feature.
+# Relief slots that turn each side wall into a cantilever tongue, rooted at
+# the OPEN end so the tip near the end plate is the compliant bit. Without
+# these the wall is a plate braced on three sides and cannot open at all.
+_tz = CAP_TONGUE_H / 2 + CAP_SLOT_W / 2
 for _sx in (-1, 1):
-    cap -= Pos(_sx * (OUT_W / 2 + CAP_CLR + CAP_W), CAP_D, OUT_H / 2) * Rot(0, 90, 0) \
-        * Cylinder(4.0, 2 * CAP_W + 1, align=(Align.CENTER, Align.CENTER, Align.CENTER))
-# snap bumps on the inner faces
+    xw0 = _sx * (OUT_W / 2 + CAP_CLR) if _sx > 0 else _sx * (OUT_W / 2 + CAP_CLR + CAP_W)
+    xw1 = _sx * (OUT_W / 2 + CAP_CLR + CAP_W) if _sx > 0 else _sx * (OUT_W / 2 + CAP_CLR)
+    for _sz in (-1, 1):                       # slot above and below the tongue
+        # ⚠️ starts at Y=0, NOT at the plate face -- running it through the end
+        # plate saws the plate into strips and the cap falls into five pieces.
+        cap -= bbox(min(xw0, xw1) - EPS, max(xw0, xw1) + EPS,
+                    0.0, CAP_D - 2.5,
+                    OUT_H / 2 + _sz * _tz - CAP_SLOT_W / 2,
+                    OUT_H / 2 + _sz * _tz + CAP_SLOT_W / 2)
+    # and free the tongue from the end plate, or it is built in at both ends
+    cap -= bbox(min(xw0, xw1) - EPS, max(xw0, xw1) + EPS,
+                0.0, CAP_SLOT_W,
+                OUT_H / 2 - _tz, OUT_H / 2 + _tz)
+
+# Snap noses on the tongues: cones rooted inside the wall (never coplanar with
+# a face) and protruding 0.6 mm past the inner surface, so they stand 0.3 mm
+# proud of the tray and seat into its dimples.
 for _sx in (-1, 1):
-    cap += Pos(_sx * (OUT_W / 2 + CAP_CLR), CAP_BUMP_Y, OUT_H / 2) * Rot(0, 90, 0) \
-        * Cylinder(3.0, 2 * CAP_BUMP, align=(Align.CENTER, Align.CENTER, Align.CENTER))
+    cap += Pos(_sx * (OUT_W / 2 + CAP_CLR + CAP_W / 2), CAP_BUMP_Y, OUT_H / 2) \
+        * Rot(0, -90 * _sx, 0) \
+        * Cone(1.8, 0.9, CAP_W / 2 + 0.6,
+               align=(Align.CENTER, Align.CENTER, Align.MIN))
 
 # ----------------------------------------------------------------- export
 out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "out")
@@ -297,7 +350,7 @@ export_stl(cap, os.path.join(out, "bracer_endcap.stl"))
 print(f"end cap    {OUT_W + 2*(CAP_CLR+CAP_W):.1f} W x {CAP_D + CAP_T:.1f} L "
       f"x {OUT_H + CAP_CLR + CAP_W:.1f} H mm  ~= {cap.volume/1000*1.27:.0f} g")
 
-print(f"outer      {OUT_W + 2*WING:.1f} W x {OUT_L:.1f} L x {OUT_H + SAG:.1f} H mm")
+print(f"outer      {OUT_W:.1f} W x {OUT_L:.1f} L x {OUT_H + SAG:.1f} H mm")
 print(f"tray       {OUT_W:.1f} x {OUT_L:.1f} x {OUT_H:.1f}")
 print(f"pocket     {POCK_W:.1f} x {POCK_L:.1f} x {POCK_D:.1f}")
 print(f"rib drop   {SAG:.2f} mm  (ARM_R={ARM_R}, GAP={GAP}, RIB_W={RIB_W})")

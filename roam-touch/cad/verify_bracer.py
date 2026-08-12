@@ -36,15 +36,18 @@ probes = [
     # coin toss, which is worse than no test at all.
     ("volume plunger in its bore",   (36.3, 80.0, FLOOR + 4), True),
     ("power plunger in its bore",    (36.3, 102.0, FLOOR + 4), True),
-    ("cap snap dimple, right wall",  (37.3, 6.5, OUT_H / 2), False),
+    ("cap snap dimple, right wall",  (37.3, 5.0, OUT_H / 2), False),
     ("wall between the two buttons", (36.3, 94.0, FLOOR + 4), True),
     ("wall below volume opening",    (36.3, 60.0, FLOOR + 4), True),
     ("floor vent",                   (0, 73, 1.0), False),
-    ("rib material at centre",       (0, 34, -2.0), True),
+    ("rib material above channel",   (0, 34, -1.0), True),
     ("arm void under rib",           (0, 34, -8.0), False),
     ("open span between ribs",       (0, 73, -2.0), False),
-    ("strap slot",                   (WING_X0 + 4.0, 34, 2.0), False),
-    ("wing beside strap slot",       (WING_X0 + 0.9, 34, 2.0), True),
+    # Strap now runs in a channel under each rib instead of through side
+    # flanges, so the device is tray-width. The bars bridge that channel.
+    ("strap channel under rib",      (10.0, 34, -4.0), False),
+    ("retaining bar across channel", (20.0, 34, -7.0), True),
+    ("no flange where wings were",   (40.0, 34, 2.0), False),
     ("retaining lip over bezel",     (34.0, 70, Z_FACE + 1.0), True),
     ("screen window (clear)",        (0, 70, Z_FACE + 1.0), False),
     # The bezel: face material above the phone, outside the display aperture.
