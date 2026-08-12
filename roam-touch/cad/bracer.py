@@ -66,8 +66,21 @@ WING = 8.0           # strap-anchor flange, each side
 WING_T = 4.0
 SLOT_L, SLOT_W = 26.0, 3.6   # for 25 mm webbing
 
-BTN_Y0, BTN_Y1 = 25.0, 80.0  # side relief for power + volume, from hand end
 JACK_W = 22.0        # 3.5 mm jack notch (sailfish jack is on the TOP edge)
+
+# ------------------------------------------------- phone face features
+# Taken from the scale drawing File:Pixel_(2016).svg on Wikimedia Commons,
+# which is authored at 1 SVG unit = 1 mm and whose outline matches the spec
+# body exactly (69.5 x 143.8). Its internal features are traced, so treat
+# them as +/-1 mm and check against the real phone once a print exists.
+# SVG origin is the top-left of the FACE, y increasing toward the USB-C end.
+FEAT_TOL = 0.6       # opening margin, absorbs the tracing error
+SCREEN_SVG = (3.32, 14.30, 66.12, 127.77)   # x0,y0,x1,y1 -- black display area
+EARPIECE_SVG = (27.10, 5.44, 40.78, 6.51)
+PROX_SVG = (31.49, 10.70, 36.38, 12.65)     # proximity + ambient light
+CAM_SVG = (11.22, 5.78, 1.50)               # cx, cy, r -- front camera
+PWR_SVG = (37.11, 46.01)                    # power button, y range, right edge
+VOL_SVG = (55.16, 72.91)                    # volume rocker, y range, right edge
 VENT_R = 6.0
 EPS = 0.1
 
@@ -94,6 +107,18 @@ SAG = -(ARM_AXIS_Z + math.sqrt(ARM_CUT_R ** 2 - (RIB_W / 2) ** 2))
 
 WING_X0 = OUT_W / 2                # wings run from the tray wall outward
 WING_X1 = OUT_W / 2 + WING
+
+# --------------------------------------- SVG face coords -> model coords
+# The phone sits with its TOP edge (headphone jack) at the hand end.
+PHONE_TOP_Y = POCK_L - CLR         # Y of the phone's top edge in the tray
+def fx(x):  return x - PH_W / 2    # SVG x -> model X (centred)
+def fy(y):  return PHONE_TOP_Y - y  # SVG y -> model Y (elbow = 0)
+
+# Screen aperture: the housing bezel closes down to the black display area,
+# opened by FEAT_TOL so a tracing error can never clip live pixels.
+_sx0, _sy0, _sx1, _sy1 = SCREEN_SVG
+WIN_X = max(abs(fx(_sx0)), abs(fx(_sx1))) + FEAT_TOL
+WIN_Y0, WIN_Y1 = fy(_sy1) - FEAT_TOL, fy(_sy0) + FEAT_TOL
 
 
 def bbox(x0, x1, y0, y1, z0, z1):
@@ -124,21 +149,39 @@ part -= arm
 # Phone pocket -- runs out the elbow end so the phone slides in
 part -= bbox(-POCK_W / 2, POCK_W / 2, -10, POCK_L, FLOOR, FLOOR + POCK_D)
 
-# Screen window: inset from the pocket, leaving the retaining lip
-part -= bbox(
-    -(POCK_W / 2 - LIP_SIDE), POCK_W / 2 - LIP_SIDE,
-    -10, POCK_L - LIP_END,
-    FLOOR + POCK_D, OUT_H + 10,
+# Screen aperture. This is the bezel: the face closes down to the display
+# instead of exposing the phone's own bezel, so the housing reads as the
+# device rather than as a tray with a phone in it.
+part -= bbox(-WIN_X, WIN_X, WIN_Y0, WIN_Y1, FLOOR + POCK_D, OUT_H + 10)
+
+# Sensor apertures through the top bezel -- earpiece, front camera and the
+# proximity/ambient window. Covering any of these breaks the phone: no
+# proximity means the screen stays lit against your face and eats battery.
+_ex0, _ey0, _ex1, _ey1 = EARPIECE_SVG
+part -= bbox(fx(_ex0) - FEAT_TOL, fx(_ex1) + FEAT_TOL,
+             fy(_ey1) - FEAT_TOL, fy(_ey0) + FEAT_TOL,
+             FLOOR + POCK_D, OUT_H + 10)
+
+_px0, _py0, _px1, _py1 = PROX_SVG
+part -= bbox(fx(_px0) - FEAT_TOL, fx(_px1) + FEAT_TOL,
+             fy(_py1) - FEAT_TOL, fy(_py0) + FEAT_TOL,
+             FLOOR + POCK_D, OUT_H + 10)
+
+_cx, _cy, _cr = CAM_SVG
+part -= Pos(fx(_cx), fy(_cy), FLOOR + POCK_D) * Cylinder(
+    _cr + FEAT_TOL, (OUT_H + 10), align=(Align.CENTER, Align.CENTER, Align.MIN)
 )
 
-# Side relief for power + volume (right side, viewed from the front = +X).
-# One generous window rather than two guessed cutouts -- exact button
-# positions weren't measurable, and this cannot miss.
-part -= bbox(
-    POCK_W / 2 - 1.0, OUT_W / 2 + EPS,
-    OUT_L - BTN_Y1, OUT_L - BTN_Y0,
-    FLOOR + 0.8, OUT_H + 10,
-)
+# Button apertures, right edge (+X): power ABOVE volume on this phone.
+# Two placed openings rather than one 55 mm slot -- the slot worked but it
+# left the phone's own edge on show, which is the "tray with a phone in it"
+# look. Sized for a finger now; a print-in-place actuator is a separate pass.
+for (_b0, _b1) in (PWR_SVG, VOL_SVG):
+    part -= bbox(
+        POCK_W / 2 - 1.0, OUT_W / 2 + EPS,
+        fy(_b1) - FEAT_TOL, fy(_b0) + FEAT_TOL,
+        FLOOR + 0.8, OUT_H + 10,
+    )
 
 # 3.5 mm headphone jack notch, hand end
 part -= bbox(
