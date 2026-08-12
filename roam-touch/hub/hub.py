@@ -41,6 +41,7 @@ from starlette.concurrency import run_in_threadpool
 
 import channels as channels_mod
 from channels import Channel, TmuxError
+from presence import DEFAULT_TTL_S, OBSERVED_PREFIXES, Presence
 from store import DEFAULT_DB_PATH, EventKind, Store, StoredChannel
 from transcript import INLINE_BODY_CHARS
 
@@ -82,6 +83,12 @@ class Settings(BaseSettings):
     activity_polling: bool = True
     capture_lines: int = 200
     history_limit: int = 200
+
+    #: How long after his last keystroke a tmux client still counts as "he is
+    #: sitting there". Stop typing for this long and the arm starts buzzing
+    #: again, which is the behaviour you want when you walk away mid-task.
+    presence_grace_s: float = 120.0
+
     log_level: str = "info"
 
 
@@ -198,6 +205,28 @@ class ArchiveRequest(BaseModel):
     archived: bool = True
 
 
+class PresenceRequest(BaseModel):
+    """What a client says about where the user is.
+
+    The ROAM app foregrounded posts `{"source": "roam-app", "covers_all": true}`
+    and re-posts while it stays up; backgrounding either DELETEs or simply lets
+    the TTL lapse.
+    """
+
+    source: str = Field(min_length=1, description="Stable id for the reporter.")
+    kind: str = Field(default="reported", description="app | client | reported…")
+    panes: list[str] = Field(
+        default_factory=list, description="Panes this source can already see."
+    )
+    covers_all: bool = Field(
+        default=False, description="This source sees every channel (the panel)."
+    )
+    ttl_s: float = Field(
+        default=DEFAULT_TTL_S, ge=1, le=3600, description="Believed for this long."
+    )
+    detail: dict[str, Any] = Field(default_factory=dict)
+
+
 # --------------------------------------------------------------------- views
 
 
@@ -297,6 +326,7 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
     async def lifespan(app: FastAPI):
         app.state.store = store or Store(settings.db_path)
         app.state.broadcaster = Broadcaster()
+        app.state.presence = Presence()
         app.state.settings = settings
         app.state.token = token
         app.state.started_at = time.time()
@@ -326,6 +356,9 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
 
     def _publish(message: dict[str, Any]) -> None:
         app.state.broadcaster.publish(message)
+
+    def _publish_presence() -> None:
+        _publish({"type": "presence", **app.state.presence.snapshot()})
 
     def _publish_event(event) -> None:
         # Stream frames carry the summary and a bounded body; the full text is
@@ -372,7 +405,57 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
             "latest_event_id": st.latest_event_id(),
             "subscribers": app.state.broadcaster.subscriber_count,
             "db_path": str(st.path),
+            "presence": app.state.presence.snapshot(),
         }
+
+    # ------------------------------------------------------------ presence
+
+    @app.get("/presence", tags=["presence"], dependencies=[Depends(require_auth)])
+    async def get_presence() -> dict[str, Any]:
+        """Where the user is, as far as the hub can tell."""
+        return app.state.presence.snapshot()
+
+    @app.post("/presence", tags=["presence"], dependencies=[Depends(require_auth)])
+    async def post_presence(payload: PresenceRequest) -> dict[str, Any]:
+        """Register or refresh a presence source.
+
+        This is how the ROAM app says "I am foregrounded, stop notifying me" --
+        first-class from the start, not a special case added later.
+        """
+        if payload.source.startswith(OBSERVED_PREFIXES):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"'{payload.source}' is in a namespace the hub observes; "
+                    "pick another id"
+                ),
+            )
+        panes = [normalise_pane_id(p) for p in payload.panes]
+        source = app.state.presence.report(
+            payload.source,
+            kind=payload.kind,
+            panes=panes,
+            covers_all=payload.covers_all,
+            ttl_s=payload.ttl_s,
+            detail=payload.detail,
+        )
+        _publish_presence()
+        return {"source": source.to_dict(), "presence": app.state.presence.snapshot()}
+
+    @app.delete(
+        "/presence/{source}", tags=["presence"], dependencies=[Depends(require_auth)]
+    )
+    async def delete_presence(source: str = PathParam(...)) -> dict[str, Any]:
+        """The app backgrounding, a device going away."""
+        if source.startswith(OBSERVED_PREFIXES):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="the hub owns that source; it expires on its own",
+            )
+        removed = app.state.presence.forget(source)
+        if removed:
+            _publish_presence()
+        return {"removed": removed, "presence": app.state.presence.snapshot()}
 
     @app.get("/channels", tags=["channels"], dependencies=[Depends(require_auth)])
     async def list_channels_endpoint(
@@ -610,6 +693,7 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
                     "server_time": time.time(),
                     "latest_event_id": watermark,
                     "channels": build_channel_list(st, live),
+                    "presence": app.state.presence.snapshot(),
                 }
             )
             if since is not None:
@@ -701,6 +785,33 @@ def _sample_activity(
     return moved
 
 
+def _observe_presence(
+    presence: Presence, clients: list[Any], grace_s: float, ttl_s: float
+) -> None:
+    """Turn attached tmux clients into presence sources.
+
+    A client is only reported while it has taken input within `grace_s`, and
+    the source is refreshed every poll with a short TTL -- so coverage lapses a
+    couple of seconds after the grace window instead of lingering.
+
+    `origin` (from `who`) is carried through as detail: it is the difference
+    between "he is somewhere" and "he is on the laptop at 192.168.86.63, in the
+    main session, looking at %0".
+    """
+    for client in clients:
+        if not client.front_pane:
+            continue
+        if grace_s and client.idle_s() > grace_s:
+            continue
+        presence.report(
+            f"tmux:{client.tty}",
+            kind="tmux",
+            panes=(client.front_pane,),
+            ttl_s=ttl_s,
+            detail=client.to_dict(),
+        )
+
+
 async def _poll_forever(app: FastAPI) -> None:
     """Watch tmux so clients never have to.
 
@@ -712,6 +823,7 @@ async def _poll_forever(app: FastAPI) -> None:
     settings: Settings = app.state.settings
     store: Store = app.state.store
     broadcaster: Broadcaster = app.state.broadcaster
+    presence: Presence = app.state.presence
     known: dict[str, str] | None = None  # pane_id -> label
     digests: dict[str, str] = {}  # pane_id -> last screen fingerprint
     while True:
@@ -753,6 +865,20 @@ async def _poll_forever(app: FastAPI) -> None:
                         broadcaster.publish(
                             {"type": "event", "event": event.to_dict()}
                         )
+
+            # Presence: observe tmux, expire whatever has lapsed, and tell
+            # clients only when the picture actually changed.
+            before = presence.signature()
+            clients = await run_in_threadpool(channels_mod.tmux_clients)
+            _observe_presence(
+                presence,
+                clients,
+                settings.presence_grace_s,
+                ttl_s=max(2.0, settings.poll_interval * 3),
+            )
+            presence.sweep()
+            if presence.signature() != before:
+                broadcaster.publish({"type": "presence", **presence.snapshot()})
 
             if settings.activity_polling and live:
                 moved = await run_in_threadpool(

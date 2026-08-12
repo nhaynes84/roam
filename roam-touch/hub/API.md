@@ -186,6 +186,41 @@ minutes reads as idle, and a `tail -f` reads as busy forever. Treat a climbing
 `idle_s` as "nothing is coming out", which is exactly the input to "should I kill
 it?", and never as proof of death.
 
+### Presence
+
+Where the user is, so nothing buzzes his arm about a screen he is already
+reading. A **source** is one piece of evidence, and coverage is the union across
+live sources.
+
+```json
+{
+  "present": true,
+  "covers_all": false,
+  "covered_panes": ["%0"],
+  "sources": [
+    {"id": "tmux:/dev/ttys000", "kind": "tmux", "panes": ["%0"], "covers_all": false,
+     "since": 1786516400.1, "last_seen": 1786516490.0, "idle_s": 1.2,
+     "expires_in_s": 4.8,
+     "detail": {"session": "main", "front_pane": "%0", "origin": "192.168.86.63"}}
+  ],
+  "server_time": 1786516491.2
+}
+```
+
+* `covered_panes` — he can already see these; do not notify about them.
+* `covers_all` — a source sees *everything* (the panel is open in front of him).
+* Sources expire. Whoever owns one refreshes it; TTLs are seconds-to-a-minute, so
+  presence lapses on its own rather than sticking.
+* **The client is expected to report its own presence** — see `POST /presence`.
+* ⚠️ **No sources means push.** An empty snapshot is "we don't know", and a missed
+  message is worse than a redundant one. Never read absence as presence.
+* Observed today: `tmux` (a client that has taken input within 120 s, covering the
+  pane on its screen; `detail.origin` is where that login came from). Deliberately
+  **not** observed: macOS window focus and whether he is in the room — talos cannot
+  see either. `HIDIdleTime` was tried and rejected: it reported 13.2 hours idle
+  while he was actively typing, because he works over SSH and it measures this
+  machine's keyboard.
+
 ---
 
 ## 3. HTTP endpoints
@@ -297,6 +332,37 @@ something into a channel thread.
 * Returns `201` with `{"event": Event}` and pushes it to every WebSocket client.
 * If the pane is unknown to the hub, the channel is created first.
 
+### `GET /presence`
+
+The snapshot above. Cheap; safe to call on resume.
+
+### `POST /presence`
+
+Register or refresh a source. **This is how the client says "I am foregrounded,
+stop notifying me"** — first-class, not a later special case.
+
+```json
+{"source": "roam-app", "kind": "app", "covers_all": true, "ttl_s": 60,
+ "detail": {"device": "pixel"}}
+```
+
+* `source` — a stable id you own. Ids beginning `tmux:` are the hub's own
+  observations and are rejected with `400`.
+* `panes` — cover specific channels instead of everything (bare `3` or `%3`).
+* `ttl_s` — 1–3600. Re-post to stay present; stop posting (or `DELETE`) to lapse.
+  Pick a TTL a few times your refresh interval so a crash lapses quickly.
+* Returns `{"source": …, "presence": <snapshot>}` and pushes a `presence` frame.
+
+**Recommended client behaviour**: `POST` with `covers_all: true` on foreground and
+every ~30 s while foregrounded; `DELETE /presence/{source}` on background. Then the
+bridge stops notifying while you are looking at the panel, and resumes when you put
+it down — with no logic duplicated in the client.
+
+### `DELETE /presence/{source}`
+
+`{"removed": true, "presence": <snapshot>}`. `400` for a `tmux:` source (the hub
+owns those; they expire on their own).
+
 ### `GET /events`
 
 Query: `since` (default 0), `limit` (1–2000, default 500). Every event after
@@ -339,13 +405,14 @@ Every frame is a JSON object with a `type`. Ignore unknown types.
 
 | type | payload | notes |
 |---|---|---|
-| `hello` | `{protocol, version, server_time, latest_event_id, channels: [Channel]}` | always the first frame |
+| `hello` | `{protocol, version, server_time, latest_event_id, channels: [Channel], presence}` | always the first frame |
 | `backlog` | `{since, events: [Event]}` | only when `?since=` was given; oldest first; sent once, right after `hello` |
 | `event` | `{event: Event}` | one new event, live |
 | `channels` | `{channels: [Channel], server_time}` | the pane set or a pane title changed — replace your list |
 | `channel` | `{channel: Channel}` | one channel changed (archive/restore) |
 | `activity` | `{panes: {"%0": 1786511500.3}, server_time}` | those panes' output just moved — update `last_output_at`, reset `idle_s` to ~0. At most one per 2 s poll, and none at all while everything is quiet. |
 | `history_cleared` | `{pane_id, archived}` | someone soft-cleared a thread |
+| `presence` | the presence snapshot, inline | where he is changed — update suppression. Emitted only on real change, not per poll. |
 | `ping` | `{t}` | app-level heartbeat, every 30 s of silence. No reply needed. |
 | `pong` | `{t}` | reply to a client `ping` |
 | `desync` | `{latest_event_id}` | the client fell too far behind; the hub closes with 1011 — reconnect with `?since=` |
@@ -373,7 +440,8 @@ Send only JSON objects. A non-JSON frame ends the connection.
 5. `event` → append to that channel's thread; `cursor = event.id`. Show
    `summary`; keep `body` for the expanded view.
 6. `channels` / `channel` → replace list / patch one entry. `activity` → update
-   `last_output_at` for those panes and re-render the live indicator.
+   `last_output_at` for those panes and re-render the live indicator. `presence`
+   → replace your presence view.
 7. When the user expands an event whose `body_truncated` is `true` →
    `GET /events/{id}`.
 8. On `desync`, on close, or on any error → reconnect with `?since=<cursor>`,

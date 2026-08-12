@@ -29,8 +29,6 @@ from typing import Any, Awaitable, Callable, Iterable
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-import channels as channels_mod
-
 log = logging.getLogger("roam.bridge")
 
 HUB_DIR = Path(__file__).resolve().parent
@@ -50,6 +48,18 @@ PUSH_KINDS: tuple[str, ...] = ("outcome", "error")
 #: Prefixes by kind. An error must not read like an answer.
 KIND_PREFIX: dict[str, str] = {"error": "⚠️ "}
 
+#: How far behind the bridge may be and still push what it missed.
+#:
+#: Owner, 2026-08-11: *"let's in fact box it not by time but by message count,
+#: if we're 15 messages behind, presumably I've just been talking to you via
+#: laptop or some other means; keep it in the channel but no need to ping me."*
+#: Being far behind is itself evidence he was working somewhere else and has
+#: already seen it, so a big backlog is dropped rather than fired at his arm.
+#: The events are not lost -- they are in the hub and in the channel history,
+#: which is where he will look. Counted in *pushable* events (outcomes and
+#: errors), because that is the number of buzzes it would cause. Will be tuned.
+BACKLOG_PUSH_LIMIT = 15
+
 
 class Settings(BaseSettings):
     """Every field is settable as `ROAM_BRIDGE_<FIELD>`."""
@@ -62,9 +72,11 @@ class Settings(BaseSettings):
     state_file: Path = HUB_DIR / "bridge-state.json"
     roam_msg: Path = Path.home() / "Projects/roam/tools/roam-msg"
 
-    #: Don't push an event from a pane whose client typed within this long.
-    #: 0 disables suppression entirely (everything gets pushed).
-    active_grace_s: float = 120.0
+    #: Honour the hub's presence: don't push what he is already looking at.
+    #: False pushes everything regardless of where he is.
+    suppress_when_present: bool = True
+    #: How far behind is "too far to bother him with" (see BACKLOG_PUSH_LIMIT).
+    backlog_push_limit: int = BACKLOG_PUSH_LIMIT
 
     #: Rate limit: at most one notification per this many seconds. Events that
     #: arrive inside the window are coalesced per channel, newest wins.
@@ -203,7 +215,6 @@ class Bridge:
         self,
         settings: Settings,
         pusher: Callable[[str, str], Awaitable[bool]] | None = None,
-        watched_panes: Callable[[], Iterable[str]] | None = None,
         state: State | None = None,
         clock: Callable[[], float] | None = None,
     ) -> None:
@@ -213,9 +224,10 @@ class Bridge:
         self._pusher = pusher or (
             lambda text, pane: push_via_roam_msg(settings, text, pane)
         )
-        self._watched = watched_panes or (
-            lambda: channels_mod.watched_panes(settings.active_grace_s)
-        )
+        #: Where the hub says he is. The bridge does not ask tmux itself: the
+        #: hub owns presence, the bridge is one more client of it, and the
+        #: ROAM app's own "I am foregrounded" arrives through the same door.
+        self.presence: dict[str, Any] = {}
         self.labels: dict[str, str] = {}
         #: pane_id -> (summary, kind, coalesced_count)
         self._queue: dict[str, tuple[str, str, int, int]] = {}
@@ -224,6 +236,7 @@ class Bridge:
         self.dropped = 0
         self.pushed: list[tuple[str, str]] = []  # (pane_id, text), for tests
         self.suppressed = 0
+        self.skipped_backlogs = 0
 
     # ------------------------------------------------------------- policy
 
@@ -240,13 +253,19 @@ class Bridge:
         return event.get("kind") in PUSH_KINDS
 
     def is_watched(self, pane_id: str) -> bool:
-        if not self.settings.active_grace_s:
+        """Is he already looking at this?
+
+        ⚠️ Unknown means **no** -- push. A missed message is worse than a
+        redundant one, so an empty or absent presence snapshot (a hub too old
+        to send one, a bridge that just started) must never mean silence.
+        """
+        if not self.settings.suppress_when_present:
             return False
-        try:
-            return pane_id in set(self._watched())
-        except Exception as exc:  # tmux gone: push rather than go silent
-            log.warning("cannot determine watched panes: %s", exc)
+        if not self.presence:
             return False
+        if self.presence.get("covers_all"):
+            return True  # the panel itself is open; it already shows this
+        return pane_id in set(self.presence.get("covered_panes") or ())
 
     def enqueue(self, event: dict[str, Any]) -> None:
         pane_id = event.get("pane_id") or ""
@@ -264,19 +283,50 @@ class Bridge:
         kind = frame.get("type")
         if kind == "hello":
             self.learn_channels(frame.get("channels"))
+            if frame.get("presence") is not None:
+                self.presence = frame["presence"]
             if self.state.last_event_id is None:
                 # First ever run: start from now. Replaying a week of outcomes
                 # onto someone's arm is not a welcome.
                 self.state.remember(int(frame.get("latest_event_id") or 0))
+        elif kind == "presence":
+            self.presence = frame
         elif kind in ("channels",):
             self.learn_channels(frame.get("channels"))
         elif kind == "channel":
             self.learn_channels([frame.get("channel") or {}])
         elif kind == "backlog":
-            for event in frame.get("events") or []:
-                await self.handle_event(event)
+            await self.handle_backlog(frame.get("events") or [])
         elif kind == "event":
             await self.handle_event(frame.get("event") or {})
+
+    async def handle_backlog(self, events: list[dict[str, Any]]) -> None:
+        """Catch up. If we are a long way behind, catch up *silently*.
+
+        See `BACKLOG_PUSH_LIMIT`: a big backlog means he was working somewhere
+        else and has already seen this. The events still land in the hub and the
+        channel history; the arm just stays quiet.
+        """
+        fresh = [
+            e
+            for e in events
+            if isinstance(e.get("id"), int)
+            and (self.state.last_event_id is None or e["id"] > self.state.last_event_id)
+        ]
+        pushable = sum(1 for e in fresh if self.wants(e))
+        if pushable > self.settings.backlog_push_limit:
+            log.info(
+                "%d missed notifications (>%d): staying quiet, they are in the channels",
+                pushable,
+                self.settings.backlog_push_limit,
+            )
+            for event in fresh:
+                if isinstance(event.get("id"), int):
+                    self.state.remember(event["id"])
+            self.skipped_backlogs += 1
+            return
+        for event in events:
+            await self.handle_event(event)
 
     async def handle_event(self, event: dict[str, Any]) -> None:
         event_id = event.get("id")

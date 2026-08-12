@@ -367,7 +367,9 @@ def test_capture_returns_pane_output(client, auth, fake_tmux):
     ).json()
     assert body["text"] == "the tail of the pane\n"
     assert body["lines"] == 10
-    assert fake_tmux.argv_for("capture-pane")[-1][-1] == "-10"
+    # The liveness poller also runs capture-pane (no -S); find the read-back.
+    scrollback = [a for a in fake_tmux.argv_for("capture-pane") if "-S" in a]
+    assert scrollback[-1][-1] == "-10"
 
 
 def test_capture_of_a_dead_pane_is_404(client, auth, fake_tmux):
@@ -571,6 +573,113 @@ def test_activity_polling_can_be_turned_off(settings, store, fake_tmux, auth):
         channel = c.get("/channels/0", headers=auth).json()["channel"]
         assert channel["last_output_at"] is None
         assert channel["idle_s"] is None
+
+
+# ----------------------------------------------------------------- presence
+
+
+def test_presence_is_empty_until_something_says_otherwise(client, auth, fake_tmux):
+    fake_tmux.clients = {}
+    body = wait_for(
+        lambda: (p := client.get("/presence", headers=auth).json())
+        and not p["sources"]
+        and p
+    )
+    assert body["present"] is False
+    assert body["covered_panes"] == []
+
+
+def test_a_tmux_client_typing_becomes_presence(client, auth, fake_tmux):
+    """The observed source: he is in that session, looking at that pane."""
+    fake_tmux.clients = {"main": time.time()}
+    body = wait_for(
+        lambda: (p := client.get("/presence", headers=auth).json())
+        and p["sources"]
+        and p
+    )
+    assert body["present"] is True
+    assert body["covered_panes"] == ["%0"]
+    source = body["sources"][0]
+    assert source["kind"] == "tmux"
+    assert source["id"].startswith("tmux:")
+    assert source["detail"]["session"] == "main"
+    assert source["detail"]["origin"] == "192.168.86.63", "where he is, not just that"
+
+
+def test_a_client_he_left_an_hour_ago_is_not_presence(client, auth, fake_tmux):
+    fake_tmux.clients = {"augment": time.time() - 4000}
+    time.sleep(0.3)
+    body = client.get("/presence", headers=auth).json()
+    assert [s for s in body["sources"] if s["detail"].get("session") == "augment"] == []
+
+
+def test_presence_lapses_when_he_stops_typing(client, auth, fake_tmux):
+    fake_tmux.clients = {"main": time.time()}
+    wait_for(lambda: client.get("/presence", headers=auth).json()["sources"])
+    fake_tmux.clients = {"main": time.time() - 4000}  # walked away
+    lapsed = wait_for(
+        lambda: not client.get("/presence", headers=auth).json()["present"]
+    )
+    assert lapsed
+
+
+def test_the_app_can_report_itself_foregrounded(client, auth):
+    """First-class from the start: this is how the client says 'stop'."""
+    resp = client.post(
+        "/presence",
+        json={"source": "roam-app", "kind": "app", "covers_all": True, "ttl_s": 60},
+        headers=auth,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["presence"]["covers_all"] is True
+    assert client.get("/presence", headers=auth).json()["covers_all"] is True
+
+    gone = client.delete("/presence/roam-app", headers=auth)
+    assert gone.json()["removed"] is True
+    assert gone.json()["presence"]["covers_all"] is False
+
+
+def test_a_reported_source_can_name_specific_panes(client, auth):
+    client.post(
+        "/presence",
+        json={"source": "desk-panel", "panes": ["0", "%1"]},
+        headers=auth,
+    )
+    body = client.get("/presence", headers=auth).json()
+    covered = {p for s in body["sources"] if s["id"] == "desk-panel" for p in s["panes"]}
+    assert covered == {"%0", "%1"}, "pane ids are normalised like everywhere else"
+
+
+def test_a_client_cannot_forge_an_observed_source(client, auth):
+    resp = client.post(
+        "/presence", json={"source": "tmux:/dev/ttys000", "covers_all": True}, headers=auth
+    )
+    assert resp.status_code == 400
+    assert client.delete("/presence/tmux:x", headers=auth).status_code == 400
+
+
+def test_presence_requires_a_token(client):
+    assert client.get("/presence").status_code == 401
+    assert client.post("/presence", json={"source": "x"}).status_code == 401
+
+
+def test_status_carries_presence(client, auth):
+    client.post("/presence", json={"source": "roam-app", "covers_all": True}, headers=auth)
+    body = client.get("/status", headers=auth).json()
+    assert body["presence"]["covers_all"] is True
+
+
+def test_presence_is_pushed_over_the_websocket(client, auth):
+    with client.websocket_connect("/ws", headers=auth) as ws:
+        hello = ws.receive_json()
+        assert "presence" in hello, "the client knows where he is from frame one"
+        client.post(
+            "/presence",
+            json={"source": "roam-app", "covers_all": True},
+            headers=auth,
+        )
+        frame = next_frame(ws, "presence", limit=30, where=lambda f: f["covers_all"])
+        assert frame["present"] is True
 
 
 # ------------------------------------------------------------------- poller

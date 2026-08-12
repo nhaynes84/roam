@@ -70,8 +70,10 @@ class FakeTmux:
                 for pid, sess, win, idx, cmd, title in self.panes
             )
         if sub == "list-clients":
+            # #{client_tty}\t#{client_session}\t#{client_activity}
             return "".join(
-                f"{session}\t{activity}\n" for session, activity in self.clients.items()
+                f"/dev/tty{session}\t{session}\t{activity}\n"
+                for session, activity in self.clients.items()
             )
         if sub == "display-message":
             session = args[args.index("-t") + 1]
@@ -91,6 +93,12 @@ class FakeTmux:
 def fake_tmux(monkeypatch) -> FakeTmux:
     fake = FakeTmux()
     monkeypatch.setattr(channels_mod, "_run", fake)
+    # `who(1)` is a second boundary: it says where a login came from.
+    monkeypatch.setattr(
+        channels_mod,
+        "_who",
+        lambda: "talos  ttymain  Aug 11 20:17 (192.168.86.63)\n",
+    )
     return fake
 
 

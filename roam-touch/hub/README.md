@@ -93,15 +93,16 @@ tail -f ~/Library/Logs/roam-bridge.log
   `✳ Augment things: the suite is green — 122 tests`. The label is the point: which
   session is talking, without unlocking anything. `roam-msg --pane` tags each
   channel separately so two sessions don't overwrite each other.
-* **What it will not do**: buzz about the pane he is sitting in front of. A pane is
-  "watched" when it is the front pane of a tmux client that has taken input within
-  `ROAM_BRIDGE_ACTIVE_GRACE_S` (default 120 s) — both facts come straight from
-  `tmux list-clients` (`client_activity`) and `display-message`. Walk away for two
-  minutes and that same channel starts pushing again, which is the behaviour you
-  want. ⚠️ Limit: tmux cannot see whether the terminal is the frontmost macOS
-  window or whether you are in the room; recent typing is the strongest signal
-  available without polling the window server. Set the grace to `0` to push
-  everything.
+* **What it will not do**: buzz about something he is already looking at. The bridge
+  does not work that out itself — **the hub owns presence** (see below) and the
+  bridge is one more consumer of it, which is why the Android app saying "I am
+  foregrounded" needs no bridge change at all. `ROAM_BRIDGE_SUPPRESS_WHEN_PRESENT=false`
+  pushes regardless.
+* **What it will not do either**: dump a backlog on him. If it reconnects more than
+  `BACKLOG_PUSH_LIMIT` (15) pushable events behind, it catches up **silently** —
+  being that far behind is itself evidence he was working elsewhere and has already
+  seen it. The events are in the hub and the channel history, which is where he
+  will look.
 * **Rate**: at most one notification per `ROAM_BRIDGE_MIN_INTERVAL_S` (default 5 s).
   Events arriving inside the window are coalesced per channel — newest wins, with
   `(+N more)` — so a burst cannot machine-gun the phone.
@@ -109,6 +110,30 @@ tail -f ~/Library/Logs/roam-bridge.log
   restart resumes exactly where it stopped; a *first* run starts from the hub's
   current latest id, because nobody wants a week of old outcomes on their arm at
   startup.
+
+## Presence — where he is
+
+`presence.py`. The hub tracks where the user is interacting so nothing notifies
+him about a screen he is already reading. Sources are named, carry a TTL, and
+combine by union; new ones need no new logic, just a `POST /presence`.
+
+| source | kind | how | covers |
+|---|---|---|---|
+| `tmux:/dev/ttys000` | observed | a tmux client that has taken input within `ROAM_HUB_PRESENCE_GRACE_S` (120 s); `who(1)` supplies where that login came from | the pane on its screen |
+| `roam-app` | reported | the client POSTs while foregrounded | everything (`covers_all`) |
+
+* ⚠️ **No sources means push.** A missed message is worse than a redundant one, so
+  an empty registry is "we do not know", never "he must be here". `Presence.should_push`
+  returns True for anything uncovered, and a hub restart forgets everything — failing
+  towards notifying.
+* ⚠️ **Only what talos can observe.** macOS window focus and "is he in the room" are
+  not knowable from here and are absent by choice. `HIDIdleTime` *was* tried and
+  rejected: it read **13.2 hours idle while he was actively typing**, because he
+  works over SSH and it measures this machine's keyboard, not his. A signal that
+  wrong is worse than no signal.
+* A source with no panes and no `covers_all` is still presence (it shows on
+  `/presence`) but suppresses nothing: evidence he is at *a* keyboard is not
+  evidence he can see *this* channel.
 
 ## Auth and binding
 
