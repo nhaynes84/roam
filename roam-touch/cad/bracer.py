@@ -72,7 +72,11 @@ STRAP_D = 2.2        # channel depth into the rib's arm face
 BAR_X = 20.0         # retaining bars, either side of centre
 BAR_W = 6.0
 
-JACK_W = 22.0        # 3.5 mm jack notch (sailfish jack is on the TOP edge)
+# 3.5 mm jack: on the TOP edge and NOT centred -- it sits in the right-hand
+# (button-side) quartile. Owner measured this off the phone; the Wikimedia SVG
+# only draws the face, so the earlier centred notch was a guess and was wrong.
+JACK_W = 20.0
+JACK_X = 22.0        # notch centre, +X = button side
 
 # print-in-place button plungers (see the build section)
 BTN_BORE_H = 4.0     # outer bore height, Z
@@ -186,7 +190,18 @@ part -= bbox(-POCK_W / 2, POCK_W / 2, -10, POCK_L, FLOOR, FLOOR + POCK_D)
 # Screen aperture. This is the bezel: the face closes down to the display
 # instead of exposing the phone's own bezel, so the housing reads as the
 # device rather than as a tray with a phone in it.
-part -= bbox(-WIN_X, WIN_X, WIN_Y0, WIN_Y1, FLOOR + POCK_D, OUT_H + 10)
+# Lofted, not a straight cut: the aperture is BEZEL_CHAM wider at the top face
+# and closes down to the display, so the bezel slopes into the screen instead
+# of standing over it as a lip. Owner's change, brought back into the source.
+BEZEL_CHAM = 1.5
+part -= loft([
+    Plane(origin=(0, (WIN_Y0 + WIN_Y1) / 2, FLOOR + POCK_D))
+    * Rectangle(2 * WIN_X, WIN_Y1 - WIN_Y0),
+    Plane(origin=(0, (WIN_Y0 + WIN_Y1) / 2, OUT_H))
+    * Rectangle(2 * (WIN_X + BEZEL_CHAM), (WIN_Y1 - WIN_Y0) + 2 * BEZEL_CHAM),
+])
+part -= bbox(-(WIN_X + BEZEL_CHAM), WIN_X + BEZEL_CHAM,
+             WIN_Y0 - BEZEL_CHAM, WIN_Y1 + BEZEL_CHAM, OUT_H - EPS, OUT_H + 10)
 
 # Sensor apertures through the top bezel -- earpiece, front camera and the
 # proximity/ambient window. Covering any of these breaks the phone: no
@@ -247,7 +262,7 @@ for (_b0, _b1) in (PWR_SVG, VOL_SVG):
 
 # 3.5 mm headphone jack notch, hand end
 part -= bbox(
-    -JACK_W / 2, JACK_W / 2,
+    JACK_X - JACK_W / 2, JACK_X + JACK_W / 2,
     OUT_L - WALL - EPS, OUT_L + 10,
     FLOOR + 0.8, OUT_H + 10,
 )
@@ -295,6 +310,10 @@ USB_Z = FLOOR + PH_T / 2   # port sits mid phone thickness, NOT near the floor
 # slim cable head ever reaches the port -- a funnel lets fat overmoulds seat,
 # and it reads as a designed feature instead of a punched hole.
 USB_FLARE = 5.0            # per side, so a ~10 mm spread down to the opening
+# Speaker and mic sit either side of the USB port on the bottom edge. Blocking
+# them with a solid plate would muffle the one output the device has.
+SPK_W, SPK_H = 13.0, 2.6
+SPK_X = 17.0               # centre offset either side of the port
 # ★ Retro-futurist: the flare is not an oval around the port, it is a trough
 # spanning the whole face with the port at its centre. The loft tapers to
 # nothing at the edges, so it never breaches the 2.4 mm plate -- it reads as a
@@ -352,6 +371,11 @@ cap -= loft([
 # off and the cap came out as five loose pieces. They are not needed either:
 # the snap domes stand proud on the OUTSIDE too, so the grip point and the
 # press-here-to-release point are the same feature.
+# Speaker / mic apertures either side of the port, through the plate.
+for _sx in (-1, 1):
+    cap -= Pos(_sx * SPK_X, -CAP_T - EPS, USB_Z) * Rot(-90, 0, 0) * extrude(
+        RectangleRounded(SPK_W, SPK_H, SPK_H / 2 - 0.01), amount=CAP_T + 2 * EPS)
+
 # Relief slots that turn each side wall into a cantilever tongue, rooted at
 # the OPEN end so the tip near the end plate is the compliant bit. Without
 # these the wall is a plate braced on three sides and cannot open at all.

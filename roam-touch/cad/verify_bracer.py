@@ -58,8 +58,11 @@ probes = [
     ("front camera hole",            (-23.53, 138.4, Z_FACE + 1.0), False),
     ("proximity/ambient window",     (-1.0, 132.5, Z_FACE + 1.0), False),
     ("bezel between camera and ear", (-15.0, 138.2, Z_FACE + 1.0), True),
-    ("hand-end wall",                (25.0, 145.8, FLOOR + 4), True),
-    ("headphone jack notch",         (0, 145.8, FLOOR + 4), False),
+    # ⚠️ The jack is in the button-side quartile, NOT centred -- so the wall
+    # probe moved to the far side and the notch probe moved onto the jack.
+    ("hand-end wall, far side",      (-25.0, 145.8, FLOOR + 4), True),
+    ("hand-end wall at centre",      (0.0, 145.8, FLOOR + 4), True),
+    ("headphone jack notch",         (22.0, 145.8, FLOOR + 4), False),
     ("elbow end open for insertion", (0, 1.0, FLOOR + 4), False),
 ]
 
