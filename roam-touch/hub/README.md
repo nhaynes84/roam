@@ -13,11 +13,12 @@ was asleep catches up by event id.
 Client contract: **[API.md](API.md)**. Read that before writing any client.
 
 ```
-channels.py    tmux: discover panes, send keys, capture output
+channels.py    tmux: discover panes, send keys, capture output, who's watching
 store.py       SQLite event log, per channel, never hard-deleted
 transcript.py  pull the assistant's answer out of a session transcript;
                summarise it for Piper and for a glance
 hub.py         FastAPI service + WebSocket + the tmux poller
+bridge.py      hub events -> phone notifications, via roam-msg
 roam-hub-hook  the Claude Code hook that posts receipts and outcomes
 tests/         pytest; tmux faked at channels._run, network at urlopen
 ```
@@ -68,6 +69,46 @@ Health check (no auth):
 ```bash
 curl -s http://100.67.237.109:8787/health
 ```
+
+## The bridge (hub → phone)
+
+Until the Channels app exists, nothing subscribes to the hub, so from across the
+room it is a database. `bridge.py` is a WebSocket client that forwards the events
+worth interrupting someone for to ROAM Touch by **shelling out to
+`~/Projects/roam/tools/roam-msg`** — one push path, never a second implementation.
+
+```bash
+cp com.talos.roam-bridge.plist ~/Library/LaunchAgents/
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.talos.roam-bridge.plist
+launchctl kickstart -k gui/$(id -u)/com.talos.roam-bridge   # restart
+launchctl bootout   gui/$(id -u)/com.talos.roam-bridge      # stop
+tail -f ~/Library/Logs/roam-bridge.log
+```
+
+* **What gets pushed**: `PUSH_KINDS` in `bridge.py` — currently `outcome` and
+  `error`. `receipt` is deliberately excluded: he typed it seconds ago, and
+  echoing it back to his arm is noise. It is a constant with a comment because it
+  will get tuned.
+* **What it says**: the channel **label** then the event summary —
+  `✳ Augment things: the suite is green — 122 tests`. The label is the point: which
+  session is talking, without unlocking anything. `roam-msg --pane` tags each
+  channel separately so two sessions don't overwrite each other.
+* **What it will not do**: buzz about the pane he is sitting in front of. A pane is
+  "watched" when it is the front pane of a tmux client that has taken input within
+  `ROAM_BRIDGE_ACTIVE_GRACE_S` (default 120 s) — both facts come straight from
+  `tmux list-clients` (`client_activity`) and `display-message`. Walk away for two
+  minutes and that same channel starts pushing again, which is the behaviour you
+  want. ⚠️ Limit: tmux cannot see whether the terminal is the frontmost macOS
+  window or whether you are in the room; recent typing is the strongest signal
+  available without polling the window server. Set the grace to `0` to push
+  everything.
+* **Rate**: at most one notification per `ROAM_BRIDGE_MIN_INTERVAL_S` (default 5 s).
+  Events arriving inside the window are coalesced per channel — newest wins, with
+  `(+N more)` — so a burst cannot machine-gun the phone.
+* **Cursor**: `bridge-state.json` holds the last event id, written atomically. A
+  restart resumes exactly where it stopped; a *first* run starts from the hub's
+  current latest id, because nobody wants a week of old outcomes on their arm at
+  startup.
 
 ## Auth and binding
 

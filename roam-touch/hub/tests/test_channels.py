@@ -3,6 +3,8 @@ the flags used to talk to tmux are the contract under test."""
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
 import channels as channels_mod
@@ -165,6 +167,46 @@ def test_screen_digest_of_a_dead_pane_is_empty_not_an_error(fake_tmux):
     fake_tmux.kill_pane("%0")
     fake_tmux.installed = False
     assert channels_mod.screen_digest("%0") == ""
+
+
+# ------------------------------------------------- who is watching what
+
+
+def test_the_front_pane_of_a_recently_used_client_is_watched(fake_tmux):
+    """"He is sitting in this pane" = the front pane of a client he just typed into."""
+    fake_tmux.clients = {"main": time.time() - 5}
+    assert channels_mod.watched_panes(grace_s=120) == {"%0"}
+
+
+def test_a_client_he_walked_away_from_is_not_watched(fake_tmux):
+    """68 minutes without a keystroke means the screen is not telling him anything."""
+    fake_tmux.clients = {"main": time.time() - 5, "augment": time.time() - 4000}
+    assert channels_mod.watched_panes(grace_s=120) == {"%0"}
+
+
+def test_several_attached_clients_are_all_watched(fake_tmux):
+    fake_tmux.clients = {"main": time.time() - 1, "augment": time.time() - 2}
+    assert channels_mod.watched_panes(grace_s=120) == {"%0", "%1"}
+
+
+def test_no_attached_client_means_nothing_is_watched(fake_tmux):
+    fake_tmux.clients = {}
+    assert channels_mod.watched_panes() == set()
+
+
+def test_grace_zero_ignores_recency(fake_tmux):
+    fake_tmux.clients = {"augment": time.time() - 99999}
+    assert channels_mod.watched_panes(grace_s=0) == {"%1"}
+
+
+def test_a_client_with_an_unparseable_activity_is_treated_as_stale(fake_tmux):
+    fake_tmux.clients = {"main": "not-a-number"}
+    assert channels_mod.watched_panes(grace_s=120) == set()
+
+
+def test_watched_panes_without_a_tmux_server_is_empty(fake_tmux):
+    fake_tmux.installed = False
+    assert channels_mod.watched_panes() == set()
 
 
 def test_channel_to_dict_carries_the_label(fake_tmux):

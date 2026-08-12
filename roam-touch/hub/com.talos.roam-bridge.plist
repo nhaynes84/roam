@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- ROAM bridge: hub events -> phone notifications via roam-msg.
+     Separate job from the hub on purpose: the hub must keep holding state
+     even if the push path is broken, and restarting one must not restart
+     the other. Install: see README.md. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.talos.roam-bridge</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/talos/Projects/roam/roam-touch/hub/.venv/bin/python</string>
+    <string>/Users/talos/Projects/roam/roam-touch/hub/bridge.py</string>
+  </array>
+  <key>WorkingDirectory</key><string>/Users/talos/Projects/roam/roam-touch/hub</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>ROAM_BRIDGE_HUB_URL</key><string>http://100.67.237.109:8787</string>
+    <key>ROAM_BRIDGE_TOKEN_FILE</key><string>/Users/talos/Projects/roam/roam-touch/hub/hub-token.txt</string>
+    <key>ROAM_BRIDGE_STATE_FILE</key><string>/Users/talos/Projects/roam/roam-touch/hub/bridge-state.json</string>
+    <key>ROAM_BRIDGE_ROAM_MSG</key><string>/Users/talos/Projects/roam/tools/roam-msg</string>
+    <key>ROAM_BRIDGE_ACTIVE_GRACE_S</key><string>120</string>
+    <key>ROAM_BRIDGE_MIN_INTERVAL_S</key><string>5</string>
+    <key>ROAM_BRIDGE_LOG_LEVEL</key><string>info</string>
+    <!-- roam-msg needs adb and tmux on PATH. -->
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>ProcessType</key><string>Background</string>
+  <key>StandardOutPath</key><string>/Users/talos/Library/Logs/roam-bridge.log</string>
+  <key>StandardErrorPath</key><string>/Users/talos/Library/Logs/roam-bridge.err</string>
+</dict>
+</plist>

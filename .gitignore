@@ -14,6 +14,7 @@ housing/step/
 # ROAM Touch hub: shared bearer token and the event database. The token is a
 # secret; the database is machine state (and can contain transcripts).
 roam-touch/hub/hub-token.txt
+roam-touch/hub/bridge-state.json
 roam-touch/hub/*.sqlite
 roam-touch/hub/*.sqlite-wal
 roam-touch/hub/*.sqlite-shm
