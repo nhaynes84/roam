@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Policy metadata for KioskDeviceAdminReceiver.
+
+  Deliberately minimal. Device owner grants the app most policy powers implicitly;
+  this list only needs to cover the legacy per-policy uses-policies gate. Nothing
+  destructive (no wipe-data, no force-lock) is declared, so a mis-fire cannot
+  brick or erase the prototype.
+-->
+<device-admin xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-policies>
+        <disable-keyguard-features />
+        <set-global-proxy />
+    </uses-policies>
+</device-admin>
