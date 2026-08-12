@@ -1,0 +1,26 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.roam.testsco'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.roam.testsco"
+        minSdk 26
+        //noinspection ExpiredTargetSdkVersion,OldTargetApi
+        targetSdk 29
+        versionCode 1
+        versionName "TEST"
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    lint {
+        abortOnError false
+    }
+}
