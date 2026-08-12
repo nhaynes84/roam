@@ -5,6 +5,9 @@ import com.roam.touch.BuildConfig
 import com.roam.touch.channels.net.HubApi
 import com.roam.touch.channels.net.HubConfig
 import com.roam.touch.channels.net.HubSocket
+import com.roam.touch.channels.stt.MicRecorder
+import com.roam.touch.channels.stt.Ptt
+import com.roam.touch.channels.stt.WyomingStt
 import com.roam.touch.channels.tts.Speaker
 import com.roam.touch.channels.tts.TtsSpeaker
 import com.roam.touch.channels.tts.WyomingTts
@@ -32,6 +35,15 @@ object Roam {
     lateinit var device: DeviceStateMonitor
         private set
     lateinit var speaker: Speaker
+        private set
+
+    /**
+     * ★ The input half. Voice is the input; the screen reads output and confirms input.
+     *
+     * ⚠️ Constructed here but **inert** — a [Ptt] holds a closed microphone until
+     * something presses it, and the only thing that does is the PTT control.
+     */
+    lateinit var ptt: Ptt
         private set
 
     /**
@@ -66,6 +78,14 @@ object Roam {
         speaker = TtsSpeaker(
             WyomingTts(BuildConfig.TTS_HOST, BuildConfig.TTS_PORT, BuildConfig.TTS_VOICE),
             scope,
+        )
+
+        // The level callback is read back through `ptt` at call time, which is why the
+        // recorder can be built before the controller that consumes it.
+        ptt = Ptt(
+            recorder = MicRecorder(onLevel = { level -> ptt.onLevel(level) }),
+            stt = WyomingStt(BuildConfig.STT_HOST, BuildConfig.STT_PORT, BuildConfig.STT_LANG),
+            scope = scope,
         )
 
         val haConfig = HaConfig(

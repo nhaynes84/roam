@@ -1,8 +1,13 @@
 package com.roam.touch.channels.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -25,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.roam.touch.channels.Roam
+import com.roam.touch.channels.stt.PttTarget
 import kotlinx.coroutines.delay
 
 /**
@@ -60,7 +66,9 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
     val battery by Roam.device.battery.collectAsStateWithLifecycle()
     val speakingEventId by vm.speakingEventId.collectAsStateWithLifecycle()
     val haHome by vm.haHome.collectAsStateWithLifecycle()
+    val pttState by vm.pttState.collectAsStateWithLifecycle()
     val nowMs = rememberTicker()
+    val requestMic = rememberMicPermission(vm)
 
     var screen by remember { mutableStateOf(Screen.Channels) }
     var openPane by remember { mutableStateOf<String?>(null) }
@@ -97,9 +105,13 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
     }
 
     // Back always unwinds toward Channels, in one step, from anywhere.
+    // ⚠️ Leaving a thread cancels any recording or pending confirmation with it: an
+    // open mic must not survive the screen that opened it, and a transcript confirmed
+    // against a channel he has walked away from is exactly the mis-routing the confirm
+    // step exists to prevent.
     BackHandler(enabled = openPane != null || screen != Screen.Channels) {
         when {
-            openPane != null -> { openPane = null; vm.stopSpeaking() }
+            openPane != null -> { openPane = null; vm.stopSpeaking(); vm.pttCancel() }
             else -> screen = Screen.Channels
         }
     }
@@ -111,13 +123,22 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
                 channel = channel,
                 nowMs = nowMs,
                 speakingEventId = speakingEventId,
-                onBack = { openPane = null; vm.stopSpeaking() },
+                pttState = pttState,
+                onBack = { openPane = null; vm.stopSpeaking(); vm.pttCancel() },
                 onExpand = vm::expand,
                 onPlay = vm::play,
                 onStopPlaying = vm::stopSpeaking,
                 onSend = { vm.send(channel.paneId, it) },
                 onInterrupt = { vm.interrupt(channel.paneId) },
                 onKill = { vm.kill(channel.paneId) },
+                // ★ The permission check is here, in front of the press, not inside
+                // the recorder: a dialog that appears *after* he has already started
+                // talking loses the sentence and teaches him the mic is unreliable.
+                onPttPress = { target -> requestMic(target) },
+                onPttRelease = vm::pttRelease,
+                onPttSend = vm::pttConfirm,
+                onPttCancel = vm::pttCancel,
+                onPttDismiss = vm::pttDismiss,
             )
             // The link banner follows him into the thread. Nowhere in this app is a
             // dead hub invisible.
@@ -166,6 +187,38 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
                     color = if (t.bad) Color.White else RoamColors.TextPrimary,
                 )
             }
+        }
+    }
+}
+
+/**
+ * ★ The microphone gate: check the permission, then press — never the other way round.
+ *
+ * ⚠️ **The result of the dialog never starts a recording.** By the time he has answered
+ * it his thumb is off the button, and a mic that opens on a dialog dismissal is a mic
+ * that opened without anyone pressing anything. He is told to hold it again instead.
+ * That is one wasted press the first time, and no hot mic ever — the same rule that got
+ * automatic speech deleted, applied to the input side where it matters more.
+ */
+@Composable
+private fun rememberMicPermission(vm: ChannelsViewModel): (PttTarget) -> Unit {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val launcher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        vm.notify(
+            if (granted) "microphone granted — hold the mic and talk"
+            else "microphone denied — voice input is off",
+            bad = !granted,
+        )
+    }
+    return remember(context, launcher) {
+        { target ->
+            val granted = ContextCompat.checkSelfPermission(
+                context, Manifest.permission.RECORD_AUDIO
+            ) == PackageManager.PERMISSION_GRANTED
+            if (granted) vm.pttPress(target)
+            else launcher.launch(Manifest.permission.RECORD_AUDIO)
         }
     }
 }

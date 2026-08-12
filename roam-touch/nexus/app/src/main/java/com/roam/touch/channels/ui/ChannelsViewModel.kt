@@ -8,6 +8,9 @@ import com.roam.touch.channels.HubRepository
 import com.roam.touch.channels.Roam
 import com.roam.touch.channels.SendResult
 import com.roam.touch.channels.model.Event
+import com.roam.touch.channels.stt.Ptt
+import com.roam.touch.channels.stt.PttState
+import com.roam.touch.channels.stt.PttTarget
 import com.roam.touch.channels.tts.Speaker
 import com.roam.touch.ha.HaHome
 import com.roam.touch.ha.HaRepository
@@ -37,9 +40,12 @@ class ChannelsViewModel(
      * not use. App #2 is loaded when app #2 is opened.
      */
     haProvider: () -> HaRepository = { Roam.homeAssistant },
+    /** Lazy for the same reason as [haProvider] — see the note above. */
+    pttProvider: () -> Ptt = { Roam.ptt },
 ) : ViewModel() {
 
     private val ha: HaRepository by lazy(haProvider)
+    private val ptt: Ptt by lazy(pttProvider)
 
     val state: StateFlow<ChannelsState> = repo.state
     val link: StateFlow<HubLink> = repo.link
@@ -109,6 +115,44 @@ class ChannelsViewModel(
     fun send(paneId: String, text: String) {
         if (text.isBlank()) return
         viewModelScope.launch { report(repo.send(paneId, text), "sent") }
+    }
+
+    // --- Push to talk -------------------------------------------------------
+
+    val pttState: StateFlow<PttState> get() = ptt.state
+
+    /** Thumb down. [target] is captured here and never re-read; see [PttTarget]. */
+    fun pttPress(target: PttTarget) = ptt.press(target)
+
+    fun pttRelease() = ptt.release()
+
+    fun pttCancel() = ptt.cancel()
+
+    fun pttDismiss() = ptt.clear()
+
+    /**
+     * ★★ The confirmed send — **the only path from a microphone to the hub.**
+     *
+     * The pane id comes from the confirmation, which took it from the press, so the
+     * words and the routing were approved in the same gesture. It posts as the app, so
+     * the hub's last-input rule moves the channel to `app` and the outcome comes back
+     * here rather than being left in tmux.
+     *
+     * ⚠️ A refused send returns the transcript to the confirm card instead of a toast.
+     * He said it out loud; a dead pane is not a reason to make him say it twice.
+     */
+    fun pttConfirm() {
+        val confirmed = ptt.confirm() ?: return
+        viewModelScope.launch {
+            when (val result = repo.send(confirmed.paneId, confirmed.text)) {
+                is SendResult.Ok -> {
+                    ptt.sent()
+                    toasts.send(Toast("sent", bad = false))
+                }
+
+                is SendResult.Failed -> ptt.sendFailed(result.message)
+            }
+        }
     }
 
     fun interrupt(paneId: String) {

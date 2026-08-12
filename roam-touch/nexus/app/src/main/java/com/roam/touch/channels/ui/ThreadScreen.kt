@@ -56,6 +56,8 @@ import com.roam.touch.channels.Liveness
 import com.roam.touch.channels.model.Channel
 import com.roam.touch.channels.model.Event
 import com.roam.touch.channels.model.EventKind
+import com.roam.touch.channels.stt.PttState
+import com.roam.touch.channels.stt.PttTarget
 
 /**
  * One channel's thread.
@@ -71,6 +73,7 @@ fun ThreadScreen(
     channel: Channel,
     nowMs: Long,
     speakingEventId: Long?,
+    pttState: PttState,
     onBack: () -> Unit,
     onExpand: (Event) -> Unit,
     onPlay: (Event) -> Unit,
@@ -78,6 +81,11 @@ fun ThreadScreen(
     onSend: (String) -> Unit,
     onInterrupt: () -> Unit,
     onKill: () -> Unit,
+    onPttPress: (PttTarget) -> Unit,
+    onPttRelease: () -> Unit,
+    onPttSend: () -> Unit,
+    onPttCancel: () -> Unit,
+    onPttDismiss: () -> Unit,
 ) {
     val events = state.thread(channel.paneId)
     val listState = rememberLazyListState()
@@ -132,9 +140,29 @@ fun ThreadScreen(
             }
         }
 
+        // ★ The voice panel sits between the thread and the composer: directly above
+        // the thumb that opened the mic, and never covering the answer he is reading.
+        // ⚠️ `targetLive` reads the channel's live flag *now*, not the one captured at
+        // press time — a pane that died while he was talking must say so before Send.
+        PttPanel(
+            state = pttState,
+            channelLabel = channel.displayLabel,
+            targetLive = channel.live,
+            nowMs = nowMs,
+            onPress = onPttPress,
+            onRelease = onPttRelease,
+            onSend = onPttSend,
+            onCancel = onPttCancel,
+            onDismiss = onPttDismiss,
+        )
+
         Composer(
             enabled = channel.live,
+            pttState = pttState,
+            target = PttTarget(channel.paneId, channel.displayLabel),
             onSend = onSend,
+            onPttPress = onPttPress,
+            onPttRelease = onPttRelease,
         )
     }
 
@@ -371,16 +399,21 @@ private fun accentFor(kind: EventKind): Color = when (kind) {
 }
 
 /**
- * Send: canned replies plus free text.
+ * Send: voice, canned replies, and free text — in that order of importance.
  *
- * The canned row exists because the four things he actually types from a corridor are
- * one word long, and typing one word on a forearm is absurd. They send on one tap —
- * the whole value is that it is faster than a keyboard.
+ * ★ The mic is first because the thesis says so: *voice is the input, the screen reads
+ * output and confirms input.* The canned row exists because the four things he actually
+ * types from a corridor are one word long. The keyboard is last, and stays, because
+ * ⚠️ **you cannot voice-type a password**.
  */
 @Composable
 private fun Composer(
     enabled: Boolean,
+    pttState: PttState,
+    target: PttTarget,
     onSend: (String) -> Unit,
+    onPttPress: (PttTarget) -> Unit,
+    onPttRelease: () -> Unit,
 ) {
     var text by remember { mutableStateOf("") }
 
@@ -411,20 +444,14 @@ private fun Composer(
             Modifier.padding(start = 12.dp, end = 8.dp, bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // PTT sits where the thumb lands, and says out loud that it is not wired up.
-            Box(
-                Modifier
-                    .size(44.dp)
-                    .background(RoamColors.SurfaceRaised, RoundedCornerShape(22.dp)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    Icons.Filled.MicOff,
-                    contentDescription = "push to talk — not in V1",
-                    tint = RoamColors.Dead,
-                    modifier = Modifier.size(21.dp),
-                )
-            }
+            // PTT sits where the thumb lands. Hold it and talk.
+            PttButton(
+                state = pttState,
+                target = target,
+                enabled = enabled,
+                onPress = onPttPress,
+                onRelease = onPttRelease,
+            )
             Spacer(Modifier.width(8.dp))
             OutlinedTextField(
                 value = text,

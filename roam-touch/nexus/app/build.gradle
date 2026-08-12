@@ -27,8 +27,8 @@ android {
         minSdk 26
         //noinspection ExpiredTargetSdkVersion,OldTargetApi
         targetSdk 29
-        versionCode 3
-        versionName "0.3"
+        versionCode 4
+        versionName "0.4"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
@@ -38,6 +38,14 @@ android {
         buildConfigField "String", "TTS_HOST", "\"${prop('roam.tts.host', '100.67.237.109')}\""
         buildConfigField "int", "TTS_PORT", "${prop('roam.tts.port', '10200')}"
         buildConfigField "String", "TTS_VOICE", "\"${prop('roam.tts.voice', 'en_US-ryan-high')}\""
+
+        // Whisper (wyoming-faster-whisper, small-int8) — the input half of the voice
+        // loop. Same host as Piper, one port up. Language is pinned rather than
+        // auto-detected: a one-word command like "continue" is not enough signal for
+        // language ID, and a misdetect turns it into transliterated nonsense.
+        buildConfigField "String", "STT_HOST", "\"${prop('roam.stt.host', '100.67.237.109')}\""
+        buildConfigField "int", "STT_PORT", "${prop('roam.stt.port', '10300')}"
+        buildConfigField "String", "STT_LANG", "\"${prop('roam.stt.lang', 'en')}\""
 
         // ⚠️ Home Assistant. `roam.ha.token` is a LONG-LIVED ACCESS TOKEN and only Nick
         // can mint one — HA issues them from Profile → Security, behind his password,

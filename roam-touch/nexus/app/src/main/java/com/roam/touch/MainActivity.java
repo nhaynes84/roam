@@ -87,6 +87,7 @@ public class MainActivity extends ComponentActivity {
         boolean owner = dpm != null && dpm.isDeviceOwnerApp(pkg);
         if (owner) {
             setAsPersistentHome(dpm, pkg);
+            grantMicrophone(dpm);
         }
 
         // No longer painted on screen — the panel belongs to Channels. logcat is where
@@ -113,6 +114,35 @@ public class MainActivity extends ComponentActivity {
             Log.i(NexusDeviceAdminReceiver.TAG, "registered as persistent home");
         } catch (Exception e) {
             Log.e(NexusDeviceAdminReceiver.TAG, "addPersistentPreferredActivity failed", e);
+        }
+    }
+
+    /**
+     * Grant ourselves {@code RECORD_AUDIO}, which only a device owner may do.
+     *
+     * <p>Push to talk is the input half of this device. A runtime permission dialog on
+     * a screen strapped to a forearm is a bad first press — worse, it appears
+     * <i>after</i> the thumb is already down and the sentence has started. Device owner
+     * exists precisely to answer this in advance, so it does.
+     *
+     * <p>⚠️ This grants the permission; it does not open a microphone. The mic is opened
+     * by {@code MicRecorder} from exactly one place, a press on the PTT control, and is
+     * closed on release. There is no wake word and no background listening.
+     *
+     * <p>⚠️ Wrapped, like every other policy call here: a failure must cost a permission
+     * dialog, never the home screen. On a non-owner build (the emulator) this never
+     * runs and the normal runtime request in {@code ChannelsApp} handles it.
+     */
+    private void grantMicrophone(DevicePolicyManager dpm) {
+        try {
+            dpm.setPermissionGrantState(
+                    new ComponentName(this, NexusDeviceAdminReceiver.class),
+                    getPackageName(),
+                    android.Manifest.permission.RECORD_AUDIO,
+                    DevicePolicyManager.PERMISSION_GRANT_STATE_GRANTED);
+            Log.i(NexusDeviceAdminReceiver.TAG, "microphone granted by policy");
+        } catch (Exception e) {
+            Log.e(NexusDeviceAdminReceiver.TAG, "setPermissionGrantState failed", e);
         }
     }
 

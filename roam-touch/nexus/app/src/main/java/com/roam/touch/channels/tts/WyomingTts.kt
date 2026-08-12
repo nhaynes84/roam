@@ -4,82 +4,18 @@ import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
 import android.util.Log
+import com.roam.touch.channels.wyoming.WyomingReader
+import com.roam.touch.channels.wyoming.WyomingWriter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
-import java.io.BufferedInputStream
-import java.io.ByteArrayOutputStream
 import java.io.EOFException
-import java.io.InputStream
 import java.net.InetSocketAddress
 import java.net.Socket
 import kotlin.coroutines.coroutineContext
-
-/**
- * One Wyoming event: a JSON header line, optional out-of-line JSON data, optional
- * binary payload.
- *
- * The framing matters more than it looks. The header is a *line*, the payload is *raw
- * bytes*, and they share one stream — so this cannot be read with a Reader, which would
- * happily swallow PCM into a decoder. Hence the hand-rolled [readLine] over a byte
- * stream. Verified against wyoming-piper 1.10.0 on talos:10200, 2026-08-12.
- */
-private data class WyomingEvent(
-    val type: String,
-    val data: JsonObject,
-    val payload: ByteArray,
-)
-
-private class WyomingReader(input: InputStream) {
-    private val stream = BufferedInputStream(input, 16 * 1024)
-
-    private fun readLine(): String {
-        val out = ByteArrayOutputStream(256)
-        while (true) {
-            val b = stream.read()
-            if (b == -1) {
-                if (out.size() == 0) throw EOFException("wyoming stream closed")
-                break
-            }
-            if (b == '\n'.code) break
-            out.write(b)
-        }
-        return out.toString("UTF-8")
-    }
-
-    private fun readExactly(n: Int): ByteArray {
-        val buf = ByteArray(n)
-        var off = 0
-        while (off < n) {
-            val r = stream.read(buf, off, n - off)
-            if (r < 0) throw EOFException("wyoming payload truncated")
-            off += r
-        }
-        return buf
-    }
-
-    fun next(): WyomingEvent {
-        val header = com.roam.touch.channels.model.HubJson
-            .parseToJsonElement(readLine()) as JsonObject
-        val type = (header["type"] as? JsonPrimitive)?.content
-            ?: throw IllegalStateException("wyoming event with no type")
-
-        var data = header["data"] as? JsonObject ?: JsonObject(emptyMap())
-        (header["data_length"] as? JsonPrimitive)?.content?.toIntOrNull()?.let { len ->
-            data = com.roam.touch.channels.model.HubJson
-                .parseToJsonElement(String(readExactly(len), Charsets.UTF_8)) as JsonObject
-        }
-        val payload = (header["payload_length"] as? JsonPrimitive)?.content?.toIntOrNull()
-            ?.let { readExactly(it) } ?: ByteArray(0)
-
-        return WyomingEvent(type, data, payload)
-    }
-}
 
 /**
  * Piper over the Wyoming protocol, streamed straight into an [AudioTrack].
@@ -109,17 +45,13 @@ class WyomingTts(
             socket.connect(InetSocketAddress(host, port), CONNECT_TIMEOUT_MS)
             socket.soTimeout = READ_TIMEOUT_MS
 
-            val request = buildJsonObject {
-                put("type", "synthesize")
-                put("data", buildJsonObject {
+            WyomingWriter(socket.getOutputStream()).write(
+                "synthesize",
+                buildJsonObject {
                     put("text", text)
                     if (voice != null) put("voice", buildJsonObject { put("name", voice) })
-                })
-            }
-            socket.getOutputStream().apply {
-                write((request.toString() + "\n").toByteArray(Charsets.UTF_8))
-                flush()
-            }
+                },
+            )
 
             val reader = WyomingReader(socket.getInputStream())
             while (true) {

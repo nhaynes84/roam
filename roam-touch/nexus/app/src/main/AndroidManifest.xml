@@ -13,6 +13,14 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <!-- The panel has to come back after a reboot without anyone tapping anything. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!--
+      ⚠️ Push to talk, and nothing else. The mic is opened by MicRecorder, which is
+      called from exactly one place — a press on the PTT control — and is closed on
+      release. There is no wake word, no VAD and no background listening; see
+      com.roam.touch.channels.stt.Ptt and MicPolicyTest, which fail if that changes.
+    -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
 
     <application
         android:allowBackup="false"
