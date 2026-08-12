@@ -8,13 +8,16 @@ import android.util.Log;
 /**
  * The component named to {@code dpm set-device-owner}.
  *
- * <p>It intentionally does nothing but log. Its only job right now is to exist so the
- * package can hold device-owner status; lock-task and managed-configuration policy get
- * hung off it later, once there is a tested way back out of kiosk mode.
+ * <p>It intentionally does nothing but log. Its only job is to exist so the package can
+ * hold device-owner status, which buys managed configuration, policy and silent installs.
+ *
+ * <p>⚠️ Renaming this class re-provisions the device: it <i>is</i> the device-owner
+ * component, so the name change means clear-then-re-set via the escape hatch in
+ * {@link MainActivity}. Don't rename it casually.
  */
-public class KioskDeviceAdminReceiver extends DeviceAdminReceiver {
+public class NexusDeviceAdminReceiver extends DeviceAdminReceiver {
 
-    static final String TAG = "RoamKioskAdmin";
+    static final String TAG = "RoamNexus";
 
     @Override
     public void onEnabled(Context context, Intent intent) {

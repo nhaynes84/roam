@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Policy metadata for KioskDeviceAdminReceiver.
+  Policy metadata for NexusDeviceAdminReceiver.
 
   Deliberately minimal. Device owner grants the app most policy powers implicitly;
   this list only needs to cover the legacy per-policy uses-policies gate. Nothing

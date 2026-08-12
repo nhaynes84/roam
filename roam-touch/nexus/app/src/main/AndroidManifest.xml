@@ -20,6 +20,14 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+                <!--
+                  HOME + DEFAULT make Nexus eligible as a home screen. Which one Home
+                  actually lands on is then pinned by addPersistentPreferredActivity in
+                  MainActivity (device-owner only), so no launcher-picker dialog appears.
+                  The stock Pixel launcher stays installed as the fallback.
+                -->
+                <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
 
@@ -42,12 +50,12 @@
 
         <!--
           The device-admin component. `dpm set-device-owner` names exactly this:
-              com.roam.touch/.KioskDeviceAdminReceiver
+              com.roam.touch/.NexusDeviceAdminReceiver
           BIND_DEVICE_ADMIN is mandatory — without it the system refuses the
           component outright.
         -->
         <receiver
-            android:name=".KioskDeviceAdminReceiver"
+            android:name=".NexusDeviceAdminReceiver"
             android:description="@string/device_admin_description"
             android:exported="true"
             android:label="@string/app_name"

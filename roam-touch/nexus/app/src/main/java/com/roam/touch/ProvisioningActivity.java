@@ -21,7 +21,7 @@ public class ProvisioningActivity extends Activity {
         super.onCreate(savedInstanceState);
 
         String action = getIntent() == null ? null : getIntent().getAction();
-        Log.i(KioskDeviceAdminReceiver.TAG, "provisioning activity: " + action);
+        Log.i(NexusDeviceAdminReceiver.TAG, "provisioning activity: " + action);
 
         if (DevicePolicyManager.ACTION_GET_PROVISIONING_MODE.equals(action)) {
             // Fully managed device, never a work profile.

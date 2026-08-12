@@ -1,5 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <string name="app_name">ROAM Kiosk</string>
-    <string name="device_admin_description">ROAM Touch device owner. Holds lock-task and managed-configuration policy for the bracer prototype.</string>
-</resources>

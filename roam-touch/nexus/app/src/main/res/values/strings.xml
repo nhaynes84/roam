@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Nexus</string>
+    <string name="device_admin_description">ROAM device owner. Holds managed-configuration and policy control for the bracer prototype.</string>
+</resources>
