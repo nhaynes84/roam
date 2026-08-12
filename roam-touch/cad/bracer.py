@@ -55,6 +55,17 @@ LIP_SIDE = 2.5       # front lip over the long bezels
 LIP_END = 4.0        # front lip at the hand end
 LIP_H = 2.4          # lip height above the phone face (also screen standoff)
 
+# ★ Screen tilt. Worn flat on the forearm the display points at the ceiling,
+# so you have to rotate your whole arm to read it. Tilting the tray relative
+# to the arm puts it in your eyeline at rest.
+# Implemented by tilting the ARM CUT rather than the tray: the tray, pocket
+# and every aperture stay in a clean axis-aligned frame, and only the rib
+# profile changes. Rotating the tray instead would drag every feature with it.
+# ⚠️ HANDED. Positive drops the +X (button) side, so the screen faces across
+# the body -- correct for one arm and wrong for the other. Flip the sign for
+# the other forearm.
+TILT = 20.0          # degrees
+
 ARM_R = 45.0         # nominal forearm radius, mm (90 mm dia)
 GAP = 4.0            # air gap between arm and tray underside, at the crown
 FOAM = 4.0           # compliant pad thickness on EVERY rib face -- see below
@@ -129,8 +140,11 @@ OUT_H = FLOOR + POCK_D + LIP_H
 ARM_CUT_R = ARM_R + FOAM
 ARM_AXIS_Z = -(ARM_R + GAP + FOAM)
 
-# how far the ribs hang below the tray at their outer tips
-SAG = -(ARM_AXIS_Z + math.sqrt(ARM_CUT_R ** 2 - (RIB_W / 2) ** 2))
+# How far the ribs hang below the tray at their outer tips. The tilt drops one
+# tip further, so allow for it or the rib blank is too short and the arm cut
+# leaves a hole where material should be.
+SAG = -(ARM_AXIS_Z + math.sqrt(ARM_CUT_R ** 2 - (RIB_W / 2) ** 2)) \
+      + (RIB_W / 2) * math.sin(math.radians(abs(TILT)))
 
 
 # --------------------------------------- SVG face coords -> model coords
@@ -163,17 +177,19 @@ for y in RIB_Y:
     part += bbox(-RIB_W / 2, RIB_W / 2, y - RIB_T / 2, y + RIB_T / 2, -SAG, 0)
 
 # Carve the forearm (plus the foam allowance) out of the ribs.
-arm = Pos(0, OUT_L / 2, ARM_AXIS_Z) * Rot(90, 0, 0) * Cylinder(
+_pivot = -(GAP + FOAM)          # crown contact, on the tray centre line
+_tilt = Pos(0, 0, _pivot) * Rot(0, TILT, 0) * Pos(0, 0, -_pivot)
+arm = _tilt * (Pos(0, OUT_L / 2, ARM_AXIS_Z) * Rot(90, 0, 0) * Cylinder(
     ARM_CUT_R, OUT_L + 60
-)
+))
 part -= arm
 
 # Strap channel: a second, larger cylinder over just the rib's centre band
 # carves a groove into each rib's arm-facing face. The webbing lies in there,
 # between rib and arm, and wraps the forearm -- no flanges, no threading.
 for y in RIB_Y:
-    part -= Pos(0, y, ARM_AXIS_Z) * Rot(90, 0, 0) * Cylinder(
-        ARM_CUT_R + STRAP_D, STRAP_W)
+    part -= _tilt * (Pos(0, y, ARM_AXIS_Z) * Rot(90, 0, 0) * Cylinder(
+        ARM_CUT_R + STRAP_D, STRAP_W))
 
 # Retaining bars across the channel so the strap cannot fall out when it is
 # off your arm. Trimmed back to the arm surface by re-cutting the arm after.
