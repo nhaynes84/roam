@@ -1,70 +1,63 @@
 package com.roam.touch.channels.tts
 
 import android.util.Log
+import com.roam.touch.channels.model.Event
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
- * Serialises speech, because two voices at once is worse than none.
+ * The only way this app makes a sound.
  *
- * The queue is deliberately shallow. If four outcomes land while he is walking, hearing
- * the newest one promptly beats hearing all four in a two-minute monologue — and the
- * ones he skipped are still sitting in their channels with unread badges, which is
- * where he will look anyway.
+ * One method, and it takes the message he tapped. There is no queue, no policy and no
+ * subscription to arriving events — playing a second message replaces the first, because
+ * that is what pressing play on a second message means.
  */
+interface Speaker {
+    /** The event currently being spoken, or null. Drives the play/stop control. */
+    val speakingEventId: StateFlow<Long?>
+
+    /** Speak [event]. Explicit user action only — nothing in this app may call this. */
+    fun play(event: Event, channelLabel: String)
+
+    fun stop()
+}
+
 class TtsSpeaker(
     private val tts: WyomingTts,
     private val scope: CoroutineScope,
-    private val depth: Int = MAX_QUEUE,
-) {
-    private val queue = Channel<String>(capacity = depth, onBufferOverflow =
-        kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST)
+) : Speaker {
 
-    private var pump: Job? = null
+    private val _speakingEventId = MutableStateFlow<Long?>(null)
+    override val speakingEventId: StateFlow<Long?> = _speakingEventId.asStateFlow()
 
-    private val _speaking = MutableStateFlow(false)
-    val speaking: StateFlow<Boolean> = _speaking.asStateFlow()
+    private var job: Job? = null
 
-    fun start() {
-        if (pump?.isActive == true) return
-        pump = scope.launch {
-            while (isActive) {
-                val text = queue.receive()
-                _speaking.value = true
-                // Verifiable from `adb logcat -s RoamTts` — speech is the one output
-                // that leaves no trace on the screen, so it leaves one in the log.
-                Log.i(TAG, "speaking: ${text.take(80)}")
-                runCatching { tts.speak(text) }
-                    .onFailure { Log.w(TAG, "piper failed: ${it.message}") }
-                _speaking.value = false
-            }
+    override fun play(event: Event, channelLabel: String) {
+        val text = Utterance.of(channelLabel, event)
+        if (text.isBlank()) return
+        // Tapping play on a different message stops the first one mid-sentence. Two
+        // voices at once is worse than none, and he pressed the newer button.
+        job?.cancel()
+        _speakingEventId.value = event.id
+        job = scope.launch {
+            Log.i(TAG, "play(${event.id}): ${text.take(80)}")
+            runCatching { tts.speak(text) }
+                .onFailure { Log.w(TAG, "piper failed: ${it.message}") }
+            if (_speakingEventId.value == event.id) _speakingEventId.value = null
         }
     }
 
-    fun enqueue(text: String) {
-        queue.trySend(text)
-    }
-
-    /** Drop everything pending. Used the instant he looks at the screen. */
-    fun flush() {
-        while (queue.tryReceive().isSuccess) { /* drain */ }
-    }
-
-    fun stop() {
-        pump?.cancel()
-        pump = null
-        flush()
-        _speaking.value = false
+    override fun stop() {
+        job?.cancel()
+        job = null
+        _speakingEventId.value = null
     }
 
     companion object {
         private const val TAG = "RoamTts"
-        const val MAX_QUEUE = 3
     }
 }

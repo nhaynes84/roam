@@ -49,7 +49,7 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
     val state by vm.state.collectAsStateWithLifecycle()
     val link by vm.link.collectAsStateWithLifecycle()
     val battery by Roam.device.battery.collectAsStateWithLifecycle()
-    val ttsMode by Roam.ttsMode.collectAsStateWithLifecycle()
+    val speakingEventId by vm.speakingEventId.collectAsStateWithLifecycle()
     val nowMs = rememberTicker()
 
     var openPane by remember { mutableStateOf<String?>(null) }
@@ -79,7 +79,7 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
         if (link.isOnline) openPane?.let { vm.refreshThread(it) }
     }
 
-    BackHandler(enabled = openPane != null) { openPane = null }
+    BackHandler(enabled = openPane != null) { openPane = null; vm.stopSpeaking() }
 
     Box(Modifier.fillMaxSize()) {
         if (channel != null) {
@@ -87,8 +87,11 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
                 state = state,
                 channel = channel,
                 nowMs = nowMs,
-                onBack = { openPane = null },
+                speakingEventId = speakingEventId,
+                onBack = { openPane = null; vm.stopSpeaking() },
                 onExpand = vm::expand,
+                onPlay = vm::play,
+                onStopPlaying = vm::stopSpeaking,
                 onSend = { vm.send(channel.paneId, it) },
                 onInterrupt = { vm.interrupt(channel.paneId) },
                 onKill = { vm.kill(channel.paneId) },
@@ -103,10 +106,8 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
                 state = state,
                 link = link,
                 battery = battery,
-                ttsMode = ttsMode,
                 nowMs = nowMs,
                 onOpen = { openPane = it.paneId; vm.openThread(it.paneId) },
-                onCycleTts = { Roam.cycleTtsMode() },
             )
         }
 

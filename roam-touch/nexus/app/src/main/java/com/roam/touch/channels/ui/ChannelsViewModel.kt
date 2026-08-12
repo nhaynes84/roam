@@ -8,6 +8,7 @@ import com.roam.touch.channels.HubRepository
 import com.roam.touch.channels.Roam
 import com.roam.touch.channels.SendResult
 import com.roam.touch.channels.model.Event
+import com.roam.touch.channels.tts.Speaker
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
@@ -24,10 +25,28 @@ data class Toast(val text: String, val bad: Boolean)
  */
 class ChannelsViewModel(
     private val repo: HubRepository = Roam.repository,
+    private val speaker: Speaker = Roam.speaker,
 ) : ViewModel() {
 
     val state: StateFlow<ChannelsState> = repo.state
     val link: StateFlow<HubLink> = repo.link
+
+    /**
+     * Which message is being spoken, or null.
+     *
+     * ★ The *only* producer of audio in this app is [play], and the only caller of [play]
+     * is a tap on a play control. Nothing observes [HubRepository.arrivals] to speak.
+     * That is a requirement, not an implementation detail — see SpeechPolicyTest.
+     */
+    val speakingEventId: StateFlow<Long?> = speaker.speakingEventId
+
+    /** He pressed play on this message. */
+    fun play(event: Event) {
+        val label = repo.state.value.channel(event.paneId)?.displayLabel.orEmpty()
+        speaker.play(event, label)
+    }
+
+    fun stopSpeaking() = speaker.stop()
 
     private val toasts = Channel<Toast>(Channel.BUFFERED)
     val messages: Flow<Toast> = toasts.receiveAsFlow()

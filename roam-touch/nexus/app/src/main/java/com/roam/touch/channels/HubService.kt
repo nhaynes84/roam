@@ -12,8 +12,6 @@ import android.os.IBinder
 import androidx.annotation.RequiresApi
 import com.roam.touch.MainActivity
 import com.roam.touch.R
-import com.roam.touch.channels.tts.SpeechContext
-import com.roam.touch.channels.tts.TtsGate
 import android.util.Log
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
@@ -21,7 +19,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
 
@@ -56,7 +53,6 @@ class HubService : Service() {
         super.onCreate()
         Roam.init(this)
         Roam.device.start()
-        Roam.speaker.start()
         startForeground(NOTIFICATION_ID, buildNotification(HubLink.Connecting, 0))
 
         connection = scope.launch {
@@ -65,12 +61,15 @@ class HubService : Service() {
         }
 
         // Presence: "I am looking at the panel." Registered on foreground, dropped on
-        // background, exactly as API.md asks — the bridge reads it from the hub, so
-        // suppression is never reimplemented on this side.
+        // background, exactly as API.md asks — the bridge reads suppression out of the
+        // hub, so none of that logic is duplicated on this side.
+        //
+        // ⚠️ The heartbeat is launched into the SERVICE scope, not into this collector's,
+        // so a state change cannot cancel it half-registered.
         scope.launch {
-            Roam.device.appForeground.collectLatest { foreground ->
+            Roam.device.appForeground.collect { foreground ->
+                Log.i(TAG, "foreground=$foreground screenOn=${Roam.device.screenOn.value}")
                 if (foreground) {
-                    Roam.speaker.flush()
                     Roam.repository.startPresence(scope)
                 } else {
                     Roam.repository.stopPresence()
@@ -78,31 +77,17 @@ class HubService : Service() {
             }
         }
 
-        scope.launch { speakArrivals() }
         scope.launch { updateNotification() }
     }
 
     /**
-     * TTS on outcomes, gated on context.
+     * ★★ There is deliberately no code here that turns an arriving event into speech.
      *
-     * The decision itself is [TtsGate], which is pure and tested; this only supplies
-     * the three live facts and hands the utterance to the queue.
+     * The owner, with the app on the phone while he worked at the laptop: *"channels is
+     * reading these messages out loud … I don't want it non stop blabbering at me."*
+     * Speech is opt-in per message, from a play control in the thread. If you are adding
+     * an automatic path back, you are re-introducing a bug he has already reported.
      */
-    private suspend fun speakArrivals() {
-        Roam.repository.arrivals.collect { arrival ->
-            val ctx = SpeechContext(
-                mode = Roam.ttsMode.value,
-                screenOn = Roam.device.screenOn.value,
-                appForeground = Roam.device.appForeground.value,
-                fromBacklog = arrival.fromBacklog,
-            )
-            if (!TtsGate.shouldSpeak(arrival.event, ctx)) return@collect
-            val label = Roam.repository.state.value
-                .channel(arrival.event.paneId)?.displayLabel.orEmpty()
-            Roam.speaker.enqueue(TtsGate.utterance(label, arrival.event))
-        }
-    }
-
     private suspend fun updateNotification() {
         Roam.repository.link.collect { link ->
             val unread = Roam.repository.state.value.totalUnread()

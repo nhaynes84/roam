@@ -37,7 +37,6 @@ import com.roam.touch.channels.LivenessLabel
 import com.roam.touch.channels.OfflineReason
 import com.roam.touch.channels.Queue
 import com.roam.touch.channels.model.Channel
-import com.roam.touch.channels.tts.TtsMode
 
 /**
  * ★ The queue. Not a feed.
@@ -51,17 +50,15 @@ fun ChannelListScreen(
     state: ChannelsState,
     link: HubLink,
     battery: BatteryState,
-    ttsMode: TtsMode,
     nowMs: Long,
     onOpen: (Channel) -> Unit,
-    onCycleTts: () -> Unit,
 ) {
     Column(
         Modifier
             .fillMaxSize()
             .background(RoamColors.Background)
     ) {
-        ListTopBar(state, battery, ttsMode, onCycleTts)
+        ListTopBar(state, battery)
         LinkBanner(link, nowMs)
 
         val ordered = Queue.order(state, nowMs)
@@ -87,8 +84,6 @@ fun ChannelListScreen(
 private fun ListTopBar(
     state: ChannelsState,
     battery: BatteryState,
-    ttsMode: TtsMode,
-    onCycleTts: () -> Unit,
 ) {
     Row(
         Modifier
@@ -108,18 +103,8 @@ private fun ListTopBar(
             UnreadBadge(unread)
         }
         Spacer(Modifier.weight(1f))
-        // Voice mode is one tap, because the right answer changes when he walks into a
-        // room with people in it — and that is not a trip to a settings screen.
-        StateChip(
-            text = ttsMode.label,
-            color = when (ttsMode) {
-                TtsMode.AUTO -> RoamColors.Attention
-                TtsMode.ALWAYS -> RoamColors.Working
-                TtsMode.MUTED -> RoamColors.Dead
-            },
-            modifier = Modifier.clickable { onCycleTts() },
-        )
-        Spacer(Modifier.width(8.dp))
+        // No voice-mode control here. The app never speaks unless he taps play on a
+        // specific message, so there is no mode to be in.
         BatteryChip(battery)
     }
 }

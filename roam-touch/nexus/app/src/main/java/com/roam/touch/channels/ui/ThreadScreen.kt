@@ -26,6 +26,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
@@ -68,8 +70,11 @@ fun ThreadScreen(
     state: ChannelsState,
     channel: Channel,
     nowMs: Long,
+    speakingEventId: Long?,
     onBack: () -> Unit,
     onExpand: (Event) -> Unit,
+    onPlay: (Event) -> Unit,
+    onStopPlaying: () -> Unit,
     onSend: (String) -> Unit,
     onInterrupt: () -> Unit,
     onKill: () -> Unit,
@@ -118,7 +123,10 @@ fun ThreadScreen(
                     EventCard(
                         state = state,
                         event = event,
+                        speaking = speakingEventId == event.id,
                         onExpand = { onExpand(event) },
+                        onPlay = { onPlay(event) },
+                        onStopPlaying = onStopPlaying,
                     )
                 }
             }
@@ -227,7 +235,10 @@ private fun ThreadTopBar(
 private fun EventCard(
     state: ChannelsState,
     event: Event,
+    speaking: Boolean,
     onExpand: () -> Unit,
+    onPlay: () -> Unit,
+    onStopPlaying: () -> Unit,
 ) {
     var expanded by remember(event.id) { mutableStateOf(false) }
     val kind = event.kindEnum
@@ -260,6 +271,24 @@ private fun EventCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = RoamColors.TextSecondary.copy(alpha = 0.7f),
             )
+            // ★★ The only thing in this app that makes a sound. One tap, one message.
+            // Nothing plays on its own — see Utterance and SpeechPolicyTest.
+            if (event.summary.isNotBlank() || event.body.isNotBlank()) {
+                Spacer(Modifier.width(4.dp))
+                IconButton(
+                    onClick = { if (speaking) onStopPlaying() else onPlay() },
+                    modifier = Modifier.size(40.dp),
+                ) {
+                    Icon(
+                        imageVector = if (speaking) Icons.Filled.Stop
+                        else Icons.Filled.PlayArrow,
+                        contentDescription = if (speaking) "stop speaking"
+                        else "play this message",
+                        tint = if (speaking) RoamColors.Alarm else RoamColors.Attention,
+                        modifier = Modifier.size(26.dp),
+                    )
+                }
+            }
         }
 
         // ⚠️ API.md: an outcome whose transcript never settled may be an earlier block

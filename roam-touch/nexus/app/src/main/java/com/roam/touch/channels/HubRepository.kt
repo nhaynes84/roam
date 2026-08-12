@@ -325,7 +325,12 @@ class HubRepository(
         if (presenceJob?.isActive == true) return
         presenceJob = scope.launch {
             while (isActive) {
+                // ⚠️ Logged, not swallowed. This silently failing is invisible from the
+                // outside: the only symptom is the bridge notifying him about a screen
+                // he is looking at, which reads as a notification bug, not a presence bug.
                 runCatching { api.registerPresence() }
+                    .onSuccess { Log.i(TAG, "presence registered (covers_all)") }
+                    .onFailure { Log.w(TAG, "presence POST failed: ${it.message}") }
                 delay(PRESENCE_REFRESH_MS)
             }
         }
@@ -335,6 +340,7 @@ class HubRepository(
         presenceJob?.cancel()
         presenceJob = null
         api.clearPresence()
+        Log.i(TAG, "presence dropped")
     }
 
     companion object {

@@ -6,7 +6,6 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
-import com.roam.touch.channels.tts.TtsMode
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -36,15 +35,6 @@ interface ReadCursorStore {
 class Settings(context: Context) : ReadCursorStore {
     private val store = context.applicationContext.dataStore
 
-    val ttsMode: Flow<TtsMode> = store.data.map { prefs ->
-        prefs[KEY_TTS_MODE]?.let { runCatching { TtsMode.valueOf(it) }.getOrNull() }
-            ?: TtsMode.AUTO
-    }
-
-    suspend fun setTtsMode(mode: TtsMode) {
-        store.edit { it[KEY_TTS_MODE] = mode.name }
-    }
-
     /** pane id -> highest event id read, flattened to `%0=41;%1=7`. */
     val readCursors: Flow<Map<String, Long>> = store.data.map { decode(it[KEY_READ]) }
 
@@ -55,7 +45,6 @@ class Settings(context: Context) : ReadCursorStore {
     }
 
     companion object {
-        private val KEY_TTS_MODE = stringPreferencesKey("tts_mode")
         private val KEY_READ = stringPreferencesKey("read_cursors")
 
         fun encode(cursors: Map<String, Long>): String =
