@@ -154,45 +154,58 @@ STRAP_BAND = 3.0     # how far the thick band runs past the channel
 WALL_END = 3.0       # closing wall at the hand end
 CAV_Y1 = 3.0         # cavity stops this far short of the hand end
 
-# ------------------------------------------------------------------ visor
-# ★★ The screen sits in a WELL with a hood proud around it, not flush in a
-# flat face. Taken from the Pip-Boy reference in ref/. What that object does,
-# and what is worth stealing: the display is sunk, the surround stands well
-# clear of it, and the surround is NOT a uniform ring -- there is a deep brow
-# at one end, a shallower one at the other, and plain walls down the sides.
+# ------------------------------------------------------------- high guard
+# ★★ A HIGH GUARD, not a brow: the screen sits down inside a deep three-sided
+# surround. Measured off the owner's RoamTouchHighGuardDemo.step, which is the
+# authority for the form; the numbers below are read from it, not invented.
+# What his file says, in his geometry:
+#   * crest at Z 28.4 -- 15.0 mm above the tray face, where ours was 5.0;
+#   * outer face vertical to Z ~22.4, then bevelled in 2.5 mm to the crest;
+#   * inner face hard against the aperture mouth at |X| 33.65;
+#   * THREE SIDES. The deep (+X) flank has no guard at all -- that is the
+#     3.11 cm3 "deep-flank cut": it is not a cut, it is a wall he never built;
+#   * the crest RAMPS DOWN at 45 deg into both ends, from Y 134 at the hand
+#     end and Y ~10.9 at the elbow. That ramp is what stops the guard reading
+#     as an extrusion, and it is the answer to the blocky ends as well.
 #
-# ⚠️ The screen aperture and its lofted slope into the display are FROZEN. The
-# visor is added on top of the existing face and every existing cut (screen,
-# earpiece, camera, proximity) is made after it, so it runs straight through.
-# Nothing here narrows the opening.
+# ★ What he asked for on top of his file: the inner faces CONCAVE -- scooped
+# back into the thick surround so the wall thins as it rises and its crest
+# meets his outer bevel. Cut with cylinders, so it is one curved face per side
+# in the STEP rather than a faceted approximation he has to clean up.
 #
-# ⚠️ Print constraint, and it is what makes the two brows different: standing
-# on the hand end, +Y is DOWN. A face whose outward normal has a +Y component
-# is a ceiling. So the ELBOW brow's screen-side face must rake back at 45 deg
-# or shallower, while the HAND brow's can be a plain vertical wall. The
-# asymmetry the reference has for styling reasons, this part has for real ones.
-VISOR_H = 5.0        # how far the hood stands above the tray's face
-# ⚠️ 41.5, not 40: flush with the RIBS, not with the hull's flank. The hood
-# wall has to carry a 3 mm bevel on its outer top edge and a 1.2 mm one on
-# its inner lip, and at 40 there were only 3.97 mm of wall for 4.2 mm of
-# chamfer -- the two met at a knife edge. It costs 1.5 mm of width on the
-# shallow side and none on the deep side, where the ribs already reach 41.5.
-VISOR_HW = 41.5      # hood half width -- flush with the ribs
-# ⚠️ WELL_HW is DERIVED, not chosen. The frozen bezel already limits how far
-# off-axis you can see the far edge of the display: the aperture mouth stands
-# BEZEL_CHAM proud of the display over LIP_H of rise, a 32 deg cone. Setting
-# the well's wall on that same ray means the hood can be as tall as it likes
-# and still never shadow a pixel the housing was not already shadowing.
-SIGHT = None         # filled in below, once WIN_X exists
-WELL_Y0 = 11.0       # well starts here -- elbow brow is everything before it
-WELL_Y1 = 141.0      # ...and ends here, clear of the camera at 140.5
-# ⚠️ 5.0, and it rakes AWAY from the screen, not over it. Two constraints meet
-# here: printed on the hand end this face points down, so it needs to run at
-# least VISOR_H in Y to stay inside 45 deg; and raking it the other way would
-# put the hood's lip inside the sight cone and shadow the near edge.
-VISOR_RAKE = 5.0     # back-rake on the elbow brow's inner face
-VISOR_NOTCH_W = 17.0  # notch through the hand brow, echoing the reference
-VISOR_BASE_CH = 1.0   # bevel where the hood overhangs the tray's side wall
+# What I did NOT take from his file, and why:
+#   ⚠️ his hand brow starts at Y 135.3, which puts 15 mm of material over the
+#      front camera and the earpiece. Those are frozen apertures; punching them
+#      through a 15 mm brow would tube the camera. Ours starts at Y 141, clear
+#      of the camera's outer edge at 140.5, and the brow is correspondingly
+#      shorter. That is the one place his form and the housing disagree.
+#   ⚠️ his elbow brow's inner face rakes at 49 deg off vertical. Printed
+#      standing on the hand end that face points down and needs support; ours
+#      is held to 45 deg by construction (see SCOOP_R_BROW).
+GUARD_H = 15.0       # crest height above the tray face -- his 28.4 - 13.4
+GUARD_HW = 41.5      # outer half width, flush with the ribs
+GUARD_BEV_H = 6.0    # his outer bevel: starts this far below the crest...
+GUARD_BEV_X = 2.5    # ...and takes this much off the width
+GUARD_BASE_CH = 1.0  # bevel where the guard overhangs the tray's side wall
+GUARD_LEDGE = 0.3    # well floor left outside the aperture mouth. ⚠️ NOT zero:
+                     # landing the scoop exactly on the mouth makes a
+                     # coincident face with the aperture cut, and that is what
+                     # took the whole solid non-manifold last round.
+# ⚠️ CREST_W is set by the min-wall check, not by taste. His outer bevel is
+# only 22.6 deg off vertical and the scoop arrives vertical at the crest, so a
+# true point is a 22.6 deg wedge -- a feather edge, and the wall check flags it
+# (its filter keeps exactly this case). 1.2 mm is three extrusion lines and it
+# still reads as a point at 83 mm across.
+CREST_W = 1.2        # flat left at the crest
+BROW_Y0 = 11.0       # elbow scoop's base, on the well floor
+BROW_Y1 = 141.0      # hand scoop's base -- clear of the camera at 140.5
+ELBOW_OUT = 0.59     # elbow brow's outer face rakes back at his slope
+RAMP_Y0 = 11.0       # crest starts ramping down here, toward the elbow...
+RAMP_Y1 = 134.0      # ...and here toward the hand. His numbers.
+# 1.1, not his 1.0. The ramp faces point downward when the part stands on its
+# hand end, and at 1.0 they land at exactly 45 deg -- on the threshold, not
+# under it. 1.1 puts them at 48 deg and is indistinguishable by eye.
+RAMP_SLOPE = 1.1     # run per unit rise; >1 is shallower than 45 deg
 
 CAP_D = 10.0         # end-cap slip depth
 CAP_W = 2.0          # cap side wall
@@ -256,7 +269,6 @@ EPS = 0.1
 # designed object rather than a blank.
 CHAMFER = 3.0        # major creases
 CHAMFER_SM = 1.5     # where a facet is too narrow for the full size
-CHAMFER_LIP = 1.2    # the visor hood's inner edge
 
 # --------------------------------------------------------------- derived
 POCK_L = PH_L + 2 * CLR
@@ -315,10 +327,32 @@ WIN_X = max(abs(fx(_sx0)), abs(fx(_sx1))) + FEAT_TOL
 WIN_Y0, WIN_Y1 = fy(_sy1) - FEAT_TOL, fy(_sy0) + FEAT_TOL
 
 
-# ★ The hood's well, set on the ray the frozen bezel already casts (see the
-# visor parameters). Anything inside this line would shadow live pixels.
+# ★ The ray the frozen bezel already casts: the aperture mouth stands
+# BEZEL_CHAM proud of the display over LIP_H of rise. The guard's inner wall
+# starts on that ray and the concave scoop only ever moves material AWAY from
+# it, so the guard cannot shadow a pixel the housing was not already shadowing.
+# The harness proves it rather than trusting the arithmetic.
 SIGHT = BEZEL_CHAM / LIP_H
-WELL_HW = WIN_X + (LIP_H + VISOR_H) * SIGHT
+GUARD_X0 = WIN_X + BEZEL_CHAM + GUARD_LEDGE     # scoop's base, on the well floor
+_GZ0, _GZ1 = OUT_H, OUT_H + GUARD_H
+GUARD_XC = GUARD_HW - GUARD_BEV_X - CREST_W     # crest, inboard of the bevel
+
+
+def scoop_r(run, rise):
+    """Radius of the arc that leaves a vertical wall at the crest and has moved
+    `run` sideways by the time it reaches `rise` below it."""
+    return (run ** 2 + rise ** 2) / (2 * run)
+
+
+SCOOP_R_SIDE = scoop_r(GUARD_XC - GUARD_X0, GUARD_H)
+SCOOP_CX = GUARD_XC - SCOOP_R_SIDE              # axis, out in the well
+# ⚠️ The brow scoops' radius is a PRINTABILITY choice, not a styling one. The
+# elbow brow's inner face points down when the part stands on its hand end, so
+# it must stay inside 45 deg; for this family of arcs the steepest point is at
+# the base and the condition is exactly R >= rise * sqrt(2).
+SCOOP_R_BROW = GUARD_H * math.sqrt(2) * 1.13
+SCOOP_CY0 = BROW_Y0 + math.sqrt(SCOOP_R_BROW ** 2 - GUARD_H ** 2)   # elbow axis
+SCOOP_CY1 = BROW_Y1 - math.sqrt(SCOOP_R_BROW ** 2 - GUARD_H ** 2)   # hand axis
 
 
 def bbox(x0, x1, y0, y1, z0, z1):
@@ -606,62 +640,76 @@ part += fins(CAP_D, OUT_L)
 # floor is the old face, at OUT_H); the hood stands proud all round; and the
 # hood is not a uniform ring -- deep brow at the elbow, shallower at the hand,
 # plain walls down the sides where there are only 6 mm to play with.
-_vz0, _vz1 = OUT_H, OUT_H + VISOR_H
-# The hood's own section, bevelled at the top corners in the polygon rather
-# than by OCCT afterwards -- same reasoning as the hull creases.
-# ⚠️ Wound the same way round as HULL_SEC. prism() extrudes along the face
-# normal and Polygon takes its normal from the winding, so listing this the
-# other way sends the whole hood to -Y and the part comes out 294 mm long.
-# ⚠️ The base sits EPS below OUT_H, not on it. The hood's underside and the
-# tray's top face are the same plane; unioning two solids that share a face
-# exactly is what made the part non-manifold, and the symptom was four probes
-# failing 140 mm away with no obvious connection to the visor.
-VISOR_SEC = [
-    (-VISOR_HW + VISOR_BASE_CH, _vz0 - EPS),
-    ( VISOR_HW - VISOR_BASE_CH, _vz0 - EPS),
-    ( VISOR_HW,           _vz0 + VISOR_BASE_CH),
-    ( VISOR_HW,           _vz1 - CHAMFER),
-    ( VISOR_HW - CHAMFER, _vz1),
-    (-VISOR_HW + CHAMFER, _vz1),
-    (-VISOR_HW,           _vz1 - CHAMFER),
-    (-VISOR_HW,           _vz0 + VISOR_BASE_CH),
+# ---- the blank: a slab the full width, bevelled top and base like his ----
+GUARD_SEC = [
+    (-GUARD_HW + GUARD_BASE_CH, _GZ0 - EPS),
+    ( GUARD_HW - GUARD_BASE_CH, _GZ0 - EPS),
+    ( GUARD_HW,                 _GZ0 - EPS + GUARD_BASE_CH),
+    ( GUARD_HW,                 _GZ1 - GUARD_BEV_H),
+    ( GUARD_HW - GUARD_BEV_X,   _GZ1),
+    (-GUARD_HW + GUARD_BEV_X,   _GZ1),
+    (-GUARD_HW,                 _GZ1 - GUARD_BEV_H),
+    (-GUARD_HW,                 _GZ0 - EPS + GUARD_BASE_CH),
 ]
-# ⚠️ The hood has to be tall enough to carry both of its bevels. At 4.0 the
-# base bevel's top (14.9) sat ABOVE the start of the top bevel (14.4), the
-# polygon self-intersected, and the solid came out non-manifold.
-assert _vz1 - CHAMFER > _vz0 + VISOR_BASE_CH, \
-    "visor too shallow for its own bevels"
-visor = prism(VISOR_SEC, 0.0, OUT_L)
-# The well. Cut as a Y-Z profile so the elbow brow's inner face can rake BACK
-# at 42 deg: steep enough to stay off the sight line, shallow enough that it
-# is not a ceiling when printed on the hand end.
-visor -= yz_prism([
-    (WELL_Y0,                 _vz0 - EPS),
-    (WELL_Y1,                 _vz0 - EPS),
-    (WELL_Y1,                 _vz1 + 10),
-    (WELL_Y0 - VISOR_RAKE,    _vz1 + 10),
-    (WELL_Y0 - VISOR_RAKE,    _vz1),
-], -WELL_HW, WELL_HW)
-# Bevel the hood's inner lip -- the 135 mm crease the audit called out. Cut as
-# two wedges along the well rather than with OCCT, which refused it.
-# ⚠️ The cutter reaches 2 mm INTO the well, not up to its wall. Landing its
-# face exactly on X = WELL_HW makes a coincident face with the well's own
-# wall, and OCCT emits a non-manifold shell there -- the whole part stopped
-# being watertight and every contains() probe went to nonsense. Same lesson as
-# the EPS rule in gotchas: never cut to a face, always through it.
-for _sx in (-1, 1):
-    visor -= prism([
-        (_sx * (WELL_HW - 2.0), _vz1 - CHAMFER_LIP - 2.0),
-        (_sx * (WELL_HW + CHAMFER_LIP), _vz1),
-        (_sx * (WELL_HW + CHAMFER_LIP), _vz1 + 5),
-        (_sx * (WELL_HW - 2.0), _vz1 + 5),
-    ], WELL_Y0 - VISOR_RAKE, WELL_Y1)
-# A notch through the hand brow. In the reference the hood line is broken, not
-# continuous, and that one detail does most of the work of stopping it reading
-# as a picture frame.
-visor -= bbox(-VISOR_NOTCH_W / 2, VISOR_NOTCH_W / 2, WELL_Y1 - EPS, OUT_L + 10,
-              _vz1 - 2.0, _vz1 + 10)
-part += visor
+guard = prism(GUARD_SEC, 0.0, OUT_L)
+
+# ---- hollow it: the well is the intersection of three scooped half-spaces --
+# ★ Each scoop is a CYLINDER, so the inner faces come out as single curved
+# surfaces in the STEP rather than a faceted approximation.
+# ⚠️ A cylinder is NOT a half-space, and assuming it was cost a whole build:
+# "inboard of the scoop" is everything inside the cylinder PLUS everything past
+# its axis. Without the second half the well closes up again 30 mm from the
+# wall and the guard comes out inside out. Each zone below is that union.
+# ⚠️ The side zone is why the guard is three-sided and not four: its axis sits
+# at X=SCOOP_CX, so the half-space past the axis swallows the whole deep flank
+# and no guard is ever built there. That is the "deep-flank cut" in his file --
+# a wall he never built, reproduced here as a consequence of the geometry
+# rather than as a hole punched afterwards.
+# ★★ WHICH SIDE THE GUARD IS ON IS A LIVE QUESTION -- see the report. His file
+# puts it on the SHALLOW flank and this reproduces that. But the screen tilts
+# toward -X (the body's midline, for a right-arm fit), so the eye sits over the
+# shallow flank -- the same side as the guard. The harness measures what that
+# costs: 19 deg of viewing cone on the guard side against 37 deg on the open
+# deep side. Flipping this one sign puts the guard on the far side and gives
+# the eye the open one. One character, if he wants it.
+_SHL = -SD                      # the side the guard is on -- shallow flank
+_ax = _SHL * SCOOP_CX
+_zone_side = (Pos(_ax, OUT_L / 2, _GZ1) * Rot(90, 0, 0)
+              * Cylinder(SCOOP_R_SIDE, OUT_L + 300)) \
+    + bbox(min(_ax, -_SHL * 90), max(_ax, -_SHL * 90), -60, OUT_L + 60, -90, 200)
+_zone_elbow = (Pos(0, SCOOP_CY0, _GZ1) * Rot(0, 90, 0)
+               * Cylinder(SCOOP_R_BROW, 400)) \
+    + bbox(-90, 90, SCOOP_CY0, OUT_L + 60, -90, 200)
+_zone_hand = (Pos(0, SCOOP_CY1, _GZ1) * Rot(0, 90, 0)
+              * Cylinder(SCOOP_R_BROW, 400)) \
+    + bbox(-90, 90, -60, SCOOP_CY1, -90, 200)
+guard -= (_zone_side & _zone_elbow & _zone_hand
+          & bbox(-90, 90, -60, OUT_L + 60, _GZ0 - EPS, _GZ1 + 40))
+
+# ---- the elbow brow's outer face rakes back off the cap's top ----
+# The guard grows out of the cap's face rather than butting against it. In this
+# print orientation that face's normal points toward the elbow, which is UP, so
+# the rake is free at any angle.
+guard -= yz_prism([
+    (0.0,                          _GZ0 - EPS),
+    (ELBOW_OUT * (_GZ1 + 30 - _GZ0), _GZ1 + 30),
+    (-90.0,                        _GZ1 + 30),
+    (-90.0,                        _GZ0 - EPS),
+], -90, 90)
+
+# ---- and the crest ramps down at 45 deg into both ends ----
+# ★ His signature move, and the answer to "the ends are blocky caps": the guard
+# does not stop, it sweeps down into them.
+for _sy, _ry in ((-1, RAMP_Y0), (1, RAMP_Y1)):
+    guard -= yz_prism([
+        (_ry,                                        _GZ1),
+        (_ry + _sy * (GUARD_H + 12) * RAMP_SLOPE,    _GZ0 - 12),
+        (_ry + _sy * 220,                            _GZ0 - 12),
+        (_ry + _sy * 220,                            _GZ1 + 30),
+        (_ry,                                        _GZ1 + 30),
+    ], -90, 90)
+
+part += guard
 
 # Phone pocket -- runs out the elbow end so the phone slides in
 part -= bbox(-POCK_W / 2, POCK_W / 2, -10, POCK_L, FLOOR, FLOOR + POCK_D)
@@ -782,6 +830,7 @@ CAP_BUMP_Y = 7.0     # dome centre, out near the collar's free end
 CAP_SLOT_W = 1.4     # relief slot freeing the deep flank from the chine fold
 CAP_SLOT_ROOT = 2.5  # slot stops this far from the plate, leaving the root
 CAP_RAKE = 8.0       # plan-view rake across the plate's CAP_T of depth
+CAP_CHIN = 4.0       # elevation rake on the cap's face, below the tray
 # USB-C plug shell is 8.34 x 2.56 mm with fully rounded ends. Cut that SHAPE
 # with ~1 mm of clearance, not a generic rectangle -- the taper does the work
 # of accommodating fat overmoulds, so the opening itself can be tight.
@@ -861,13 +910,26 @@ cap = (prism(HULL_SEC, 0.0, CAP_D) & _cap_below) \
 # End plate: the whole face -- hull section below, tray section above.
 cap += prism(HULL_SEC, -CAP_T, 0.0)
 cap += bbox(-OUT_W / 2, OUT_W / 2, -CAP_T, 0.0, 0.0, OUT_H)
-# ...and the visor band on top of it, so the hood runs off the nose unbroken.
-cap += prism(VISOR_SEC, -CAP_T, 0.0)
+# ⚠️ NO guard band on the cap any more. The guard's elbow brow rakes back off
+# the cap's top face instead of running across it, so the cap tops out at the
+# tray face and the guard grows out from behind it. That also retires the
+# height mismatch at the joint that his demo file still has.
 # ...and the deep-flank ribs, same profile as the hull's so they line through.
 cap += fins(-CAP_T, CAP_D)
 # ⚠️ The saddle runs through the cap too. Without this the plate would close
 # off the elbow end of the arm channel and sit on the forearm.
 cap -= arm
+
+# ★ The cap's CHIN rakes back: its face leans away from the elbow as it drops
+# through the hull's section, so the nose is a wedge and not a slab. Kept below
+# Z=0 so it never touches the USB trough or the speaker mouths, and its normal
+# points toward the elbow -- up, in this print orientation -- so it is free.
+cap -= yz_prism([
+    (-CAP_T,                  0.0),
+    (-CAP_T + CAP_CHIN,       HULL_Z_DEEP - 10),
+    (-CAP_T - 40,             HULL_Z_DEEP - 10),
+    (-CAP_T - 40,             0.0),
+], -90, 90)
 
 # Plan-view rake on the nose corners, carried over from the hull's nose (the
 # hull no longer has one -- the cap IS the nose now). A cut plane containing Z
@@ -876,9 +938,9 @@ cap -= arm
 # skin the corner off a 2 mm wall.
 for _sx in (-1, 1):
     _n = Vector(_sx * CAP_T, -CAP_RAKE, 0).normalized()
-    # ⚠️ Off VISOR_HW, not HULL_HW. The hood and the ribs both reach 41.5;
+    # ⚠️ Off GUARD_HW, not HULL_HW. The hood and the ribs both reach 41.5;
     # raking to 40 by Y=0 cut their corners off and put a step at the joint.
-    _p0 = Vector(_sx * (VISOR_HW - CAP_RAKE), -CAP_T, 0)
+    _p0 = Vector(_sx * (GUARD_HW - CAP_RAKE), -CAP_T, 0)
     cap -= Pos(_p0 + _n * 100.0) \
         * Rot(0, 0, math.degrees(math.atan2(_n.Y, _n.X))) * Box(200, 200, 200)
 
@@ -954,7 +1016,7 @@ for _sd, _zc in FLANKS:
 # deliberately left sharp: chamfering those would eat clearances. The audit in
 # verify_bracer.py lists every sharp exterior crease that survives, so the ones
 # left alone are a decision on record rather than an oversight.
-_VZ1 = OUT_H + VISOR_H
+_VZ1 = _GZ1
 
 
 def _near(a, b, t=0.05):
@@ -970,21 +1032,10 @@ def _is_crease(e):
 
 
 def _visor_rim(e):
-    """Outer boundary of the hood's top face. ⚠️ Excludes the brow notch: its
-    mouth is also at _VZ1 and a 3 mm cut there ate the brow down to 1 mm."""
+    """The guard's crest. Mostly formed in section now; this catches whatever
+    flat is left at the top."""
     c = e.center()
-    if abs(c.X) < VISOR_NOTCH_W / 2 + 1.0 and c.Y > WELL_Y1 - 1.0:
-        return False
-    return _near(c.Z, _VZ1) and (_near(abs(c.X), VISOR_HW)
-                                 or _near(c.Y, 0.0) or _near(c.Y, OUT_L))
-
-
-def _visor_lip(e):
-    """The hood's inner edge, where it looks down into the well."""
-    c = e.center()
-    return _near(c.Z, _VZ1) and (_near(abs(c.X), WELL_HW)
-                                 or _near(c.Y, WELL_Y0 + VISOR_RAKE)
-                                 or _near(c.Y, WELL_Y1))
+    return _near(c.Z, _VZ1) and abs(c.X) > GUARD_XC - 1.0
 
 
 def _cap_face(e):
@@ -997,9 +1048,9 @@ def _cap_face(e):
 
 
 def _visor_base(e):
-    """Where the hood overhangs the tray's side wall."""
+    """Where the guard overhangs the tray's side wall."""
     c = e.center()
-    return _near(c.Z, OUT_H) and _near(abs(c.X), VISOR_HW)
+    return _near(c.Z, OUT_H) and _near(abs(c.X), GUARD_HW)
 
 
 # ⚠️ The hand-end perimeter is DELIBERATELY LEFT SHARP, and this is the one
@@ -1015,9 +1066,8 @@ def _visor_base(e):
 # groups. Each group is attempted independently so one awkward set cannot lose
 # the others, and each falls back to edge-by-edge.
 _groups = [
-    ("visor rim",      CHAMFER,     _visor_rim),
-    ("visor base",     CHAMFER_SM,  _visor_base),
-    ("visor lip",      CHAMFER_LIP, _visor_lip),
+    ("guard crest",    CHAMFER_SM,  _visor_rim),
+    ("guard base",     CHAMFER_SM,  _visor_base),
 ]
 _cap_groups = [("cap face rim", CHAMFER, _cap_face)]
 def _sig(e):
