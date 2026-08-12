@@ -29,6 +29,40 @@ fi
 msg="$*"
 [ -z "$msg" ] && { echo "roam-msg: nothing to send" >&2; exit 1; }
 
+# ★ Don't buzz him for something he is already looking at.
+#
+# The hub suppresses pushes when he is at the keyboard or has the app open --
+# but roam-msg posts straight to the phone and used to bypass all of it. Every
+# agent completion rang his phone while he sat at the laptop, because
+# ~/CLAUDE.md tells every session to push status here. Ask the hub first.
+#
+# Fails OPEN: if the hub is unreachable or slow, the message still goes. A
+# missed status line is worse than a redundant buzz. --force skips the check.
+if [ "${1:-}" = "--force" ] || [ "${ROAM_FORCE:-}" = "1" ]; then
+    [ "${1:-}" = "--force" ] && { shift; msg="$*"; }
+else
+    _hub="${ROAM_HUB:-http://100.67.237.109:8787}"
+    _tokf="$HOME/Projects/roam/roam-touch/hub/hub-token.txt"
+    if [ -r "$_tokf" ]; then
+        _pres=$(curl -s -m 2 -H "Authorization: Bearer $(cat "$_tokf")" \
+                     "$_hub/presence" 2>/dev/null)
+        # covers_all = app foregrounded or he is demonstrably present.
+        case "$_pres" in
+            *'"covers_all":true'*)
+                echo "roam-msg: skipped — he is present (hub says covered). --force to override."
+                exit 0 ;;
+        esac
+        # covered_panes contains this pane => he is typing in it right now.
+        if [ -n "${TMUX_PANE:-}" ]; then
+            case "$_pres" in
+                *"\"${TMUX_PANE#%}\""*|*"\"${TMUX_PANE}\""*)
+                    echo "roam-msg: skipped — you are in $TMUX_PANE. --force to override."
+                    exit 0 ;;
+            esac
+        fi
+    fi
+fi
+
 # Single-quote for the device-side shell: ' -> '\''
 q() { printf "%s" "$1" | sed "s/'/'\\\\''/g"; }
 
