@@ -41,7 +41,15 @@ class ThreadScreenTest {
     /** What the card asked to be opened in the reader, if anything. */
     private var readRequest: Event? = null
 
-    private fun render(vararg events: Event) {
+    /** What the composer's field was last told to hold. */
+    private var draft = ""
+
+    /** Canned words the composer asked to send. */
+    private val sent = mutableListOf<String>()
+
+    private var draftSends = 0
+
+    private fun render(vararg events: Event, outbox: Outbox? = null) {
         readRequest = null
         val state = events.fold(ChannelsState(channels = listOf(channel))) { acc, e ->
             ChannelReducer.applyEvent(acc, e)
@@ -59,7 +67,11 @@ class ThreadScreenTest {
                     onRead = { readRequest = it },
                     onPlay = {},
                     onStopPlaying = {},
-                    onSend = {},
+                    draft = draft,
+                    outbox = outbox,
+                    onDraft = { draft = it },
+                    onSend = { sent += it },
+                    onSendDraft = { draftSends++ },
                     onInterrupt = {},
                     onKill = {},
                     onPttPress = {},
@@ -173,5 +185,53 @@ class ThreadScreenTest {
         compose.onAllNodesWithText("READ ALL", substring = true).assertCountEquals(0)
         compose.onNodeWithText("the suite is green").performClick()
         assertNull("a card with nothing behind it must not navigate", readRequest)
+    }
+
+    // -- ★★ the composer, while the hub has his words -------------------------
+
+    /**
+     * ★★ The typed half of the freeze the owner reported.
+     *
+     * Tapping a canned chip used to produce **nothing visible at all** — the word left
+     * the composer and the only feedback was a toast that arrived when the hub answered.
+     * Against a hub that never answered, that was a blank screen for as long as he cared
+     * to look at it. Reproduced on the emulator, 105 seconds, 2026-08-12.
+     */
+    @Test
+    fun `a send in flight is on screen, with a clock on it`() {
+        render(outbox = Outbox("continue", startedAtMs = Fx.NOW_MS - 4_000))
+        compose.onNodeWithText("SENDING · 4s").assertIsDisplayed()
+        compose.onNodeWithText("continue").assertIsDisplayed()
+    }
+
+    /** Nothing is in flight, so nothing claims to be. */
+    @Test
+    fun `an idle composer says nothing about sending`() {
+        render()
+        compose.onAllNodesWithText("SENDING", substring = true).assertCountEquals(0)
+    }
+
+    /**
+     * ⚠️ One at a time. A second tap on a send that has not come back is a man wondering
+     * whether the first worked, and turning that into two prompts in a live agent is a
+     * far more expensive mistake than making him wait.
+     */
+    @Test
+    fun `the canned replies are dead while a send is in flight`() {
+        render(outbox = Outbox("continue", startedAtMs = Fx.NOW_MS))
+        compose.onNodeWithText("YES").performClick()
+        assertEquals("a send was already in flight", emptyList<String>(), sent)
+    }
+
+    /**
+     * ★★ **His words are not the price of a failed send.** The field is fed from above
+     * and cleared only when the hub has actually taken them — see
+     * [ChannelsViewModel.sendDraft].
+     */
+    @Test
+    fun `the composer shows the words it was given rather than owning them`() {
+        draft = "check the roaster temperature"
+        render()
+        compose.onNodeWithText("check the roaster temperature").assertIsDisplayed()
     }
 }

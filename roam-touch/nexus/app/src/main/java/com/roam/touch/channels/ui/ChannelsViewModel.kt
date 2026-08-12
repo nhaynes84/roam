@@ -15,14 +15,29 @@ import com.roam.touch.channels.tts.Speaker
 import com.roam.touch.ha.HaHome
 import com.roam.touch.ha.HaRepository
 import com.roam.touch.ha.HaState
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 
 /** A one-shot message for the wearer: what just happened to something he did. */
 data class Toast(val text: String, val bad: Boolean)
+
+/**
+ * ★★ A typed or canned message that is with the hub right now.
+ *
+ * ⚠️ This exists because the composer used to clear the field on tap and then say
+ * nothing at all until the hub answered. Measured on the emulator against a wedged hub:
+ * he tapped CONTINUE, his word vanished, and 105 seconds later there was still nothing
+ * on screen — no pending state, no error, no message in the thread. A send that leaves
+ * no trace is indistinguishable from an app that has stopped working, which is exactly
+ * how it was reported.
+ */
+data class Outbox(val text: String, val startedAtMs: Long)
 
 /**
  * Thin. Every decision worth testing lives in [com.roam.touch.channels.ChannelReducer],
@@ -42,6 +57,8 @@ class ChannelsViewModel(
     haProvider: () -> HaRepository = { Roam.homeAssistant },
     /** Lazy for the same reason as [haProvider] — see the note above. */
     pttProvider: () -> Ptt = { Roam.ptt },
+    /** Injectable so "how long has this send been in flight" is a test, not a stopwatch. */
+    private val clock: () -> Long = System::currentTimeMillis,
 ) : ViewModel() {
 
     private val ha: HaRepository by lazy(haProvider)
@@ -130,9 +147,62 @@ class ChannelsViewModel(
         viewModelScope.launch { repo.expand(event) }
     }
 
+    // --- typed and canned sends ---------------------------------------------
+
+    private val _draft = MutableStateFlow("")
+
+    /**
+     * ★ The composer's words, held here rather than in the composable.
+     *
+     * ⚠️ Above the screen on purpose, for the same reason the reader's event id is: state
+     * inside the composer is disposed by anything that disposes the composer, and a
+     * sentence he typed one-handed while walking must survive a recomposition, a rotation
+     * and — above all — a send that failed.
+     */
+    val draft: StateFlow<String> = _draft.asStateFlow()
+
+    private val _outbox = MutableStateFlow<Outbox?>(null)
+
+    /** Non-null while a typed or canned message is with the hub. See [Outbox]. */
+    val outbox: StateFlow<Outbox?> = _outbox.asStateFlow()
+
+    fun draft(text: String) {
+        _draft.value = text
+    }
+
+    /** A canned chip. Its word is its own; the draft is left exactly where it was. */
     fun send(paneId: String, text: String) {
         if (text.isBlank()) return
-        viewModelScope.launch { report(repo.send(paneId, text), "sent") }
+        launchSend(paneId, text, clearDraft = false)
+    }
+
+    /**
+     * ★ The composer's Send.
+     *
+     * ⚠️ The field is cleared **only when the hub has actually taken the words**. It used
+     * to clear on tap, so a refused or timed-out send silently deleted a sentence he had
+     * just typed and told him about it in a toast that was gone three seconds later.
+     */
+    fun sendDraft(paneId: String) {
+        val text = _draft.value
+        if (text.isBlank()) return
+        launchSend(paneId, text, clearDraft = true)
+    }
+
+    private fun launchSend(paneId: String, text: String, clearDraft: Boolean) {
+        // One at a time. A second tap on a send that has not come back yet is a man
+        // wondering whether the first one worked, not a request to say it twice.
+        if (_outbox.value != null) return
+        _outbox.value = Outbox(text, clock())
+        viewModelScope.launch {
+            try {
+                val result = repo.send(paneId, text)
+                if (result is SendResult.Ok && clearDraft) _draft.value = ""
+                report(result, "sent")
+            } finally {
+                _outbox.value = null
+            }
+        }
     }
 
     // --- Push to talk -------------------------------------------------------
@@ -147,7 +217,25 @@ class ChannelsViewModel(
 
     fun pttRelease() = ptt.release()
 
-    fun pttCancel() = ptt.cancel()
+    /**
+     * ★★ The way out, from any state — including the one in flight to the hub.
+     *
+     * ⚠️ From [PttState.Sending] this means **stop waiting**, not "unsend": the request is
+     * cancelled (which really does cancel the socket, see `HubApi.execute`), but the hub
+     * may already have typed it. So the words go back onto the confirm card with
+     * [Ptt.STOPPED_WAITING] written on them rather than being thrown away, and he decides
+     * whether to say it again. Throwing them away would be the same silent loss this
+     * whole confirm step exists to prevent.
+     */
+    fun pttCancel() {
+        if (ptt.state.value is PttState.Sending) {
+            pttSendJob?.cancel()
+            pttSendJob = null
+            ptt.sendFailed(Ptt.STOPPED_WAITING)
+            return
+        }
+        ptt.cancel()
+    }
 
     fun pttDismiss() = ptt.clear()
 
@@ -162,16 +250,25 @@ class ChannelsViewModel(
      * ⚠️ A refused send returns the transcript to the confirm card instead of a toast.
      * He said it out loud; a dead pane is not a reason to make him say it twice.
      */
+    private var pttSendJob: Job? = null
+
     fun pttConfirm() {
         val confirmed = ptt.confirm() ?: return
-        viewModelScope.launch {
+        pttSendJob = viewModelScope.launch {
             when (val result = repo.send(confirmed.paneId, confirmed.text)) {
                 is SendResult.Ok -> {
                     ptt.sent()
                     toasts.send(Toast("sent", bad = false))
                 }
 
-                is SendResult.Failed -> ptt.sendFailed(result.message)
+                // ⚠️ If the card is no longer on screen — he stopped waiting, or walked
+                // out of the thread — the complaint still has to reach him somewhere.
+                // Silently dropping it is how a failed send becomes a message he thinks
+                // he sent.
+                is SendResult.Failed ->
+                    if (!ptt.sendFailed(result.message)) {
+                        toasts.send(Toast("not sent — ${result.message}", bad = true))
+                    }
             }
         }
     }

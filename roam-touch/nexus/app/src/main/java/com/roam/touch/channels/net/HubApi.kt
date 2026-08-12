@@ -14,6 +14,8 @@ import com.roam.touch.channels.model.SendRequest
 import com.roam.touch.channels.model.SendResponse
 import com.roam.touch.channels.model.StatusResponse
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -23,7 +25,9 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
 import java.io.IOException
+import java.util.concurrent.TimeUnit
 
 /**
  * Why a send failed, in the terms `API.md` defines. The UI shows the *cause*, because
@@ -57,6 +61,14 @@ class HubHttpException(
  *
  * Nothing here polls. `GET /channels` is called exactly once per connection attempt to
  * seed the cursor, per the client algorithm in `API.md` §4.
+ *
+ * ⚠️⚠️ **Every call carries a deadline, and that is not optional.** OkHttp's
+ * connect/read/write timeouts are per socket operation, not per call: a hub that answers
+ * slowly — headers, then a trickle of body — resets the read timeout with every byte and
+ * the call never ends. Measured against a deliberately wedged hub on 2026-08-12: a send
+ * was still outstanding after 105 seconds with no error and nothing on screen. On the
+ * tailnet that case is invisible in testing and inevitable in use, so the bound is a
+ * whole-call deadline via [okhttp3.Call.timeout], applied in [execute].
  */
 class HubApi(
     private val config: HubConfig,
@@ -75,27 +87,67 @@ class HubApi(
         header("Authorization", "Bearer ${config.token}")
     }
 
-    private suspend inline fun <reified T> call(request: Request): T =
-        withContext(Dispatchers.IO) {
-            client.newCall(request).execute().use { resp ->
-                val text = resp.body?.string().orEmpty()
-                if (!resp.isSuccessful) {
-                    val detail = runCatching {
-                        HubJson.decodeFromString<ErrorResponse>(text).detail
-                    }.getOrNull().orEmpty().ifBlank { resp.message }
-                    throw HubHttpException(resp.code, detail)
-                }
-                HubJson.decodeFromString<T>(text)
+    /**
+     * One HTTP call, bounded and cancellable.
+     *
+     * ⚠️ Two separate problems are closed here, and both were measured rather than
+     * imagined:
+     *
+     * 1. **The deadline.** [okhttp3.Call.timeout] is the only timeout that covers a whole
+     *    call. Without it a hub that dribbles its answer holds the call open forever —
+     *    every individual read lands inside `readTimeout`, so `readTimeout` never fires.
+     * 2. **Cancellation.** `execute()` is a blocking socket read, and cancelling the
+     *    coroutine cannot interrupt it. So the call is cancelled explicitly when the
+     *    coroutine dies — otherwise walking away from a screen leaves the request running
+     *    on an IO thread until the deadline expires.
+     *
+     * ⚠️ The watcher is a *suspended child*, not a completion handler. `invokeOnCompletion`
+     * fires when a job finishes, and a job whose body is blocked in a socket read has not
+     * finished — so it would arrive after the thing it was supposed to interrupt. A child
+     * parked on [awaitCancellation] is torn down the instant the parent is cancelled,
+     * which is the only moment at which cancelling the call still means anything.
+     */
+    private suspend fun <T> execute(
+        request: Request,
+        deadlineMs: Long,
+        block: (Response) -> T,
+    ): T = withContext(Dispatchers.IO) {
+        val httpCall = client.newCall(request)
+        httpCall.timeout().timeout(deadlineMs, TimeUnit.MILLISECONDS)
+        val watcher = launch {
+            try {
+                awaitCancellation()
+            } finally {
+                httpCall.cancel()
             }
         }
+        try {
+            httpCall.execute().use(block)
+        } finally {
+            watcher.cancel()
+        }
+    }
+
+    private suspend inline fun <reified T> call(
+        request: Request,
+        deadlineMs: Long = READ_DEADLINE_MS,
+    ): T = execute(request, deadlineMs) { resp ->
+        val text = resp.body?.string().orEmpty()
+        if (!resp.isSuccessful) {
+            val detail = runCatching {
+                HubJson.decodeFromString<ErrorResponse>(text).detail
+            }.getOrNull().orEmpty().ifBlank { resp.message }
+            throw HubHttpException(resp.code, detail)
+        }
+        HubJson.decodeFromString<T>(text)
+    }
 
     /** No auth on `/health` — this is the "is the hub even there" probe. */
-    suspend fun health(): Boolean = withContext(Dispatchers.IO) {
-        runCatching {
-            client.newCall(Request.Builder().url(url("health")).build()).execute()
-                .use { it.isSuccessful }
-        }.getOrDefault(false)
-    }
+    suspend fun health(): Boolean = runCatching {
+        execute(Request.Builder().url(url("health")).build(), PROBE_DEADLINE_MS) {
+            it.isSuccessful
+        }
+    }.getOrDefault(false)
 
     suspend fun status(): StatusResponse =
         call(Request.Builder().url(url("status")).auth().build())
@@ -156,7 +208,8 @@ class HubApi(
         )
         return call(
             Request.Builder().url(url("channels", paneKey(paneId), "send"))
-                .auth().post(body.toRequestBody(jsonMedia)).build()
+                .auth().post(body.toRequestBody(jsonMedia)).build(),
+            deadlineMs = SEND_DEADLINE_MS,
         )
     }
 
@@ -177,31 +230,47 @@ class HubApi(
             detail = JsonObject(mapOf("device" to JsonPrimitive("pixel"))),
         )
         val body = HubJson.encodeToString(PresenceRequest.serializer(), req)
-        withContext(Dispatchers.IO) {
-            client.newCall(
-                Request.Builder().url(url("presence")).auth()
-                    .post(body.toRequestBody(jsonMedia)).build()
-            ).execute().use { resp ->
-                if (!resp.isSuccessful) {
-                    throw HubHttpException(resp.code, resp.message)
-                }
-            }
+        execute(
+            Request.Builder().url(url("presence")).auth()
+                .post(body.toRequestBody(jsonMedia)).build(),
+            PROBE_DEADLINE_MS,
+        ) { resp ->
+            if (!resp.isSuccessful) throw HubHttpException(resp.code, resp.message)
         }
     }
 
     suspend fun clearPresence() {
-        withContext(Dispatchers.IO) {
-            runCatching {
-                client.newCall(
-                    Request.Builder().url(url("presence", PRESENCE_SOURCE)).auth()
-                        .delete().build()
-                ).execute().close()
-            }
+        runCatching {
+            execute(
+                Request.Builder().url(url("presence", PRESENCE_SOURCE)).auth().delete().build(),
+                PROBE_DEADLINE_MS,
+            ) { }
         }
     }
 
     companion object {
         const val PRESENCE_SOURCE = "roam-app"
+
+        /**
+         * ★★ How long he is made to stand there.
+         *
+         * A send is a man in a corridor waiting to find out whether his words landed, so
+         * this is a *human* budget, not a network one: the hub is on a tailnet and types
+         * into a pane in milliseconds, so anything past a few seconds is already wrong
+         * and he needs to be told rather than kept waiting. Short enough that the answer
+         * arrives while he is still looking at the screen he sent from.
+         */
+        const val SEND_DEADLINE_MS = 8_000L
+
+        /**
+         * Reads — history, the catch-up sweep, one expanded body. Longer than a send
+         * because 500 events is a real payload and nobody is standing still for it, but
+         * still bounded: a read that never returns is a screen that never fills in.
+         */
+        const val READ_DEADLINE_MS = 25_000L
+
+        /** Health and presence: fire-and-forget housekeeping. Fail fast, retry later. */
+        const val PROBE_DEADLINE_MS = 6_000L
 
         /** A few times the 30 s refresh, so a killed app lapses fast but not mid-glance. */
         const val PRESENCE_TTL_S = 90
@@ -213,6 +282,16 @@ class HubApi(
          */
         fun paneKey(paneId: String): String = paneId.removePrefix("%")
 
+        /**
+         * ⚠️ These are per-socket-operation, and that is the whole reason [execute] adds
+         * a deadline on top. `readTimeout` bounds one read, not one call; a hub that
+         * sends a byte every ten seconds satisfies it forever.
+         *
+         * ⚠️ There is deliberately **no** `callTimeout` here. This client is shared with
+         * [HubSocket], and a whole-call deadline on a WebSocket is a deadline on the
+         * connection itself — the one thing on this device that is meant to stay open for
+         * days. The deadline belongs on the REST calls, one at a time.
+         */
         fun defaultClient(): OkHttpClient = OkHttpClient.Builder()
             // The tailnet is not the internet: a dead hub should read as dead in
             // seconds, not after a 30 s stall the wearer interprets as "quiet".

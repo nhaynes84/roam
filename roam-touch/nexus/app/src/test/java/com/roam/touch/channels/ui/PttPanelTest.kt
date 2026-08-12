@@ -182,9 +182,38 @@ class PttPanelTest {
 
     @Test
     fun `sending is distinct from transcribing`() {
-        render(PttState.Sending(target, "continue"))
-        compose.onNodeWithText("SENDING").assertIsDisplayed()
+        render(PttState.Sending(target, "continue", startedAtMs = 12_000L))
+        compose.onNodeWithText("SENDING · 0s").assertIsDisplayed()
         compose.onNodeWithText("continue").assertIsDisplayed()
+    }
+
+    /**
+     * ★★ **The freeze, as a test.**
+     *
+     * The owner: *"app froze sending you a message."* Nothing had crashed and nothing was
+     * blocking the UI thread — this panel simply rendered the word SENDING, no controls
+     * and no clock, while [Ptt.press] ignores every press in that state. A hub that
+     * stopped answering therefore produced a panel that could not be talked to, tapped or
+     * dismissed, and looked identical to a dead app.
+     *
+     * ⚠️ Both halves are load-bearing. The seconds prove it is still trying; STOP WAITING
+     * is the way out. A worn device must never put him somewhere he cannot leave.
+     */
+    @Test
+    fun `sending shows that it is still trying, and offers a way out of it`() {
+        render(PttState.Sending(target, "run the tests", startedAtMs = 9_000L))
+
+        // nowMs is 12 s in the harness, so this send is three seconds old and says so.
+        compose.onNodeWithText("SENDING · 3s").assertIsDisplayed()
+        compose.onNodeWithText("STOP WAITING").assertIsDisplayed().performClick()
+        assertEquals(1, cancels)
+    }
+
+    /** Where it is going stays on screen while it goes there, like every other state. */
+    @Test
+    fun `sending still says where the words are going`() {
+        render(PttState.Sending(target, "run the tests", startedAtMs = 12_000L))
+        compose.onNodeWithText("◑ Roam Touch rebuild").assertIsDisplayed()
     }
 
     /**

@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.IOException
+import java.io.InterruptedIOException
 
 /** Why the panel is not showing live truth. Each one reads differently to a wearer. */
 enum class OfflineReason {
@@ -306,6 +307,18 @@ class HubRepository(
             SendResult.Ok
         } catch (e: HubHttpException) {
             SendResult.Failed(e.shortReason(), fatal = e.isNotLive || e.isUnauthorised)
+        } catch (e: InterruptedIOException) {
+            // ★★ The deadline in HubApi expired: the hub answered the phone and then
+            // stopped talking. Told apart from "unreachable" because the two send him to
+            // completely different places — this one means the route is fine and
+            // something on talos is wedged, and it is the only one where trying the exact
+            // same thing again in ten seconds is a reasonable idea.
+            //
+            // ⚠️ It is deliberately not fatal and deliberately not silent: the words are
+            // kept and handed back, because a timeout says nothing about whether the hub
+            // will take them on the next try.
+            Log.w(TAG, "send($paneId) timed out: ${e.message}")
+            SendResult.Failed(TIMED_OUT, fatal = false)
         } catch (e: IOException) {
             SendResult.Failed("hub unreachable", fatal = false)
         }
@@ -345,6 +358,12 @@ class HubRepository(
 
     companion object {
         private const val TAG = "RoamChannels"
+
+        /**
+         * ★ What a wedged hub is called on screen. Short enough for a chip, and it names
+         * the hub rather than the network, because that is which one is broken.
+         */
+        const val TIMED_OUT = "hub did not answer in time"
 
         /** Well inside the 90 s TTL, so one dropped refresh does not lapse presence. */
         const val PRESENCE_REFRESH_MS = 30_000L

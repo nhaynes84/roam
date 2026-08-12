@@ -75,8 +75,19 @@ sealed interface PttState {
         val error: String? = null,
     ) : PttState
 
-    /** Confirmed and in flight to the hub. */
-    data class Sending(val target: PttTarget, val transcript: String) : PttState
+    /**
+     * Confirmed and in flight to the hub.
+     *
+     * ⚠️ [startedAtMs] is not decoration. This state used to render one word and no
+     * controls at all, so a hub that took its time was indistinguishable from a hung app
+     * — the failure the owner reported as *"app froze sending you a message"*. A state
+     * that can outlast a glance has to show that it is still moving.
+     */
+    data class Sending(
+        val target: PttTarget,
+        val transcript: String,
+        val startedAtMs: Long,
+    ) : PttState
 
     /** It did not work, and it says why. */
     data class Failed(val reason: String) : PttState
@@ -301,7 +312,7 @@ class Ptt(
     }
 
     /** Dismiss a failure without starting anything. */
-    fun clear() {
+    fun clear() = synchronized(lock) {
         if (_state.value is PttState.Failed) _state.value = PttState.Idle
     }
 
@@ -311,27 +322,33 @@ class Ptt(
      * Returns null unless there is something confirmed — a double-tap on Send cannot
      * post the same sentence twice.
      */
-    fun confirm(): PttConfirmed? {
+    fun confirm(): PttConfirmed? = synchronized(lock) {
         val confirming = _state.value as? PttState.Confirming ?: return null
         replacing = null
-        _state.value = PttState.Sending(confirming.target, confirming.transcript)
-        return PttConfirmed(confirming.target.paneId, confirming.transcript)
+        _state.value = PttState.Sending(confirming.target, confirming.transcript, clock())
+        PttConfirmed(confirming.target.paneId, confirming.transcript)
     }
 
     /** The hub took it. */
-    fun sent() {
+    fun sent() = synchronized(lock) {
         if (_state.value is PttState.Sending) _state.value = PttState.Idle
     }
 
     /**
-     * The hub refused it.
+     * The hub refused it, timed out, or he stopped waiting for it.
      *
      * ⚠️ The transcript comes *back*, it is not lost. He said a sentence out loud; a
-     * dead pane or a dropped tailnet is not a reason to make him say it again.
+     * dead pane, a dropped tailnet or a hub that never answered is not a reason to make
+     * him say it again.
+     *
+     * @return false when this arrived too late to matter — he had already walked away
+     *   from the panel — so the caller can say what happened somewhere he will see it
+     *   instead of writing it to a card that is no longer on screen.
      */
-    fun sendFailed(reason: String) {
-        val sending = _state.value as? PttState.Sending ?: return
+    fun sendFailed(reason: String): Boolean = synchronized(lock) {
+        val sending = _state.value as? PttState.Sending ?: return false
         _state.value = PttState.Confirming(sending.target, sending.transcript, error = reason)
+        true
     }
 
     // -----------------------------------------------------------------------
@@ -520,6 +537,15 @@ class Ptt(
          */
         const val MIC_NOT_DELIVERING =
             "the microphone never started — no audio at all, not your press"
+        /**
+         * ★★ He gave up on a send that was taking too long.
+         *
+         * ⚠️ It does **not** claim the message was cancelled, because it was not: the
+         * hub may well have typed it already and only the waiting was stopped. Saying
+         * "cancelled" would be the comfortable lie that gets a prompt sent twice.
+         */
+        const val STOPPED_WAITING = "stopped waiting — it may still have landed"
+
         const val TOO_QUIET = "nothing heard — is the mic covered?"
         const val NOTHING_HEARD = "whisper heard nothing"
         const val WHISPER_UNREACHABLE = "whisper unreachable"

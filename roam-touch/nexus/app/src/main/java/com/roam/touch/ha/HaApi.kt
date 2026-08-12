@@ -1,6 +1,8 @@
 package com.roam.touch.ha
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -8,7 +10,9 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
 import java.io.IOException
+import java.util.concurrent.TimeUnit
 
 /**
  * Where Home Assistant is and how to prove we may talk to it.
@@ -84,19 +88,44 @@ class HaApi(
         header("Content-Type", "application/json")
     }
 
-    private suspend inline fun <reified T> call(request: Request): T =
+    /**
+     * ⚠️ Bounded and cancellable, for the reason spelled out in
+     * [com.roam.touch.channels.net.HubApi]: OkHttp's read timeout covers one read, not
+     * one call, so a server that answers slowly holds the call open indefinitely. HA on
+     * a Raspberry Pi with a busy recorder is exactly the kind of server that does that.
+     */
+    private suspend fun <T> execute(request: Request, block: (Response) -> T): T =
         withContext(Dispatchers.IO) {
-            client.newCall(request).execute().use { resp ->
-                val text = resp.body?.string().orEmpty()
-                if (!resp.isSuccessful) {
-                    // HA returns {"message": "..."} on error, and bare HTML from the
-                    // reverse proxy in front of it. Take whichever is there.
-                    val detail = runCatching { HaJson.decodeFromString<HaPing>(text).message }
-                        .getOrNull().orEmpty().ifBlank { resp.message }
-                    throw HaHttpException(resp.code, detail)
+            val httpCall = client.newCall(request)
+            httpCall.timeout().timeout(CALL_DEADLINE_MS, TimeUnit.MILLISECONDS)
+            // See HubApi.execute: a suspended child, not a completion handler — a job
+            // blocked in a socket read has not completed, so the handler would arrive
+            // after the read it was meant to interrupt.
+            val watcher = launch {
+                try {
+                    awaitCancellation()
+                } finally {
+                    httpCall.cancel()
                 }
-                HaJson.decodeFromString<T>(text)
             }
+            try {
+                httpCall.execute().use(block)
+            } finally {
+                watcher.cancel()
+            }
+        }
+
+    private suspend inline fun <reified T> call(request: Request): T =
+        execute(request) { resp ->
+            val text = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) {
+                // HA returns {"message": "..."} on error, and bare HTML from the
+                // reverse proxy in front of it. Take whichever is there.
+                val detail = runCatching { HaJson.decodeFromString<HaPing>(text).message }
+                    .getOrNull().orEmpty().ifBlank { resp.message }
+                throw HaHttpException(resp.code, detail)
+            }
+            HaJson.decodeFromString<T>(text)
         }
 
     /** `GET /api/` — 200 means URL and token are both good. Cheapest possible probe. */
@@ -129,6 +158,9 @@ class HaApi(
     }
 
     companion object {
+        /** One whole call, tap to answer. A tile that never settles is a broken tile. */
+        const val CALL_DEADLINE_MS = 20_000L
+
         fun defaultClient(): OkHttpClient = OkHttpClient.Builder()
             // Same reasoning as the hub client: on a tailnet, dead should read as dead
             // in seconds. A service call gets longer because HA blocks on the device.

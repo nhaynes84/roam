@@ -89,7 +89,11 @@ fun ThreadScreen(
     onRead: (Event) -> Unit,
     onPlay: (Event) -> Unit,
     onStopPlaying: () -> Unit,
+    draft: String,
+    outbox: Outbox?,
+    onDraft: (String) -> Unit,
     onSend: (String) -> Unit,
+    onSendDraft: () -> Unit,
     onInterrupt: () -> Unit,
     onKill: () -> Unit,
     onPttPress: (PttTarget) -> Unit,
@@ -226,7 +230,12 @@ fun ThreadScreen(
             enabled = channel.live,
             pttState = pttState,
             target = PttTarget(channel.paneId, channel.displayLabel),
+            draft = draft,
+            outbox = outbox,
+            nowMs = nowMs,
+            onDraft = onDraft,
             onSend = onSend,
+            onSendDraft = onSendDraft,
             onPttPress = onPttPress,
             onPttRelease = onPttRelease,
         )
@@ -497,11 +506,19 @@ private fun Composer(
     enabled: Boolean,
     pttState: PttState,
     target: PttTarget,
+    draft: String,
+    outbox: Outbox?,
+    nowMs: Long,
+    onDraft: (String) -> Unit,
     onSend: (String) -> Unit,
+    onSendDraft: () -> Unit,
     onPttPress: (PttTarget) -> Unit,
     onPttRelease: () -> Unit,
 ) {
-    var text by remember { mutableStateOf("") }
+    // ⚠️ The words live above this composable — see [ChannelsViewModel.draft]. A `remember`
+    // here is what let a failed send delete a sentence he had just typed.
+    val inFlight = outbox != null
+    val canSend = enabled && !inFlight
 
     Column(
         Modifier
@@ -509,6 +526,38 @@ private fun Composer(
             .background(RoamColors.Surface)
     ) {
         Box(Modifier.fillMaxWidth().height(1.dp).background(dividerColor()))
+
+        // ★★ A send in flight is *shown*, with a clock on it.
+        //
+        // ⚠️ This row is the whole of the fix for the typed half of the freeze. Tapping
+        // a canned chip used to produce nothing visible whatsoever until the hub
+        // answered, so a hub that never answered was indistinguishable from a dead app.
+        // Measured against a wedged hub on the emulator: 105 s, blank screen, no error.
+        if (outbox != null) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TypingEllipsis(RoamColors.Quiet)
+                Spacer(Modifier.width(9.dp))
+                Text(
+                    "SENDING · ${((nowMs - outbox.startedAtMs) / 1_000).coerceAtLeast(0)}s",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = RoamColors.Quiet,
+                )
+                Spacer(Modifier.width(9.dp))
+                Text(
+                    outbox.text,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = RoamColors.TextSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+
         Row(
             Modifier
                 .fillMaxWidth()
@@ -519,10 +568,10 @@ private fun Composer(
             CANNED.forEach { reply ->
                 StateChip(
                     text = reply.uppercase(),
-                    color = if (enabled) RoamColors.Attention else RoamColors.Dead,
+                    color = if (canSend) RoamColors.Attention else RoamColors.Dead,
                     modifier = Modifier
                         .heightIn(min = 38.dp)
-                        .clickable(enabled = enabled) { onSend(reply) },
+                        .clickable(enabled = canSend) { onSend(reply) },
                 )
             }
         }
@@ -540,10 +589,10 @@ private fun Composer(
             )
             Spacer(Modifier.width(8.dp))
             OutlinedTextField(
-                value = text,
-                onValueChange = { text = it },
+                value = draft,
+                onValueChange = onDraft,
                 modifier = Modifier.weight(1f),
-                enabled = enabled,
+                enabled = canSend,
                 placeholder = {
                     Text(
                         if (enabled) "message" else "pane is dead",
@@ -557,7 +606,7 @@ private fun Composer(
                 shape = RoundedCornerShape(11.dp),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                 keyboardActions = KeyboardActions(onSend = {
-                    if (text.isNotBlank()) { onSend(text); text = "" }
+                    if (canSend && draft.isNotBlank()) onSendDraft()
                 }),
                 colors = TextFieldDefaults.colors(
                     focusedContainerColor = RoamColors.SurfaceRaised,
@@ -570,13 +619,13 @@ private fun Composer(
                 ),
             )
             IconButton(
-                onClick = { if (text.isNotBlank()) { onSend(text); text = "" } },
-                enabled = enabled && text.isNotBlank(),
+                onClick = onSendDraft,
+                enabled = canSend && draft.isNotBlank(),
             ) {
                 Icon(
                     Icons.AutoMirrored.Filled.Send,
                     contentDescription = "send",
-                    tint = if (enabled && text.isNotBlank()) RoamColors.Attention
+                    tint = if (canSend && draft.isNotBlank()) RoamColors.Attention
                     else RoamColors.Dead,
                 )
             }

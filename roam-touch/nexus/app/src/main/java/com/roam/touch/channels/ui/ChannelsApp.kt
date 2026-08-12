@@ -71,6 +71,8 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
     val speakingEventId by vm.speakingEventId.collectAsStateWithLifecycle()
     val haHome by vm.haHome.collectAsStateWithLifecycle()
     val pttState by vm.pttState.collectAsStateWithLifecycle()
+    val draft by vm.draft.collectAsStateWithLifecycle()
+    val outbox by vm.outbox.collectAsStateWithLifecycle()
     val nowMs = rememberTicker()
     val requestMic = rememberMicPermission(vm)
 
@@ -237,7 +239,11 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
                 onRead = { event -> vm.expand(event); readingEventId = event.id },
                 onPlay = vm::play,
                 onStopPlaying = vm::stopSpeaking,
+                draft = draft,
+                outbox = outbox,
+                onDraft = vm::draft,
                 onSend = { vm.send(channel.paneId, it) },
+                onSendDraft = { vm.sendDraft(channel.paneId) },
                 onInterrupt = { vm.interrupt(channel.paneId) },
                 onKill = { vm.kill(channel.paneId) },
                 // ★ The permission check is here, in front of the press, not inside

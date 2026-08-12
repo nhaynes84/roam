@@ -352,15 +352,30 @@ fun PttPanel(
                 }
             }
 
+            // ★★ The state the owner reported as a frozen app.
+            //
+            // ⚠️ It used to be one word and nothing else: no counter, no control, and
+            // the mic button ignores presses while a send is in flight — so a hub that
+            // stopped answering left a panel that could not be talked to, tapped, or
+            // dismissed, with no indication it was even still trying. Two things fix
+            // that and neither is optional. The seconds **move**, so a slow send reads
+            // as slow rather than dead. And STOP WAITING is always there, because on a
+            // device strapped to a forearm the wearer must never be somewhere he cannot
+            // leave.
             is PttState.Sending -> {
+                val seconds = ((nowMs - state.startedAtMs) / 1_000).coerceAtLeast(0)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     TypingEllipsis(RoamColors.Quiet)
                     Spacer(Modifier.width(9.dp))
                     Text(
-                        "SENDING",
+                        "SENDING · ${seconds}s",
                         style = MaterialTheme.typography.labelLarge,
                         color = RoamColors.Quiet,
                     )
+                    Spacer(Modifier.weight(1f))
+                    // ⚠️ Not "CANCEL". This stops the waiting, not the message — the hub
+                    // may already have typed it. See [Ptt.STOPPED_WAITING].
+                    ActionChip("STOP WAITING", RoamColors.TextSecondary, onCancel)
                 }
                 Text(
                     state.transcript,
@@ -369,6 +384,7 @@ fun PttPanel(
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
+                Destination(channelLabel, targetLive)
             }
 
             is PttState.Failed -> {
