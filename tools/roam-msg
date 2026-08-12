@@ -33,8 +33,12 @@ msg="$*"
 q() { printf "%s" "$1" | sed "s/'/'\\\\''/g"; }
 
 # Reconnect if the transport dropped (adb tcpip does not survive a phone reboot).
+# ⚠️ Bounded: a sleeping/absent phone makes `adb connect` sit for ~75 s, which
+# stalls every caller behind it. Fail fast instead -- a missed status message is
+# nothing, a wedged queue is a real problem.
 if ! adb devices | grep -q "^${ROAM_DEV}[[:space:]]*device$"; then
-    adb connect "$ROAM_DEV" >/dev/null 2>&1
+    _timeout() { perl -e 'alarm shift; exec @ARGV' "$@" 2>/dev/null; }
+    _timeout 5 adb connect "$ROAM_DEV" >/dev/null 2>&1
 fi
 
 if ! adb -s "$ROAM_DEV" shell \
