@@ -259,6 +259,65 @@ class PttTest {
             assertEquals("nothing that short goes to whisper", 0, stt.calls)
         }
 
+    /**
+     * ⚠️⚠️ **The 0.5 regression, and the one this file exists for now.**
+     *
+     * He held it for 3.4 seconds talking straight into the phone and got *"mic dropped
+     * out — only 0.1s captured from a 3.4s hold"*. Every word of that was true and the
+     * whole of it was misleading: nothing dropped out, because nothing ever started.
+     * The 120 ms he was handed was **zero-filled by the audio HAL's error path** after
+     * `pcm_prepare` failed — measured on sailfish 2026-08-12, for every audio source,
+     * every sample rate and every buffer size. "Dropped out" reads as "it was working",
+     * which sends him back to the app and to how he pressed the button; both are fine.
+     *
+     * So starved-and-silent must never again share a message with starved-and-audible.
+     */
+    @Test
+    fun `a long press that produced only digital silence blames the audio input, not the press`() =
+        runTest(dispatcher) {
+            var now = 1_000L
+            // 120 ms of zeroes: exactly what a 3449 ms press returned on the device.
+            val rec = mic().also { it.willCapture(Recording(ByteArray(3_840))) }
+            val stt = FakeStt()
+            val ptt = Ptt(rec, stt, scope) { now }
+
+            ptt.press(augment)
+            now += 3_449L
+            ptt.release()
+            advanceUntilIdle()
+
+            val reason = (ptt.state.value as PttState.Failed).reason
+            assertEquals(Ptt.MIC_NOT_DELIVERING, reason)
+            assertTrue("it must not read as a mic that was working and stopped",
+                !reason.contains("dropped out"))
+            assertTrue("and it must not send him back to his own press",
+                !reason.contains("hold the button"))
+            assertEquals("silence never goes to whisper", 0, stt.calls)
+        }
+
+    /**
+     * ★ The other side of that line. Audio that is genuinely *there* but far short of
+     * the press is the app's own drain loop losing bytes it was handed — a different
+     * fault with a different owner, and it keeps the message that names both numbers.
+     */
+    @Test
+    fun `a starved press that did capture real audio is still the recorder's fault`() =
+        runTest(dispatcher) {
+            var now = 1_000L
+            val rec = mic().also { it.willCapture(FakeRecorder.speech(ms = 240)) }
+            val ptt = Ptt(rec, FakeStt(), scope) { now }
+
+            ptt.press(augment)
+            now += 5_000L
+            ptt.release()
+            advanceUntilIdle()
+
+            val reason = (ptt.state.value as PttState.Failed).reason
+            assertEquals(Ptt.micDropout(240, 5_000), reason)
+            assertTrue("the two capture faults must not read alike",
+                reason != Ptt.MIC_NOT_DELIVERING)
+        }
+
     @Test
     fun `a genuinely short press is still reported as a short press`() = runTest(dispatcher) {
         var now = 1_000L

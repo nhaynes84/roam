@@ -241,6 +241,24 @@ class Ptt(
             // thing that would have made the bug diagnose itself. So the two are now
             // told apart by comparing the press against the audio it produced.
             if (heldMs >= MIN_MS) {
+                // ★★ Two different faults wear the same shape here, and telling him the
+                // wrong one costs an evening. *Starved and silent* is the phone's audio
+                // input failing to start — measured on sailfish 2026-08-12, where the
+                // HAL fails `pcm_prepare` for every source, rate and buffer size and
+                // returns zero-filled buffers at 3 % of real time. *Starved but audible*
+                // is the app's own drain loop losing audio it was actually handed. He
+                // can act on the first (it is not his app and not his press); the second
+                // is ours to fix.
+                if (recording.isDigitalSilence) {
+                    Log.e(
+                        TAG,
+                        "AUDIO INPUT DEAD: a $heldMs ms press produced " +
+                                "${recording.durationMs} ms of pure digital silence. " +
+                                "The microphone never started; nothing was recorded."
+                    )
+                    fail(MIC_NOT_DELIVERING)
+                    return
+                }
                 Log.e(
                     TAG,
                     "CAPTURE FAULT: ${recording.durationMs} ms of audio from a " +
@@ -333,6 +351,18 @@ class Ptt(
                     "${tenths(heldMs)}s hold"
 
         private fun tenths(ms: Long): String = "%.1f".format(ms / 1000.0)
+
+        /**
+         * ★★ The press was fine, the app was fine, and the phone's audio input never
+         * started.
+         *
+         * ⚠️ Deliberately does **not** say "mic dropped out" — dropping out implies it
+         * was working, which sends him to the app and to the way he pressed it. This is
+         * the one failure here he cannot fix by doing anything differently, so it says
+         * so, and it points at the layer that is actually broken.
+         */
+        const val MIC_NOT_DELIVERING =
+            "the phone's microphone never started — no audio at all, not your press"
         const val TOO_QUIET = "nothing heard — is the mic covered?"
         const val NOTHING_HEARD = "whisper heard nothing"
         const val WHISPER_UNREACHABLE = "whisper unreachable"

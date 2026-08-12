@@ -1,6 +1,7 @@
 package com.roam.touch.channels.stt
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.math.PI
@@ -67,6 +68,32 @@ class PcmTest {
     fun `a mic that is muted or covered falls below the gate`() {
         // Dither-level noise: a blocked mic still returns something, just nothing real.
         assertTrue(Pcm.rmsDbfs(tone(30)) < Ptt.MIN_RMS_DBFS)
+    }
+
+    /**
+     * ★★ The line between "the HAL gave us nothing" and "the room was quiet".
+     *
+     * ⚠️ A working microphone never returns all-zero samples: even a covered one has a
+     * noise floor, which the dither case above puts near −60 dBFS. All-zero bytes are
+     * *manufactured* silence — on sailfish, the audio HAL zero-fills the buffer when it
+     * cannot start the input stream. Every quiet-but-real case here must stay on the
+     * false side of this, or a covered mic gets reported as dead hardware.
+     */
+    @Test
+    fun `only manufactured silence counts as digital silence`() {
+        assertTrue("zero-filled buffers are the HAL's error path",
+            Recording(ByteArray(3_840)).isDigitalSilence)
+
+        assertFalse("a covered mic still has a noise floor",
+            Recording(tone(30)).isDigitalSilence)
+        assertFalse("and one LSB of dither is still not nothing",
+            Recording(pcm(0, 1, 0, -1, 0, 1)).isDigitalSilence)
+        assertFalse("speech certainly is not", Recording(tone(8_000)).isDigitalSilence)
+
+        // ⚠️ Nothing captured at all is a different failure — the mic never opened —
+        // and must not be dressed up as the HAL returning silence.
+        assertFalse("an empty recording is not silence, it is absence",
+            Recording.EMPTY.isDigitalSilence)
     }
 
     @Test

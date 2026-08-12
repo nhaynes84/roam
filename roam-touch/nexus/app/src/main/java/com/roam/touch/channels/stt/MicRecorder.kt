@@ -44,6 +44,12 @@ interface PcmSource {
  * ⚠️ [MediaRecorder.AudioSource.VOICE_RECOGNITION], not `MIC`: it is the one source
  * Android guarantees will not have the "assistant" processing chain or an unpredictable
  * AGC applied, which is what an ASR model wants to be handed.
+ *
+ * ★ Measured on sailfish 2026-08-12, so nobody swaps it hoping for a cure: `MIC`,
+ * `DEFAULT`, `VOICE_COMMUNICATION`, `UNPROCESSED` and `CAMCORDER` route to five
+ * different `snd_device`s (handset-mic, speaker-dmic-endfire, unprocessed-mic,
+ * camcorder-mic) and **all five fail identically** to this one. The source is not a
+ * lever on that device.
  */
 class MicRecorder(
     private val onLevel: (Double) -> Unit = {},
@@ -61,6 +67,17 @@ class MicRecorder(
     /** Why a session stopped collecting early, or null. Reported in the close log. */
     @Volatile
     private var stalledBecause: String? = null
+
+    /**
+     * The loudest chunk this session produced, in dBFS.
+     *
+     * ★ Tracked here rather than measured again at the end because it is what tells a
+     * *starved* capture apart from a *silent* one, and those have different culprits:
+     * digital silence arriving far slower than real time is the audio HAL's error path
+     * handing back zero-filled buffers, not a microphone that heard nothing.
+     */
+    @Volatile
+    private var loudestDbfs = Pcm.FLOOR_DBFS
 
     override val recording: Boolean get() = running.get()
 
@@ -80,6 +97,7 @@ class MicRecorder(
         val src = open() ?: return false
         buffer.reset()
         stalledBecause = null
+        loudestDbfs = Pcm.FLOOR_DBFS
         source = src
         session++
         openedAtMs = System.currentTimeMillis()
@@ -105,10 +123,16 @@ class MicRecorder(
      * hold the button long enough", which was true of the audio and a lie about the
      * user. Nothing in the app said otherwise, which is what made it cost an evening.
      *
-     * Two causes, both fixed: the request was **larger than the capture buffer**
-     * (4096 B asked of a 3840 B buffer), and zero was treated as fatal. Now the chunk
-     * can never exceed half the buffer, zero backs off and retries, and only a genuine
-     * negative error code — or a full second of nothing — ends the session, loudly.
+     * The contract that came out of it stands: the chunk never exceeds half the buffer,
+     * zero backs off and retries, and only a genuine negative error code — or a full
+     * second of nothing — ends the session, loudly.
+     *
+     * ⚠️ **What did *not* survive is the diagnosis.** 0.4 blamed an oversized read
+     * request, and 0.5 sized the buffer around that theory. Neither was ever tested. A
+     * 2026-08-12 probe of this device found the audio HAL failing `pcm_prepare` for
+     * **every** source, rate and buffer size, delivering zero-filled buffers at ~3 % of
+     * real time — which produces exactly the 240 ms-from-a-5-second-hold that 0.4 was
+     * blamed for. The loop below is defensively correct; it was never the culprit.
      */
     private fun drain(src: PcmSource, id: Int) {
         val chunk = ByteArray(chunkFor(src.bufferBytes))
@@ -130,7 +154,9 @@ class MicRecorder(
                     // ★ The level meter is the only thing that distinguishes "the mic
                     // is dead" from "you are too quiet" on a device with no other
                     // feedback. It is a signal, not state — see Ptt.level.
-                    onLevel(Pcm.rmsDbfs(if (n == chunk.size) chunk else chunk.copyOf(n)))
+                    val dbfs = Pcm.rmsDbfs(if (n == chunk.size) chunk else chunk.copyOf(n))
+                    if (dbfs > loudestDbfs) loudestDbfs = dbfs
+                    onLevel(dbfs)
                 }
 
                 n == 0 -> {
@@ -163,18 +189,36 @@ class MicRecorder(
         val id = session
         val openMs = System.currentTimeMillis() - openedAtMs
         val why = stalledBecause
+        val loudest = loudestDbfs
         val recording = Recording(finish(), Pcm.RATE)
         // ★ One line per session carrying both numbers, so "the mic was open for five
         // seconds and gave me a quarter of a second" is legible from `adb logcat -s
-        // RoamStt` without a debugger attached.
+        // RoamStt` without a debugger attached. `live` is the ratio of audio to wall
+        // clock: a healthy capture sits at ~1.0, and this HAL's failure sits at 0.03.
         val short = recording.durationMs < openMs / 2
+        val live = if (openMs <= 0) 0.0 else recording.durationMs.toDouble() / openMs
         Log.i(
             TAG,
             "mic CLOSE #$id ${recording.pcm.size} B = ${recording.durationMs} ms audio, " +
-                    "open ${openMs} ms" +
+                    "open ${openMs} ms, live ${"%.2f".format(live)}, " +
+                    "loudest ${"%.1f".format(loudest)} dBFS" +
                     (if (short) "  ⚠️ SHORT" else "") +
                     (why?.let { " ($it)" } ?: "")
         )
+        // ⚠️⚠️ Starved *and* pure digital silence is not a microphone problem and not a
+        // press problem: it is the phone's audio input failing to start. Named here at
+        // the moment it happens, because the same line in logcat is what took an evening
+        // to find by hand — see [Ptt.MIC_NOT_DELIVERING].
+        if (short && recording.pcm.isNotEmpty() && loudest <= Pcm.FLOOR_DBFS) {
+            Log.e(
+                TAG,
+                "#$id AUDIO INPUT DEAD: ${recording.durationMs} ms of *silent* audio " +
+                        "from ${openMs} ms open. The HAL is handing back zero-filled " +
+                        "buffers — check `adb logcat -s audio_hw_primary` for " +
+                        "'start_input_stream: pcm_prepare returned -1'. Nothing the app " +
+                        "asks for changes this."
+            )
+        }
         return recording
     }
 
@@ -214,13 +258,33 @@ class MicRecorder(
         fun chunkFor(bufferBytes: Int): Int =
             (bufferBytes / 2).coerceIn(MIN_CHUNK_BYTES, MAX_CHUNK_BYTES)
 
+        /** Roughly 320 ms, but only ever as a whole number of driver buffers. */
+        private const val TARGET_BYTES = Pcm.RATE * Pcm.WIDTH * 320 / 1_000
+
+        /** Headroom against a scheduling hiccup, in driver buffers, at both ends. */
+        private const val MIN_MULTIPLE = 8
+        private const val MAX_MULTIPLE = 16
+
         /**
-         * ⚠️ At least half a second of capture buffer. `getMinBufferSize` on sailfish
-         * returns 960 B — 30 ms — and a buffer that small overruns on any scheduling
-         * hiccup, which on this HAL surfaces as the zero-length reads above.
+         * The capture buffer, as **a whole multiple of `getMinBufferSize`**.
+         *
+         * ⚠️ Never a byte count computed from a millisecond target. The minimum buffer
+         * is the only size the driver has ever told us it can do; anything else is a
+         * guess wearing the costume of a measurement.
+         *
+         * ★ **Measured on sailfish, 2026-08-12: the buffer size has no bearing on the
+         * capture fault.** 1280 B, 5120 B and 16000 B each produced the identical
+         * `start_input_stream: pcm_prepare returned -1`, at every sample rate and from
+         * every audio source. The previous rationale here — "at least half a second or
+         * this HAL returns zero reads" — was inferred, never tested, and is wrong. It is
+         * recorded rather than deleted so nobody re-derives it. (`getMinBufferSize` on
+         * this device returns **1280 B / 40 ms**, not the 960 B once noted, so this
+         * yields 10240 B ≈ 320 ms.)
          */
-        fun bufferFor(minBufferBytes: Int): Int =
-            maxOf(minBufferBytes * 4, Pcm.RATE * Pcm.WIDTH / 2)
+        fun bufferFor(minBufferBytes: Int): Int {
+            val wanted = (TARGET_BYTES + minBufferBytes - 1) / minBufferBytes
+            return minBufferBytes * wanted.coerceIn(MIN_MULTIPLE, MAX_MULTIPLE)
+        }
     }
 }
 
@@ -260,7 +324,16 @@ private fun openAudioRecord(): PcmSource? {
         runCatching { rec.release() }
         return null
     }
-    Log.i(tag, "AudioRecord up: minBuffer $minBuf B, using $size B")
+    // ⚠️ Log what was *granted*, not what was asked for. The framework is free to hand
+    // back a different buffer than the one requested, and on sailfish both numbers look
+    // perfectly healthy — state INITIALIZED, recordingState RECORDING — while the HAL
+    // underneath never starts. These two lines are evidence, not reassurance.
+    Log.i(
+        tag,
+        "AudioRecord up: minBuffer $minBuf B, asked $size B, " +
+                "granted ${rec.bufferSizeInFrames} frames " +
+                "(${rec.bufferSizeInFrames * Pcm.WIDTH} B) at ${rec.sampleRate} Hz"
+    )
 
     return object : PcmSource {
         override val bufferBytes = size

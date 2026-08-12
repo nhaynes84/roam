@@ -165,6 +165,7 @@ class PttPanelTest {
         val reasons = listOf(
             Ptt.NO_MIC, Ptt.TOO_SHORT, Ptt.TOO_QUIET, Ptt.NOTHING_HEARD,
             Ptt.WHISPER_UNREACHABLE, Ptt.WHISPER_FAILED, Ptt.micDropout(240, 5_000),
+            Ptt.MIC_NOT_DELIVERING,
         )
         assertEquals("no two failures may read alike", reasons.size, reasons.toSet().size)
     }
@@ -181,6 +182,18 @@ class PttPanelTest {
         compose.onNode(hasText("mic dropped out", substring = true)).assertIsDisplayed()
         compose.onNode(hasText("0.2s", substring = true)).assertIsDisplayed()
         compose.onNode(hasText("5.0s", substring = true)).assertIsDisplayed()
+    }
+
+    /**
+     * ⚠️ A dead audio input has to be readable at arm's length as *not his fault*. The
+     * panel is the only place this device ever says anything.
+     */
+    @Test
+    fun `a dead audio input says so on the panel`() {
+        render(PttState.Failed(Ptt.MIC_NOT_DELIVERING))
+
+        compose.onNode(hasText("never started", substring = true)).assertIsDisplayed()
+        compose.onNode(hasText("not your press", substring = true)).assertIsDisplayed()
     }
 
     /** ★ Idle is silent: no panel, no leftover chrome above the composer. */

@@ -56,6 +56,17 @@ class Recording(val pcm: ByteArray, val rate: Int = Pcm.RATE) {
     /** Computed once — this walks every sample and a press can be a megabyte. */
     val rmsDbfs: Double by lazy { Pcm.rmsDbfs(pcm) }
 
+    /**
+     * ★ Every sample is exactly zero — not "quiet", *nothing*.
+     *
+     * ⚠️ A real microphone in a silent room does not produce this: it produces a noise
+     * floor, which measures around −60 dBFS and is nowhere near [Pcm.FLOOR_DBFS]. Bytes
+     * that are all zero came from software, and the software that produces them is the
+     * audio HAL's error path — it zero-fills the buffer when it cannot start the input
+     * stream. Paired with a capture that ran far behind the clock, that is a diagnosis.
+     */
+    val isDigitalSilence: Boolean get() = pcm.isNotEmpty() && rmsDbfs <= Pcm.FLOOR_DBFS
+
     companion object {
         val EMPTY = Recording(ByteArray(0))
     }

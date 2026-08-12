@@ -57,9 +57,15 @@ private class ScriptedSource(
 /**
  * ★★ The drain loop, which is where push-to-talk actually broke on hardware.
  *
+ * ⚠️ **A caveat, added 2026-08-12.** The contract below is right and stays. The *story*
+ * underneath it did not survive measurement: sailfish's audio HAL fails `pcm_prepare`
+ * for every source, rate and buffer size, and hands back zero-filled buffers at 3 % of
+ * real time — which alone explains the 240 ms-from-a-5-second-hold that this loop was
+ * blamed for. Keep these tests; do not treat them as evidence about that device.
+ *
  * ⚠️⚠️ **The bug this file exists for.** Nexus 0.4 did `if (n <= 0) break`. On sailfish
- * `AudioRecord.read` returned **0** after two buffers — because the app was asking for
- * 4096 bytes out of a 3840-byte capture buffer — and the reader thread quietly exited
+ * `AudioRecord.read` returned **0** after two buffers — thought at the time to be the
+ * app asking for 4096 bytes out of a 3840-byte buffer — and the reader thread exited
  * while `running` stayed true. The recorder still reported one clean open and one clean
  * close with no error line, so a **five-second hold produced 240 ms of audio** and the
  * app blamed the user for not holding the button.
@@ -140,16 +146,38 @@ class MicRecorderTest {
     }
 
     /**
-     * ⚠️ `getMinBufferSize` returns 960 B on sailfish — 30 ms. A buffer that small
-     * overruns on any scheduling hiccup, which on that HAL surfaces as zero reads.
+     * ⚠️⚠️ **The capture buffer is a whole number of the driver's own buffers.**
+     *
+     * `getMinBufferSize` is the only size this device has ever agreed to; a byte count
+     * computed from a millisecond target is a guess, and 0.5 shipped one (16000 B, from
+     * "at least half a second") on a theory that a 2026-08-12 probe then disproved —
+     * 1280 B, 5120 B and 16000 B all failed identically on sailfish. This is the shape
+     * that survives being wrong about the cause: whatever the driver offers, times a
+     * whole number.
      */
     @Test
-    fun `the capture buffer is at least half a second`() {
-        val halfSecond = Pcm.RATE * Pcm.WIDTH / 2
-        assertTrue(MicRecorder.bufferFor(960) >= halfSecond)
-        assertTrue(MicRecorder.bufferFor(3_840) >= halfSecond)
-        // A device asking for more than that still gets what it asked for, times four.
-        assertEquals(80_000, MicRecorder.bufferFor(20_000))
+    fun `the capture buffer is always a whole multiple of the driver's minimum`() {
+        // sailfish, measured: getMinBufferSize returns 1280 B (40 ms) → 320 ms.
+        assertEquals(10_240, MicRecorder.bufferFor(1_280))
+        assertEquals(0, MicRecorder.bufferFor(960) % 960)
+        assertEquals(0, MicRecorder.bufferFor(3_840) % 3_840)
+        assertEquals(0, MicRecorder.bufferFor(20_000) % 20_000)
+    }
+
+    /** Never fewer than eight driver buffers of headroom, and never a silly allocation. */
+    @Test
+    fun `the capture buffer keeps its headroom at both ends`() {
+        // A tiny minimum is padded out rather than taken literally...
+        assertTrue(MicRecorder.bufferFor(320) >= 320 * 8)
+        // ...and a huge one is not multiplied into megabytes.
+        assertTrue(MicRecorder.bufferFor(20_000) <= 20_000 * 16)
+        // A press is never longer than the buffer's own worth of chunks: the chunk
+        // must still fit twice over, whatever the driver said.
+        listOf(320, 960, 1_280, 3_840, 20_000).forEach { min ->
+            val buffer = MicRecorder.bufferFor(min)
+            assertTrue("$min B min gave a $buffer B buffer",
+                MicRecorder.chunkFor(buffer) * 2 <= buffer)
+        }
     }
 
     // --- a genuine error still stops, and says so ---------------------------
