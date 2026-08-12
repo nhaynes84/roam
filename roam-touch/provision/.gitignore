@@ -1,0 +1,4 @@
+# Staged APKs pulled off the phone by stage-apks.sh.
+# Never committed: termux.apk alone is 118 MB, and these are third-party
+# binaries that belong in ~/pixel/apks (and on the laptop), not in git.
+apks/

@@ -1,0 +1,73 @@
+# ROAM Touch — debloat list for sailfish (Pixel, Android 10 QP1A.191005.007.A3)
+#
+# Applied with:      pm uninstall --user 0 <pkg>
+# Reversed with:     cmd package install-existing <pkg>      (provision.sh restore-debloat)
+#
+# ⚠️ `pm uninstall --user 0` does NOT delete the APK from /system. It only removes the
+#    package for user 0. That is why every line here is reversible without a reflash,
+#    and why a mistake on this list costs one command, not an hour.
+#
+# ⚠️ This list was DERIVED FROM THE LIVE DEVICE on 2026-08-12, not copied from notes:
+#       comm -23 <(pm list packages -u --user 0) <(pm list packages --user 0)
+#    It is 26 packages. [[roam-touch-phone-2]] says "29" — the notes are stale or three
+#    were later restored; the device is the authority. If you change what is removed,
+#    re-derive this file the same way rather than hand-editing from memory.
+#
+# ⚠️ Two things are deliberately NOT on this list, and must never be added:
+#      com.google.android.apps.nexuslauncher — the recovery home screen. If Nexus is ever
+#        cleared as device owner, `cmd package set-home-activity` needs a target to point
+#        at. Removing it strands Home. Keep it installed forever.
+#      com.google.android.gms / com.google.android.gsf — pulling Play Services out from
+#        under a running system on a device that is already accountless buys nothing and
+#        breaks things unpredictably. Not worth it.
+#
+# Format: one package per line; `#` comments and blank lines ignored.
+
+# --- Play Store and account/sync surfaces -------------------------------------
+# The store is the single most likely way a Google account gets added by accident,
+# and an account is the one thing that kills device owner. There is also no use for
+# it: with no account signed in it cannot install anything. `adb install` is the only
+# install path on this device, by design.
+com.android.vending
+com.google.android.apps.docs
+com.google.android.apps.pixelmigrate
+com.google.android.apps.enterprise.dmagent
+com.google.android.apps.work.oobconfig
+com.google.android.apps.safetyhub
+
+# --- Telephony / SMS ----------------------------------------------------------
+# The SIM is dead and the radio is turned off (cell_on=0). Anything that exists to
+# talk to a carrier is dead weight that still wakes up and polls.
+com.android.mms.service
+com.google.android.apps.messaging
+com.android.stk
+com.google.android.apps.carrier.log
+
+# --- Media apps ---------------------------------------------------------------
+# This is a voice-and-tiles device on a forearm. None of these are reachable from
+# Nexus (it is a small deliberate app shelf, not an app drawer) and all of them are
+# background battery draw on a 2016 battery.
+com.google.android.youtube
+com.google.android.music
+com.google.android.videos
+com.google.android.apps.maps
+
+# --- Wallpaper / launcher decoration -----------------------------------------
+# The screen lives inside a bracer and shows Nexus. Live wallpapers are a GPU wakeup
+# for pixels nobody will ever see.
+com.google.android.apps.wallpaper
+com.google.android.apps.wallpaper.nexus
+com.android.wallpaper.livepicker
+com.android.wallpaperbackup
+com.android.dreams.basic
+
+# --- Printing / cloud print ---------------------------------------------------
+com.android.printspooler
+com.google.android.apps.cloudprint
+
+# --- Misc dead weight ---------------------------------------------------------
+com.android.bookmarkprovider
+com.android.egg
+com.android.traceur
+com.google.android.apps.wellbeing
+com.google.android.apps.inputmethod.hindi
