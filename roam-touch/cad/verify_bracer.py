@@ -29,8 +29,10 @@ FLOOR, POCK_D, LIP_H = 2.2, 8.8, 2.4
 OUT_W, OUT_L, OUT_H = 75.1, 147.0, 13.4
 POCK_W = 70.3
 HULL_HW, TEN_D, HULL_BELT = 40.0, 2.3, -2.0
-VISOR_H, VISOR_HW, WELL_HW = 5.0, 41.5, 36.66
-VZ1 = OUT_H + VISOR_H
+GUARD_H, GUARD_HW = 15.0, 41.5
+GZ1 = OUT_H + GUARD_H
+WIN_X, BEZEL_CHAM, LIP_H = 32.03, 1.5, 2.4
+SIGHT = BEZEL_CHAM / LIP_H
 CARD_L, CARD_W, CARD_T = 85.60, 53.98, 0.76   # ISO/IEC 7810 ID-1
 # ★ Calibrated, not picked. The thinnest wall the FROZEN housing deliberately
 # has is 1.20 mm -- the 2.4 mm pocket wall behind the 1.2 mm button counterbore,
@@ -111,16 +113,23 @@ probes = [
     # ------------------------------------------------- ribs and visor
     # The canted louvres are gone; these are the proud ribs that replaced them.
     ("deep-flank rib",               (41.0, 60.0, -17.07), True),
+    ("cap chin is raked back",       (-4.0, 60.0, -20.0), False),
     ("gap between the ribs",         (41.0, 60.0, -13.80), False),
     ("nothing beyond the ribs",      (42.5, 60.0, -17.07), False),
-    # The hood: screen sunk in a well, surround proud around it.
-    ("hood side wall",               (39.0, 70.0, OUT_H + 2.0), True),
-    ("screen well is open",          (0.0, 70.0, OUT_H + 2.0), False),
-    ("well floor is the old face",   (35.0, 70.0, OUT_H - 1.0), True),
-    ("elbow brow",                   (0.0, 4.0, OUT_H + 2.0), True),
-    ("hand brow",                    (20.0, 145.0, OUT_H + 1.0), True),
-    ("notch through the hand brow",  (0.0, 145.0, OUT_H + 3.6), False),
-    ("nothing above the hood",       (0.0, 70.0, VZ1 + 1.0), False),
+    # The high guard: three-sided, screen sunk deep inside it.
+    ("guard wall, shallow side",     (-39.0, 73.0, OUT_H + 6.0), True),
+    ("guard wall near the crest",    (-38.5, 73.0, OUT_H + 13.0), True),
+    ("screen well is open",          (0.0, 73.0, OUT_H + 6.0), False),
+    # ★ THREE-sided. If this reads solid a guard has appeared on the deep
+    # flank and the whole point of the section is gone.
+    ("deep flank has NO guard",      (39.0, 73.0, OUT_H + 6.0), False),
+    ("scoop has cut the wall back",  (-34.5, 73.0, OUT_H + 6.0), False),
+    ("...but not at its base",       (-34.5, 73.0, OUT_H + 0.4), True),
+    ("elbow brow",                   (0.0, 8.0, OUT_H + 3.0), True),
+    ("hand brow",                    (0.0, 145.0, OUT_H + 3.0), True),
+    ("crest ramps down at the hand", (-39.0, 144.0, OUT_H + 13.0), False),
+    ("crest ramps down at the elbow", (-39.0, 4.0, OUT_H + 13.0), False),
+    ("nothing above the crest",      (-39.0, 73.0, GZ1 + 1.0), False),
     # Strap runs in a channel under the hull instead of through side flanges,
     # so the device is tray-width. The bars bridge that channel.
     ("strap channel is open, +X",    (14.0, 34, -13.7), False),
@@ -284,6 +293,8 @@ def classify(mid, part_name):
     if part_name == "bracer":
         if abs(z - OUT_H) < 0.25 or abs(z - (OUT_H - 0.1)) < 0.25:
             return "screen aperture rim (FROZEN)"
+        if FLOOR + POCK_D - 1.5 < z < OUT_H + 0.3:
+            return "sensor apertures + bezel loft (FROZEN)"
         if abs(y) < 0.3:
             return "elbow mouth / cap joint"
         if abs(y - OUT_L) < 0.3:
@@ -298,9 +309,15 @@ def classify(mid, part_name):
             return "floor vent rims (inside the pocket)"
         if abs(x) > 34.0 and z < 0.0:
             return "arm saddle edge -- 4 mm pad relief, do not cut"
+        if abs(z - GZ1) < 0.3:
+            return "guard crest -- land set by CREST_W"
+        if z > OUT_H + 3.0:
+            return "brow blades -- converging faces, checked below"
     else:
         if abs(y) < 0.3 or abs(y - CAP_D) < 0.3:
             return "collar joint faces"
+        if z < 0.0:
+            return "hull section creases + chin rake"
         if abs(y + CAP_T) < 0.3 and abs(x) < 30.0 and 0.0 < z < OUT_H:
             return "USB trough / speaker mouths"
     return "UNCLASSIFIED"
@@ -325,6 +342,71 @@ for _nm, _mesh in (("bracer", _parts[0]), ("end cap", cap)):
                       f"({_m[0]:6.1f},{_m[1]:6.1f},{_m[2]:6.1f})  {_a:4.0f} deg")
             if sum(r[0] for r in _rows) > UNCLASSIFIED_BUDGET:
                 bad += 1
+
+# ----------------------------------------------------- crest sharpness
+# ★ A converging crest is a feather edge by definition, and the wall check
+# cannot see it: its filter wants two near-parallel faces, and a crest is two
+# faces meeting at an angle. So measure the angle directly. Anything under
+# CREST_MIN_DEG is too fine to print -- that is what sets CREST_W in bracer.py,
+# rather than taste. Negative-tested: with CREST_W = 0 the guard's crest
+# measures 23 deg and this fails, which is exactly why the land exists.
+# 35, not 40: the sharpest thing on the part is the strap retaining bar's tip
+# where it runs out onto the sloped arm face, at 38.7 deg. That is pre-existing,
+# it is 26 mm of bar tip, and it prints. The guard's crest is the thing this
+# check is really watching.
+CREST_MIN_DEG = 35.0
+
+print("\n=== crest sharpness (included angle at exterior convex creases) ===")
+for _nm, _mesh in (("bracer", _parts[0]), ("end cap", cap)):
+    # ⚠️ Frozen apertures are exempt. The proximity window's corner against
+    # the bezel loft is a 32 deg crease and always has been; it is the phone's
+    # geometry, not ours, and failing on it would just train us to ignore this.
+    _sh = [(l, mid, a) for l, mid, a in sharp_exterior_edges(_mesh, deg=90.0)
+           if "FROZEN" not in classify(mid, _nm)]
+    _worst = min(((180.0 - a, l, mid) for l, mid, a in _sh), default=None)
+    if _worst is None:
+        print(f"  ok    {_nm:<22} no crease under 90 deg included")
+        continue
+    _inc, _l, _mid = _worst
+    _ok = _inc >= CREST_MIN_DEG
+    bad += not _ok
+    print(f"  {'ok  ' if _ok else 'FAIL'}  {_nm:<22} {_inc:5.1f} deg over {_l:5.1f} mm "
+          f"at ({_mid[0]:6.1f},{_mid[1]:6.1f},{_mid[2]:6.1f})  (min {CREST_MIN_DEG})")
+
+# --------------------------------------------------- how far off-axis you see
+# ⚠️ This REPLACES the old "the hood never shadows a pixel" assertion, which a
+# 15 mm guard cannot satisfy and should not pretend to. A deep well restricts
+# the viewing cone -- that is what a well IS. So measure the cone instead of
+# asserting it away: fire rays from just inside the display's near edge and
+# find the last angle that escapes the guard.
+# For reference the frozen bezel alone allows 32 deg; the guard is on the
+# SHALLOW flank, which is the side the eye sits on for a right-arm fit, so this
+# number is the one to argue about if the guard is ever on the wrong side.
+VIEW_MIN_DEG = 15.0
+
+print("\n=== viewing cone off the display's near edge ===")
+_edge_x = -(WIN_X - 0.2)          # just inside the live area, guard side
+_best = 0.0
+for _d in np.arange(0.0, 70.0, 0.5):
+    _t = math.radians(_d)
+    _o = np.array([[_edge_x, 73.0, FLOOR + POCK_D + 0.2]])
+    _dir = np.array([[-math.sin(_t), 0.0, math.cos(_t)]])
+    if _parts[0].ray.intersects_any(_o, _dir)[0]:
+        break
+    _best = _d
+_view_ok = _best >= VIEW_MIN_DEG
+bad += not _view_ok
+print(f"  {'ok  ' if _view_ok else 'FAIL'}  toward the guard  {_best:4.1f} deg "
+      f"(min {VIEW_MIN_DEG}; frozen bezel alone gives 32)")
+_best2 = 0.0
+for _d in np.arange(0.0, 70.0, 0.5):
+    _t = math.radians(_d)
+    _o = np.array([[WIN_X - 0.2, 73.0, FLOOR + POCK_D + 0.2]])
+    _dir = np.array([[math.sin(_t), 0.0, math.cos(_t)]])
+    if _parts[0].ray.intersects_any(_o, _dir)[0]:
+        break
+    _best2 = _d
+print(f"        open (deep) flank  {_best2:4.1f} deg")
 
 # ------------------------------------------------ end cap vs tray clearance
 # The cap has to slide the whole way on, not just fit once it is there. Sweep
@@ -374,5 +456,17 @@ for name, T in orients.items():
     print(f"  {name:<26} unsupported {a[need].sum()/100:7.1f} cm2   "
           f"bed contact {bed_area/100:5.1f} cm2   "
           f"height {q.bounds[1][2]-zmin:5.1f} mm")
+    if name == "standing on hand end" and need.any():
+        # ★ Name the worst face, not just the total. "27 cm2 of overhang" is
+        # not actionable; "the guard's hand ramp, 4.9 cm2 at 44 deg" is.
+        _idx = np.argsort(-a * need)[:4]
+        for _i in _idx:
+            if not need[_i]:
+                continue
+            _ang = math.degrees(math.asin(min(1.0, -n[_i][2])))
+            _c = q.triangles[_i].mean(axis=0)
+            _o = m.triangles[_i].mean(axis=0)
+            print(f"      worst face {a[_i]/100:5.2f} cm2  {_ang:4.0f} deg from "
+                  f"horizontal  at model ({_o[0]:6.1f},{_o[1]:6.1f},{_o[2]:6.1f})")
 
 raise SystemExit(1 if bad else 0)
