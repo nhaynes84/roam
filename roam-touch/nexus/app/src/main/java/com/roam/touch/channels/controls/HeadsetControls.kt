@@ -9,6 +9,9 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioTrack
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
 import android.util.Log
@@ -107,25 +110,19 @@ class HeadsetControls(
                 override fun onMediaButtonEvent(intent: Intent): Boolean =
                     handle(intent) || super.onMediaButtonEvent(intent)
             })
-            // ⚠️⚠️ Load-bearing, and the least obvious line here. Media buttons go to the
-            // most recently *active, playing* session; a session that never claims to be
-            // playing loses every key to whatever last played music. Nothing is actually
-            // played — this app produces no media — it is purely how Android decides who
-            // owns the buttons.
-            setPlaybackState(
-                PlaybackState.Builder()
-                    .setActions(
-                        PlaybackState.ACTION_PLAY_PAUSE or PlaybackState.ACTION_PLAY or
-                                PlaybackState.ACTION_PAUSE or
-                                PlaybackState.ACTION_SKIP_TO_NEXT or
-                                PlaybackState.ACTION_SKIP_TO_PREVIOUS or
-                                PlaybackState.ACTION_STOP
-                    )
-                    .setState(PlaybackState.STATE_PLAYING, 0L, 1f)
-                    .build()
-            )
+            // ⚠️⚠️ **Order is load-bearing, and this is the least obvious line here.**
+            // `isActive` first, THEN the playback state. MediaSessionService picks the
+            // media-button session when it sees a session's playback *become* active; a
+            // state set before activation raises no such event, and the session sits in
+            // the stack, active and PLAYING, while `dumpsys media_session` reports
+            // "Media button session is null" and every key goes to whatever app last
+            // played music. Measured on sailfish: keys went to Photos.
             isActive = true
+            // Nothing is ever played — this app produces no media. Claiming PLAYING is
+            // purely how Android decides who owns the buttons.
+            setPlaybackState(playing())
         }
+        reclaimButtons()
         app.registerReceiver(
             connectionReceiver,
             IntentFilter(BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED),
@@ -268,6 +265,7 @@ class HeadsetControls(
         _active.value = profile
         router.profile = profile
         applyVolumeCapture(profile)
+        reclaimButtons()
         // ★ A known headset connecting is silent. An unknown one asks, once, and never
         // again — whether or not he answers.
         _intro.value = if (profile.introduced) null else profile
@@ -307,6 +305,69 @@ class HeadsetControls(
             }
         })
     }
+
+    /**
+     * ⚠️⚠️ **Claiming the headset buttons takes more than an active session, and this is
+     * the part no documentation mentions.**
+     *
+     * On Android 9+ `MediaSessionStack.updateMediaButtonSessionIfNeeded()` walks
+     * `AudioPlayerStateMonitor.getSortedAudioPlaybackClientUids()` and only promotes a
+     * session whose **uid has actually played audio recently**. An app that has never made
+     * a sound cannot own the media buttons, however active and however PLAYING its session
+     * claims to be. Measured on sailfish: session active, state PLAYING, sole entry in the
+     * stack — and `dumpsys media_session` still said *"Media button session is null"*,
+     * with keys falling through to whichever app last played music (Photos).
+     *
+     * So a few milliseconds of **silence** are played to register the uid, and the
+     * playback state is republished so the service re-runs its selection.
+     *
+     * ⚠️ Silence, and no audio focus is requested — nothing is ducked, nothing is
+     * interrupted, and nothing is audible. This is not the app making a sound; it is the
+     * app becoming eligible to hear a button.
+     */
+    private fun reclaimButtons() {
+        val session = session ?: return
+        runCatching {
+            val rate = 8_000
+            val bytes = rate / 10 * 2                     // 100 ms, 16-bit mono
+            val track = AudioTrack.Builder()
+                .setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                        .build()
+                )
+                .setAudioFormat(
+                    AudioFormat.Builder()
+                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                        .setSampleRate(rate)
+                        .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                        .build()
+                )
+                .setBufferSizeInBytes(bytes)
+                .build()
+            track.write(ByteArray(bytes), 0, bytes)
+            track.play()
+            scope.launch {
+                kotlinx.coroutines.delay(200)
+                runCatching { track.stop(); track.release() }
+                session.setPlaybackState(playing())
+                Log.i(TAG, "reclaimed media buttons")
+            }
+        }.onFailure { Log.w(TAG, "could not reclaim media buttons: ${it.message}") }
+        session.setPlaybackState(playing())
+    }
+
+    private fun playing(): PlaybackState = PlaybackState.Builder()
+        .setActions(
+            PlaybackState.ACTION_PLAY_PAUSE or PlaybackState.ACTION_PLAY or
+                    PlaybackState.ACTION_PAUSE or
+                    PlaybackState.ACTION_SKIP_TO_NEXT or
+                    PlaybackState.ACTION_SKIP_TO_PREVIOUS or
+                    PlaybackState.ACTION_STOP
+        )
+        .setState(PlaybackState.STATE_PLAYING, 0L, 1f)
+        .build()
 
     private companion object {
         const val TAG = "RoamKeys"
