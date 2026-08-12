@@ -18,6 +18,7 @@ import logging
 import os
 import re
 import secrets
+import socket
 import subprocess
 import stat
 import time
@@ -45,6 +46,7 @@ from channels import Channel, TmuxError
 from presence import DEFAULT_TTL_S, UNKNOWN_COVERAGE, Presence
 from store import (
     DEFAULT_DB_PATH,
+    HOST_CHANNEL_ID,
     SCHEMA_VERSION,
     INPUT_APP,
     INPUT_TMUX,
@@ -55,7 +57,7 @@ from store import (
 from transcript import INLINE_BODY_CHARS
 
 HUB_DIR = Path(__file__).resolve().parent
-HUB_VERSION = "1.1.0"
+HUB_VERSION = "1.2.0"
 PROTOCOL_VERSION = 1
 
 #: WebSocket frames a subscriber may fall behind by before we cut it loose and
@@ -173,8 +175,17 @@ def normalise_pane_id(raw: str) -> str:
     client remember to encode it, the hub accepts the bare number too. Anything
     that is not a tmux pane id is rejected outright, so this can never widen
     into "send to whatever pane matches".
+
+    ⚠️ One exception, and it is a literal rather than a pattern: `@host`, the
+    channel that collects notices from things with no pane (`HOST_CHANNEL_ID`).
+    It is not live and never can be, so `/send`, `/interrupt` and `/capture`
+    answer 404 for it exactly as they do for a dead pane -- but its history and
+    its channel entry have to be reachable, or the panel could list a thread it
+    cannot open.
     """
     pane_id = raw.strip()
+    if pane_id == HOST_CHANNEL_ID:
+        return pane_id
     if pane_id and not pane_id.startswith("%"):
         pane_id = "%" + pane_id
     if not _PANE_RE.match(pane_id):
@@ -257,6 +268,28 @@ class EventRequest(BaseModel):
     meta: dict[str, Any] | None = None
 
 
+class NoticeRequest(BaseModel):
+    """"Tell the wearer this." What `roam-msg` posts.
+
+    Deliberately *not* an `outcome`: an outcome is what an agent answered and
+    belongs to the conversation. A notice is a tool talking about itself --
+    "build finished", "I need input" -- and must not make a channel look like
+    it owes a reply. It is still an event, so it is stored, stamped and
+    searchable in the ledger like everything else.
+    """
+
+    text: str = Field(min_length=1, description="What to tell him.")
+    pane: str | None = Field(
+        default=None,
+        description="The channel this is about -- `$TMUX_PANE`. Omit if there "
+        "is none; it is then filed on the host channel.",
+    )
+    source: str = Field(
+        default="cli", description="Who is speaking (roam-msg, a cron job...)."
+    )
+    meta: dict[str, Any] = Field(default_factory=dict)
+
+
 class InterruptRequest(BaseModel):
     """Stop whatever the channel is doing. No text, so nothing is 'typed'."""
 
@@ -305,6 +338,44 @@ def channel_status(live: bool, last_kind: str | None) -> str:
     return "idle"
 
 
+#: What the panel calls the no-pane channel. The host name is the useful part:
+#: "this came from talos, not from any session you started".
+HOST_CHANNEL_LABEL = f"⌁ {socket.gethostname().split('.')[0]}"
+
+
+def host_channel_view(store: Store, stored: StoredChannel | None) -> dict[str, Any]:
+    """The `@host` channel -- notices from things that have no pane.
+
+    It is not a pane, so `live` is neither true nor false in the usual sense.
+    It is reported **live** because the alternative reads as `dead`, and a
+    channel marked dead says "that session is gone" -- a lie about a box that
+    is plainly running, and one that would push it to the bottom of the list.
+    Nothing can be typed into it (`/send` still 404s: there is no pane), and it
+    has no screen to fingerprint, so `idle_s` stays null rather than faking a
+    zero.
+    """
+    last = store.last_event(HOST_CHANNEL_ID)
+    return {
+        "pane_id": HOST_CHANNEL_ID,
+        "label": stored.label if stored and stored.label else HOST_CHANNEL_LABEL,
+        "session": stored.session if stored else "",
+        "window": None,
+        "index": None,
+        "command": None,
+        "live": True,
+        "status": "idle",  # it never owes an answer; nothing is sent to it
+        "archived": bool(stored.archived) if stored else False,
+        "first_seen": stored.first_seen if stored else None,
+        "last_seen": stored.last_seen if stored else None,
+        "last_output_at": None,
+        "idle_s": None,
+        "last_input_source": None,
+        "last_input_at": None,
+        "event_count": store.event_count(HOST_CHANNEL_ID),
+        "last_event": last.to_dict(INLINE_BODY_CHARS) if last else None,
+    }
+
+
 def channel_view(
     store: Store,
     pane_id: str,
@@ -312,6 +383,8 @@ def channel_view(
     stored: StoredChannel | None,
 ) -> dict[str, Any]:
     """One merged channel: whatever tmux says now, plus whatever we remember."""
+    if pane_id == HOST_CHANNEL_ID:
+        return host_channel_view(store, stored)
     last = store.last_event(pane_id)
     label = live.label if live else (stored.label if stored else pane_id)
     last_output_at = stored.last_output_at if stored else None
@@ -824,6 +897,59 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
         event = st.append(pane_id, payload.kind, payload.body, payload.meta)
         _publish_event(event)
         return {"event": event.to_dict()}
+
+    @app.post(
+        "/notify",
+        tags=["events"],
+        dependencies=[Depends(require_auth)],
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def notify(payload: NoticeRequest) -> dict[str, Any]:
+        """★ "Tell the wearer this" -- the one way a tool reaches his arm.
+
+        `~/CLAUDE.md` tells every agent on this box to push its status to ROAM,
+        and `roam-msg` used to do that by shelling out to `adb` on the phone.
+        So the hub owned the notification policy for outcomes and for nothing
+        else, and the device rang all day two feet from his hands. **Every
+        route to the phone now ends here**, and the bridge is the only thing
+        that touches the device.
+
+        What that buys: one policy, in one place, applied to a status line
+        exactly as it is applied to the answer that status line is about. He
+        typed the prompt in that pane, so he is watching it -- the agent's
+        chatter about it stays quiet, and the same message on a channel he is
+        talking to from ROAM comes through.
+
+        It answers with the decision (`push`, and why) rather than making the
+        caller ask a second question. Delivery itself is the bridge's, so a
+        `push: true` means "queued for the phone", not "it buzzed".
+        """
+        st = _store()
+        if payload.pane is None:
+            pane_id = HOST_CHANNEL_ID
+            if st.get_channel(pane_id) is None:
+                st.remember_channel(pane_id, HOST_CHANNEL_LABEL, socket.gethostname())
+        else:
+            pane_id = normalise_pane_id(payload.pane)
+            if st.get_channel(pane_id) is None:
+                live = await run_in_threadpool(channels_mod.get, pane_id)
+                st.remember_channel(
+                    pane_id,
+                    live.label if live else pane_id,
+                    live.session if live else "",
+                )
+        meta = {**payload.meta, "source": payload.source}
+        event = st.append(pane_id, EventKind.NOTICE, payload.text, meta)
+        _publish_event(event)
+        coverage = event.coverage or {}
+        covered = bool(coverage.get("covered"))
+        if covered:
+            reason = "covered by " + (", ".join(coverage.get("by") or []) or "presence")
+        elif coverage.get("known"):
+            reason = f"not covered (last input: {coverage.get('last_input')})"
+        else:
+            reason = "nothing recorded -- unknown means push"
+        return {"event": event.to_dict(), "push": not covered, "reason": reason}
 
     @app.get("/events", tags=["events"], dependencies=[Depends(require_auth)])
     async def get_events(

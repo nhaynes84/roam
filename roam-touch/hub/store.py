@@ -42,6 +42,16 @@ SCHEMA_VERSION = 5
 INPUT_TMUX = "tmux"  # he typed it at the keyboard; the answer stays there
 INPUT_APP = "app"    # it came in over the API from ROAM; the answer goes there
 
+#: Where a `notice` goes when whatever sent it has no pane to claim -- an agent
+#: under launchd or cron, a script run over ssh. It is not a tmux pane id and
+#: never can be (tmux ids are `%<n>`), so it cannot collide with a real
+#: channel, and it is a single exact literal rather than a widened rule.
+#:
+#: The alternative was to borrow some pane's channel, which files a message
+#: under a conversation that did not send it and would inherit that
+#: conversation's coverage -- silence for a message nobody was watching for.
+HOST_CHANNEL_ID = "@host"
+
 
 class EventKind(str, Enum):
     """Every kind of thing that can land in a channel thread.
@@ -56,6 +66,11 @@ class EventKind(str, Enum):
     CLOSED = "closed"    # the pane went away (channel is dead)
     CONTROL = "control"  # a control key was sent (escape, interrupt)
     NOTE = "note"        # free-form hub/agent note
+    #: A tool saying something to the wearer -- `roam-msg "build finished"`.
+    #: Not part of the conversation: it never makes a channel owe an answer and
+    #: never moves `last_input_source`. It is pushed like an outcome, and
+    #: suppressed by exactly the same coverage rule.
+    NOTICE = "notice"
     ERROR = "error"      # something failed on the way to the pane
 
 

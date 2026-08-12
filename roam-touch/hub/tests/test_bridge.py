@@ -119,6 +119,29 @@ async def test_bookkeeping_kinds_are_not_pushed(tmp_path, kind):
 
 
 @pytest.mark.asyncio
+async def test_a_notice_from_a_tool_is_pushed(tmp_path):
+    """`roam-msg` used to shell straight to the phone. Now it posts a `notice`
+    to the hub and the bridge delivers it -- so a status line from an agent is
+    judged by the same rule as the answer it is about, and lands in the ledger
+    on the way past."""
+    bridge, phone = make_bridge(tmp_path)
+    await bridge.handle_event(event(20, kind="notice", summary="build finished"))
+    assert phone.messages == [("%1", "✳ Augment things: build finished")]
+
+
+@pytest.mark.asyncio
+async def test_a_notice_he_was_present_for_never_buzzes(tmp_path):
+    """The bug in one line: he types a prompt in tmux, the agent pushes six
+    status lines, and the phone rings six times two feet from his hands."""
+    bridge, phone = make_bridge(tmp_path)
+    await bridge.handle_event(
+        event(21, kind="notice", covered=True, by=["tmux-input"])
+    )
+    assert phone.messages == []
+    assert bridge.suppressed == 1
+
+
+@pytest.mark.asyncio
 async def test_an_event_that_landed_while_he_watched_is_not_a_missed_message(tmp_path):
     """He answered from the laptop. It was never missed, so it never buzzes."""
     bridge, phone = make_bridge(tmp_path)

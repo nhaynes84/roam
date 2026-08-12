@@ -1,6 +1,6 @@
 # ROAM Touch hub — client contract
 
-Version `1.1.0`, protocol `1`. This document is the contract the Android client is
+Version `1.2.0`, protocol `1`. This document is the contract the Android client is
 built against. If the code and this file disagree, that is a bug in one of them —
 say so rather than guessing.
 
@@ -48,6 +48,16 @@ GET /channels/%253/history     ← equivalent: percent-encoded '%3'
 
 `pane_id` in every JSON body is always the canonical `%3` form. Strip the `%` when
 building a URL and you never have to think about encoding.
+
+**One channel is not a pane: `@host`.** It collects `notice` events from things
+that have no `$TMUX_PANE` — an agent under launchd, a cron job, a script over
+ssh. Its id is that exact literal (a tmux pane id is always `%<n>`, so they can
+never collide) and it appears in `GET /channels` like any other channel, with
+`live: true`, `status: "idle"` and `idle_s: null` — it has no screen to
+fingerprint and calling it *dead* would claim the box was gone. Its history is
+readable at `GET /channels/@host/history`; `/send`, `/interrupt` and `/capture`
+answer `404`, because there is nothing to type into. Treat `pane_id` as an
+opaque string — as §5 already says — and nothing needs to special-case it.
 
 ---
 
@@ -122,6 +132,7 @@ rather than dropping it.
 | `sent` | the wearer sent this text to the channel (`body` = the text) |
 | `receipt` | a prompt was submitted (`body` = the prompt, when the hook knows it) |
 | `outcome` | the agent finished (`body` = **what it said**, not "finished") |
+| `notice` | a tool said something to the wearer (`POST /notify`; `body` = the message). Not part of the conversation: it never makes a channel `working` and never moves `last_input_source`. |
 | `opened` | the hub first saw this pane (`body` = its label) |
 | `closed` | the pane went away; the channel is dead |
 | `note` | free-form note |
@@ -250,9 +261,9 @@ because it read 13.2 hours idle while he was actively typing over SSH.
 ### `GET /health` — no auth
 
 ```json
-{"ok": true, "service": "roam-hub", "version": "1.1.0", "protocol": 1,
+{"ok": true, "service": "roam-hub", "version": "1.2.0", "protocol": 1,
  "uptime_s": 2.15,
- "build": {"version": "1.1.0", "protocol": 1, "commit": "6229cdb", "schema": 5,
+ "build": {"version": "1.2.0", "protocol": 1, "commit": "6229cdb", "schema": 5,
            "code_mtime": 1786520867.4}}
 ```
 
@@ -387,6 +398,51 @@ something into a channel thread.
   `summary` and applies the 16 KiB cap itself; do not send a `summary`.
 * Returns `201` with `{"event": Event}` and pushes it to every WebSocket client.
 * If the pane is unknown to the hub, the channel is created first.
+
+### ★ `POST /notify` — "tell the wearer this"
+
+Where a tool sends a status message. `tools/roam-msg` is the client; it is what
+every agent and hook on this box calls, and it does nothing but this.
+
+```json
+{"text": "build finished — 122 tests green", "pane": "%3",
+ "source": "roam-msg", "meta": {"host": "talos"}}
+```
+
+* `text` — required, non-empty. What to tell him.
+* `pane` — the channel this is about, normally `$TMUX_PANE`. **Omit it when
+  there is none** (launchd, cron, ssh) and it is filed on `@host`. Do not
+  borrow another pane's id: the message would inherit that conversation's
+  coverage and be silenced for a conversation it was never part of.
+* `source` / `meta` — free-form; stored on the event as `meta.source` and
+  merged into `meta`.
+
+Response `201`:
+
+```json
+{"event": Event, "push": true, "reason": "not covered (last input: app)"}
+```
+
+* `push` — whether the bridge will deliver this to the phone, decided by the
+  same `coverage` rule as any other event and stamped on the event itself.
+  `true` means *queued*, not *delivered*: the bridge does that, rate-limited.
+* `reason` — human-readable, for the CLI to print. `covered by tmux-input`,
+  `covered by roam-app`, `nothing recorded -- unknown means push`.
+
+⚠️ **This is the only way in.** Notifications used to be posted straight to the
+device with `adb ... cmd notification post`, which meant the hub's policy
+governed outcomes and nothing else, and the phone rang while he sat at the
+keyboard reading the very pane it was about. Owner: *"what's the point of a
+'hub' if all traffic doesn't go through it..."* A status line is now judged by
+exactly the rule that judges the answer it is about, and lands in the ledger on
+the way past (`memsearch --source ledger`). The one remaining program that
+speaks to the device is `tools/roam-push`, and only the bridge runs it.
+
+A notice is deliberately **not** an `outcome`: an outcome is what an agent
+answered, and a channel whose last event is a `sent`/`receipt` is `working`.
+Filing "I am still going" as an outcome would answer a prompt that is still
+open. It is not a `note` either — `note` is not pushed, and this is the kind
+that exists to be pushed.
 
 ### `GET /presence`
 

@@ -1,0 +1,70 @@
+#!/bin/bash
+# roam-push — put a notification on the ROAM Touch screen. THE DEVICE TRANSPORT.
+#
+# ⚠️⚠️ THIS IS NOT THE TOOL YOU WANT. Agents, hooks and scripts call
+#      `roam-msg`, which posts to the hub; the hub decides whether the message
+#      is worth interrupting him for, and the bridge (com.talos.roam-bridge)
+#      runs this. Calling this directly bypasses that decision and rings his
+#      phone while he is sitting at the keyboard — which is the exact bug this
+#      split exists to fix.
+#
+# This is the *only* thing in the system that speaks to the device, and it holds
+# no policy at all: it is told to post, so it posts. Everything about whether a
+# message deserves the screen lives in the hub (`roam-touch/hub/hub.py`,
+# `_coverage_for`) and in the bridge (`bridge.py`, `PUSH_KINDS`).
+#
+# Usage: roam-push [--tag TAG] "text"
+#   --tag TAG  notification tag. Same tag replaces the previous notification,
+#              so the bridge passes one per channel and two sessions do not
+#              overwrite each other.
+#
+# Env:
+#   ROAM_DEV   adb target. Default is the Pixel on the tailnet.
+#   ROAM_TITLE notification title. Default "Claude / <hostname>".
+#
+# ⚠️ It makes a sound, and cannot be made silent from here: `cmd notification
+#    post` hardcodes channel `shellcmd` at IMPORTANCE_DEFAULT and Android 10's
+#    `cmd notification` has no importance subcommand (checked on the device,
+#    SDK 29). Fixes, in order of preference: (1) Nexus posts these itself on an
+#    IMPORTANCE_LOW channel — it already runs a foreground service with one and
+#    already holds the hub socket, so the adb path retires entirely; (2) one
+#    long-press on a ROAM notification → Silent, which locks the shellcmd
+#    channel down for good.
+
+set -uo pipefail   # NOT -e: an unreachable phone must not kill the caller
+
+ROAM_DEV="${ROAM_DEV:-100.95.196.87:5555}"
+ROAM_TITLE="${ROAM_TITLE:-Claude / $(hostname -s)}"
+TAG="roam"
+
+if [ "${1:-}" = "--tag" ] || [ "${1:-}" = "--pane" ]; then
+    shift
+    TAG="${1:-roam}"
+    shift
+fi
+
+msg="$*"
+[ -z "$msg" ] && { echo "roam-push: nothing to send" >&2; exit 1; }
+
+# Single-quote for the device-side shell: ' -> '\''
+q() { printf "%s" "$1" | sed "s/'/'\\\\''/g"; }
+
+# Reconnect if the transport dropped (adb tcpip does not survive a phone reboot).
+# ⚠️ Bounded: a sleeping/absent phone makes `adb connect` sit for ~75 s, which
+# stalls every caller behind it. Fail fast instead -- a missed status message is
+# nothing, a wedged queue is a real problem.
+if ! adb devices | grep -q "^${ROAM_DEV}[[:space:]]*device$"; then
+    _timeout() { perl -e 'alarm shift; exec @ARGV' "$@" 2>/dev/null; }
+    _timeout 5 adb connect "$ROAM_DEV" >/dev/null 2>&1
+fi
+
+if ! adb -s "$ROAM_DEV" shell \
+        "cmd notification post -S bigtext -t '$(q "$ROAM_TITLE")' '$(q "$TAG")' '$(q "$msg")'" \
+        >/dev/null 2>&1; then
+    echo "roam-push: FAILED — ROAM Touch unreachable at $ROAM_DEV" >&2
+    exit 1
+fi
+
+# Confirm delivery. Silence reads as success *or* as a silent no-op, and a
+# caller cannot tell those apart -- so say so explicitly.
+echo "roam-push: delivered to $ROAM_DEV [$TAG] (${#msg} chars)"

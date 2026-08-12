@@ -1,105 +1,83 @@
-# Roam Tools — BLE Text Push
+# Roam Tools — pushing a message to the wrist
 
-Send text messages to the Roam wrist display over BLE. Any process (Claude Code, openclaw, tmux hooks, scripts) can push notifications to the OLED.
+The user wears ROAM Touch so he does not have to sit at the computer. These are
+the tools that put something on it.
 
-## Tools
+⚠️ **BLE is retired (2026-08-11).** `roam-send` (Swift/CoreBluetooth) and the
+127-byte chunking are history — see git log if you ever need them. ROAM Touch is
+a phone on the tailnet, reached over the network from anywhere.
 
-### `roam-send` — Low-level BLE sender
-Compiled Swift binary. Sends a single message (max 127 chars) to the Roam BLE text characteristic (UUID `0xFF01`).
+## The one rule
 
-```bash
-./roam-send "short message"
-./roam-send --clear
+```
+agent / hook / script          the hub                     the bridge          the phone
+   roam-msg  ──POST /notify──▶  decides: push or not  ──WS──▶  roam-push  ──adb──▶  📱
 ```
 
-- Connects to the first discovered Roam device
-- Truncates at 127 characters (BLE buffer limit)
-- Device buzzes twice on receipt (haptic confirmation)
+**`roam-msg` is the only thing you call. It never touches the device.**
 
-### `roam-msg` — Chunked message wrapper
-Bash script that splits long messages at word boundaries and sends each chunk as a separate message with a 2-second delay between sends.
+The hub owns the notification policy — *reply where the last message came from*:
+a prompt typed in tmux means he is at the keyboard, so its outcome (and every
+status line about it) stays quiet; a message sent from ROAM means the answer
+belongs on ROAM. That rule lives in exactly one place, `hub/hub.py`
+(`_coverage_for`), and everything that wants the wrist obeys it by going through
+the hub.
 
-```bash
-./roam-msg "This is a very long message that exceeds the 127 character BLE buffer limit and will be automatically split into multiple messages that you can scroll through on the device"
-```
+It was not always so. `roam-msg` used to shell straight to `adb`, so the policy
+governed outcomes and nothing else and the phone rang all day while he sat two
+feet from the screen it was about. Owner: *"what's the point of a 'hub' if all
+traffic doesn't go through it..."*
 
-- Each chunk becomes a separate message in the ring buffer (100 message capacity)
-- Scroll between chunks using the scroll buttons on the device
-- No prefix tags — chunks are clean text
-
-**Use `roam-msg` for all programmatic sends.** It handles the buffer limit transparently.
-
-## Claude Code Integration
-
-Add to `~/.claude/settings.json`:
-
-```json
-{
-  "hooks": {
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/Projects/roam/tools/roam-msg \"Sent\" 2>/dev/null &"
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/Projects/roam/tools/roam-msg \"Ready\" 2>/dev/null &"
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-- **UserPromptSubmit**: Sends "Sent" when you submit a message (confirmation you hit Enter)
-- **Stop**: Sends "Ready" when Claude finishes responding
-
-### Sending from within a Claude session
-
-Claude Code (or any agent) can call `roam-msg` directly via Bash:
+## `roam-msg` — the client
 
 ```bash
 ~/Projects/roam/tools/roam-msg "Build complete. 0 errors."
+~/Projects/roam/tools/roam-msg --pane 3 "needs your input"
 ```
 
-Use this for status updates, task completion notices, or any info the user needs on their wrist.
+* Attributes the message to `$TMUX_PANE` automatically, which is what lets the
+  hub apply "he is typing in that pane". `--pane N` overrides it. With no pane
+  at all (launchd, cron, ssh) it claims nothing and the hub files it on the
+  `@host` channel, where nothing covers it, so it pushes.
+* Prints what the hub decided — `%3 — no push (covered by tmux-input)` — so a
+  silent send is never indistinguishable from a broken one.
+* Lands in the ledger either way. `memsearch "…" --source ledger` finds it later.
+* **If the hub is unreachable the message is dropped, not sent direct**, logged
+  on stderr and appended to `~/.local/state/roam/undelivered.log`. A direct path
+  would only ever fire while the hub is down — which is when the bridge is down
+  too, so every real outcome is silently stalling. Chatter arriving on his wrist
+  at that moment would say the pipeline is healthy when it is not.
+* Env: `ROAM_HUB`, `ROAM_HUB_TOKEN_FILE`, `ROAM_HUB_TIMEOUT`.
 
-## openclaw Integration
+## `roam-notify` — fire and forget
 
-openclaw agents can shell out to `roam-msg`:
+`roam-msg` backgrounded with output discarded. For hooks that must not block or
+print.
 
-```javascript
-const { execSync } = require('child_process');
-execSync(`~/Projects/roam/tools/roam-msg "Task finished: ${summary}"`);
-```
+## `roam-push` — ⚠️ the device transport, not for you
 
-Or add to the agent's tool config as a notification action.
+The only program that speaks to the phone (`adb ... cmd notification post`). It
+holds no policy: told to post, it posts. **Only the bridge
+(`com.talos.roam-bridge`) runs it.** Calling it by hand bypasses every rule
+above and rings his phone while he is reading the pane it is about — which is
+the exact bug the split exists to fix.
 
-## tmux Integration
+It makes a **sound**, and cannot be silenced from here: `cmd notification post`
+hardcodes channel `shellcmd` at `IMPORTANCE_DEFAULT`, and Android 10 (SDK 29, on
+the device) has no `cmd notification` subcommand for importance. The fix is for
+Nexus to post these itself on an `IMPORTANCE_LOW` channel — it already runs a
+foreground service with one and already holds the hub socket — after which the
+adb path retires entirely. Failing that, one long-press → *Silent* on a ROAM
+notification locks the channel down for good.
 
-Already configured in `~/.tmux.conf`:
+## Tests
+
+`roam-msg` is a hub client, so its tests live with the hub:
 
 ```bash
-set-hook -g after-select-pane 'run-shell -b "pkill -f roam-send 2>/dev/null; ~/Projects/roam/tools/roam-send \"Pane #{pane_index}: #{pane_title}\" 2>/dev/null &"'
+cd ~/Projects/roam/roam-touch/hub && .venv/bin/python -m pytest -q
 ```
 
-Sends pane name to Roam on every pane switch.
-
-## Display Behavior
-
-- Messages stored in a 100-slot ring buffer (oldest evicted when full)
-- New messages auto-display and wake the screen
-- Scroll up (D8) = advance to next message/page (higher numbers)
-- Scroll down (D9) = go back (lower numbers)
-- Bottom indicator: `p1/3` for pages within a long message, `m2/5` for message position
-- Numbering is chronological: m1 = oldest, mN = newest
-- Double haptic pulse on every incoming message
+`tests/test_roam_msg.py` asserts the architecture, not just the behaviour: the
+client cannot reach the device, does not second-guess the hub, and the bridge
+does not shell out to the client (which would notify itself in a loop).

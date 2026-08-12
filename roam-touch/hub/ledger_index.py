@@ -36,7 +36,7 @@ SESSION_DIR = Path.home() / ".claude/projects/-Users-talos"
 
 #: Event kinds worth indexing. `opened`/`closed` are bookkeeping and `receipt`
 #: duplicates the prompt that the session transcript already carries.
-LEDGER_KINDS = ("sent", "outcome", "error", "note")
+LEDGER_KINDS = ("sent", "outcome", "error", "note", "notice")
 
 #: Minimum characters before a chunk is worth indexing.
 #:

@@ -1,88 +1,188 @@
-#!/bin/bash
-# roam-msg — push a message to ROAM Touch over the network.
-#
-# BLE IS RETIRED. This talks to the phone (ROAM Touch) over Tailscale, so it
-# works from any machine on the tailnet, from anywhere, with no pairing, no
-# proximity and no CoreBluetooth permission. The old chunked BLE path (127-byte
-# buffer, roam-send) is gone -- see git history if you ever need it back.
-#
-# Usage: roam-msg [--pane N] "your message here"
-#   --pane N   tag the notification per tmux pane so panes don't overwrite
-#              each other on the phone.
-#
-# Env:
-#   ROAM_DEV   adb target. Default is the Pixel on the tailnet.
-#   ROAM_TITLE notification title. Default "Claude / <hostname>".
+#!/usr/bin/env python3
+"""roam-msg -- tell the wearer something. **Everything goes through the hub.**
 
-set -uo pipefail   # NOT -e: an unreachable phone must not kill the caller
+Usage: roam-msg [--pane N] "your message here"
 
-ROAM_DEV="${ROAM_DEV:-100.95.196.87:5555}"
-ROAM_TITLE="${ROAM_TITLE:-Claude / $(hostname -s)}"
-TAG="roam"
+Every agent and session on this box is told to push its status to ROAM. This
+is the tool that does it, and all it does is say what happened; the hub decides
+whether it is worth interrupting him for, and the bridge is the only thing that
+touches the phone.
 
-if [ "${1:-}" = "--pane" ]; then
-    shift
-    TAG="pane${1:-0}"
-    shift
-fi
+★ Why it works this way. `roam-msg` used to shell out to
+`adb ... cmd notification post`, straight at the device. The hub already owned
+the rule that matters -- **reply where the last message came from**: a prompt
+typed in tmux means he is at the keyboard, so its outcome must not buzz -- and
+`roam-msg` ignored all of it. So every agent's status line rang his phone while
+he sat two feet from the screen it was about. Owner: *"what's the point of a
+'hub' if all traffic doesn't go through it..."*
 
-msg="$*"
-[ -z "$msg" ] && { echo "roam-msg: nothing to send" >&2; exit 1; }
+⚠️ The fix is not to teach this script the rule. A short-lived patch did that
+(it called `GET /presence` and skipped when covered) and it was worse: a second
+copy of the policy, in a client, free to drift from the hub's. There is one
+copy, it lives in the hub, and this program holds no opinion whatsoever.
 
-# ★ Don't buzz him for something he is already looking at.
-#
-# The hub suppresses pushes when he is at the keyboard or has the app open --
-# but roam-msg posts straight to the phone and used to bypass all of it. Every
-# agent completion rang his phone while he sat at the laptop, because
-# ~/CLAUDE.md tells every session to push status here. Ask the hub first.
-#
-# Fails OPEN: if the hub is unreachable or slow, the message still goes. A
-# missed status line is worse than a redundant buzz. --force skips the check.
-if [ "${1:-}" = "--force" ] || [ "${ROAM_FORCE:-}" = "1" ]; then
-    [ "${1:-}" = "--force" ] && { shift; msg="$*"; }
-else
-    _hub="${ROAM_HUB:-http://100.67.237.109:8787}"
-    _tokf="$HOME/Projects/roam/roam-touch/hub/hub-token.txt"
-    if [ -r "$_tokf" ]; then
-        _pres=$(curl -s -m 2 -H "Authorization: Bearer $(cat "$_tokf")" \
-                     "$_hub/presence" 2>/dev/null)
-        # covers_all = app foregrounded or he is demonstrably present.
-        case "$_pres" in
-            *'"covers_all":true'*)
-                echo "roam-msg: skipped — he is present (hub says covered). --force to override."
-                exit 0 ;;
-        esac
-        # covered_panes contains this pane => he is typing in it right now.
-        if [ -n "${TMUX_PANE:-}" ]; then
-            case "$_pres" in
-                *"\"${TMUX_PANE#%}\""*|*"\"${TMUX_PANE}\""*)
-                    echo "roam-msg: skipped — you are in $TMUX_PANE. --force to override."
-                    exit 0 ;;
-            esac
-        fi
-    fi
-fi
+★ **If the hub is unreachable the message is dropped, not sent direct.** A
+direct path would only ever fire while the hub is down -- which is exactly when
+the bridge is down too, so every real outcome is silently stalling. Agent
+chatter arriving on his wrist at that moment says the pipeline is healthy when
+it is not, and that is a worse failure than a lost status line. The message is
+spooled to `~/.local/state/roam/undelivered.log` and the failure is stated on
+stderr. `tools/roam-push` is the deliberate, marked exception: it is the
+bridge's transport, it holds no policy, and nothing else calls it.
 
-# Single-quote for the device-side shell: ' -> '\''
-q() { printf "%s" "$1" | sed "s/'/'\\\\''/g"; }
+Env:
+  ROAM_HUB             hub base URL. Default: the tailnet address of talos.
+  ROAM_HUB_TOKEN_FILE  bearer token file. Default: hub/hub-token.txt.
+  ROAM_HUB_TIMEOUT     seconds to wait on the hub. Default 4.
+"""
 
-# Reconnect if the transport dropped (adb tcpip does not survive a phone reboot).
-# ⚠️ Bounded: a sleeping/absent phone makes `adb connect` sit for ~75 s, which
-# stalls every caller behind it. Fail fast instead -- a missed status message is
-# nothing, a wedged queue is a real problem.
-if ! adb devices | grep -q "^${ROAM_DEV}[[:space:]]*device$"; then
-    _timeout() { perl -e 'alarm shift; exec @ARGV' "$@" 2>/dev/null; }
-    _timeout 5 adb connect "$ROAM_DEV" >/dev/null 2>&1
-fi
+from __future__ import annotations
 
-if ! adb -s "$ROAM_DEV" shell \
-        "cmd notification post -S bigtext -t '$(q "$ROAM_TITLE")' '$(q "$TAG")' '$(q "$msg")'" \
-        >/dev/null 2>&1; then
-    echo "roam-msg: FAILED — ROAM Touch unreachable at $ROAM_DEV" >&2
-    exit 1
-fi
+import json
+import os
+import socket
+import sys
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
 
-# Confirm delivery. Silence reads as success *or* as a silent no-op, and a
-# caller cannot tell those apart -- so say so explicitly. roam-notify still
-# suppresses this by redirecting.
-echo "roam-msg: delivered to $ROAM_DEV [$TAG] (${#msg} chars)"
+DEFAULT_HUB = "http://100.67.237.109:8787"
+DEFAULT_TOKEN_FILE = Path.home() / "Projects/roam/roam-touch/hub/hub-token.txt"
+DEFAULT_TIMEOUT_S = 4.0
+
+HOSTNAME = socket.gethostname().split(".")[0]
+
+#: Where a message goes when the hub could not take it. Not a queue -- nothing
+#: replays it -- but a dropped message that leaves no trace is indistinguishable
+#: from one that was never sent, and "did that ever go out?" is answerable in
+#: two seconds with a file.
+SPOOL = Path.home() / ".local/state/roam/undelivered.log"
+
+
+def read_token(env) -> str:
+    path = Path(env.get("ROAM_HUB_TOKEN_FILE") or DEFAULT_TOKEN_FILE)
+    return path.read_text(encoding="utf-8").strip()
+
+
+def resolve_pane(explicit: str | None, env) -> str | None:
+    """Which channel this message is about.
+
+    `$TMUX_PANE` is the whole of the attribution story: it is set for every
+    shell inside tmux, and it is inherited by agents and their subagents, so a
+    message from an agent working in pane %3 says so without anyone wiring it
+    up. That is what lets the hub apply "he typed the prompt in that pane" to a
+    status line -- without it, no rule can fire and everything buzzes.
+
+    ⚠️ No pane means **no pane** -- return None and let the hub file it on the
+    host channel. Borrowing some other pane's id would attach the message to a
+    conversation that did not send it, and it would then inherit that
+    conversation's coverage: silence for a message nobody was watching for.
+    """
+    if explicit:
+        pane = explicit.strip()
+        return pane if pane.startswith("%") else "%" + pane
+    pane = (env.get("TMUX_PANE") or "").strip()
+    return pane or None
+
+
+def spool(text: str, pane: str | None, why: str) -> None:
+    """Leave a trace of what was dropped. Best effort: a failure to record a
+    failure must not become a second failure."""
+    try:
+        SPOOL.parent.mkdir(parents=True, exist_ok=True)
+        stamp = time.strftime("%Y-%m-%dT%H:%M:%S")
+        with SPOOL.open("a", encoding="utf-8") as fh:
+            fh.write(f"{stamp}\t{pane or '-'}\t{why}\t{text}\n")
+    except OSError:
+        pass
+
+
+def post_notice(hub: str, token: str, payload: dict, timeout: float) -> dict:
+    request = urllib.request.Request(
+        hub.rstrip("/") + "/notify",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {token}",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def main(argv=None, env=None, stdout=None, stderr=None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    env = os.environ if env is None else env
+    out = stdout or sys.stdout
+    err = stderr or sys.stderr
+
+    pane_arg: str | None = None
+    while argv and argv[0].startswith("--"):
+        flag = argv.pop(0)
+        if flag == "--pane" and argv:
+            pane_arg = argv.pop(0)
+        elif flag == "--force":
+            # Was "skip the presence check" during the hour this script decided
+            # for itself. It decides nothing now, so it cannot skip anything.
+            print(
+                "roam-msg: --force no longer means anything; the hub decides",
+                file=err,
+            )
+        elif flag == "--":
+            break
+        else:
+            print(f"roam-msg: unknown option {flag}", file=err)
+            return 1
+
+    text = " ".join(argv).strip()
+    if not text:
+        print("roam-msg: nothing to send", file=err)
+        return 1
+
+    pane = resolve_pane(pane_arg, env)
+    payload: dict = {"text": text, "source": "roam-msg", "meta": {"host": HOSTNAME}}
+    if pane:
+        payload["pane"] = pane
+
+    hub = env.get("ROAM_HUB") or DEFAULT_HUB
+    try:
+        timeout = float(env.get("ROAM_HUB_TIMEOUT") or DEFAULT_TIMEOUT_S)
+    except ValueError:
+        timeout = DEFAULT_TIMEOUT_S
+
+    try:
+        token = read_token(env)
+    except OSError as exc:
+        spool(text, pane, "no token")
+        print(f"roam-msg: NOT DELIVERED — cannot read the hub token ({exc})", file=err)
+        return 1
+
+    try:
+        answer = post_notice(hub, token, payload, timeout)
+    except urllib.error.HTTPError as exc:
+        spool(text, pane, f"hub {exc.code}")
+        print(f"roam-msg: NOT DELIVERED — hub answered {exc.code} {exc.reason}", file=err)
+        return 1
+    except (urllib.error.URLError, OSError, ValueError, json.JSONDecodeError) as exc:
+        spool(text, pane, "hub unreachable")
+        print(
+            f"roam-msg: NOT DELIVERED — no hub at {hub} ({exc}). "
+            f"Dropped on purpose: the bridge is down too, so a direct push "
+            f"would fake a working pipeline. Spooled to {SPOOL}.",
+            file=err,
+        )
+        return 1
+
+    event = answer.get("event") or {}
+    where = event.get("pane_id") or "?"
+    if answer.get("push"):
+        print(f"roam-msg: {where} — push queued ({answer.get('reason', '')})", file=out)
+    else:
+        print(f"roam-msg: {where} — no push ({answer.get('reason', '')})", file=out)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

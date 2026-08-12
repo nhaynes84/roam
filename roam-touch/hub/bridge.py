@@ -3,7 +3,7 @@
 The hub holds everything and pushes it over a WebSocket, but nothing was
 listening, so from across the room the whole thing was a database. This service
 subscribes to the hub like any other client and forwards the events worth
-interrupting someone for to ROAM Touch via `roam-msg`.
+interrupting someone for to ROAM Touch via `tools/roam-push`.
 
 Two rules it exists to honour:
 
@@ -14,8 +14,12 @@ Two rules it exists to honour:
   the answer stays in tmux; he sent it from ROAM, so the answer buzzes on ROAM.
   The hub stamps that onto every event as `coverage`; the bridge just reads it.
 
-It shells out to `~/Projects/roam/tools/roam-msg` and never reimplements it:
-one push path, not two.
+⚠️ It shells out to `roam-push`, **never to `roam-msg`**. They used to be the
+same program, which was the whole architectural bug: `roam-msg` is what agents
+call, and it now posts a `notice` to the hub -- so a bridge that delivered
+through it would turn every notification into a new notice and feed itself
+forever. `roam-push` is the device transport and nothing else; this is the only
+thing that runs it.
 """
 
 from __future__ import annotations
@@ -37,14 +41,16 @@ BRIDGE_VERSION = "1.0.0"
 
 #: Which event kinds are worth a buzz on someone's arm.
 #:
-#: `outcome` is the answer he walked away to wait for, and `error` is a send
-#: that never reached the pane -- both are news. `receipt` is deliberately
-#: absent: he typed that himself seconds ago, and echoing it back to his wrist
-#: is exactly the noise that makes people take a device off. `sent`, `opened`
-#: and `closed` are bookkeeping the panel can show when he looks.
+#: `outcome` is the answer he walked away to wait for, `error` is a send that
+#: never reached the pane, and `notice` is a tool telling him something
+#: directly (`roam-msg "build finished"`) -- all three are news. `receipt` is
+#: deliberately absent: he typed that himself seconds ago, and echoing it back
+#: to his wrist is exactly the noise that makes people take a device off.
+#: `sent`, `opened` and `closed` are bookkeeping the panel can show when he
+#: looks.
 #:
 #: This will get tuned -- change the tuple, not a condition buried in a branch.
-PUSH_KINDS: tuple[str, ...] = ("outcome", "error")
+PUSH_KINDS: tuple[str, ...] = ("outcome", "error", "notice")
 
 #: Prefixes by kind. An error must not read like an answer.
 KIND_PREFIX: dict[str, str] = {"error": "⚠️ "}
@@ -75,7 +81,9 @@ class Settings(BaseSettings):
     token_file: Path = HUB_DIR / "hub-token.txt"
     token: str | None = None
     state_file: Path = HUB_DIR / "bridge-state.json"
-    roam_msg: Path = Path.home() / "Projects/roam/tools/roam-msg"
+    #: The device transport. ⚠️ Never point this at `roam-msg` -- see the
+    #: module docstring; that is a feedback loop, not a configuration choice.
+    roam_push: Path = Path.home() / "Projects/roam/tools/roam-push"
 
     #: Honour the hub's coverage stamp: don't push into a conversation that is
     #: already happening somewhere he can see. False pushes everything.
@@ -93,11 +101,11 @@ class Settings(BaseSettings):
     label_chars: int = 32
     summary_chars: int = 120
 
-    #: `roam-msg` blocks for ~75 s when the phone is off the tailnet (adb
+    #: `roam-push` blocks for ~75 s when the phone is off the tailnet (adb
     #: connect, measured 2026-08-11), so it must always be bounded and the
     #: child killed -- otherwise one sleeping phone stalls every notification
     #: and leaves orphan adb processes behind.
-    roam_msg_timeout_s: float = 20.0
+    roam_push_timeout_s: float = 20.0
     #: After a failed push, stop trying for this long. A phone that is asleep
     #: stays asleep; burning 20 s per queued event achieves nothing.
     offline_backoff_s: float = 60.0
@@ -171,19 +179,20 @@ class State:
             log.warning("cannot persist bridge state: %s", exc)
 
 
-async def push_via_roam_msg(
+async def push_via_roam_push(
     settings: Settings, text: str, pane_id: str
 ) -> bool:
-    """Run `roam-msg`. Never raises; the bridge outlives a failed push.
+    """Run `roam-push`, the device transport. Never raises; the bridge
+    outlives a failed push.
 
-    `--pane` tags the notification per channel so two sessions do not overwrite
-    each other on the phone.
+    `--tag` groups the notification per channel so two sessions do not
+    overwrite each other on the phone.
     """
-    tag = pane_id.lstrip("%") or "0"
+    tag = pane_id.lstrip("%@") or "0"
     try:
         proc = await asyncio.create_subprocess_exec(
-            str(settings.roam_msg),
-            "--pane",
+            str(settings.roam_push),
+            "--tag",
             tag,
             text,
             stdout=asyncio.subprocess.DEVNULL,
@@ -191,26 +200,26 @@ async def push_via_roam_msg(
         )
         try:
             _, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=settings.roam_msg_timeout_s
+                proc.communicate(), timeout=settings.roam_push_timeout_s
             )
         except asyncio.TimeoutError:
             # wait_for cancels the await, not the process. Kill it, or every
             # unreachable phone leaves an adb connect running for 75 s.
             proc.kill()
             await proc.wait()
-            log.warning("roam-msg timed out after %.0fs", settings.roam_msg_timeout_s)
+            log.warning("roam-push timed out after %.0fs", settings.roam_push_timeout_s)
             return False
     except (OSError, ValueError) as exc:
-        log.warning("roam-msg failed to start: %s", exc)
+        log.warning("roam-push failed to start: %s", exc)
         return False
     if proc.returncode != 0:
-        log.warning("roam-msg exited %s: %s", proc.returncode, stderr.decode().strip())
+        log.warning("roam-push exited %s: %s", proc.returncode, stderr.decode().strip())
         return False
     return True
 
 
 class Bridge:
-    """Hub WebSocket in, `roam-msg` out.
+    """Hub WebSocket in, `roam-push` out.
 
     `pusher` and `watched_panes` are injected so the network and tmux
     boundaries can be faked; everything above them is the real policy.
@@ -227,7 +236,7 @@ class Bridge:
         self.state = state or State(settings.state_file)
         self.clock = clock or time.monotonic
         self._pusher = pusher or (
-            lambda text, pane: push_via_roam_msg(settings, text, pane)
+            lambda text, pane: push_via_roam_push(settings, text, pane)
         )
         self.labels: dict[str, str] = {}
         #: pane_id -> (summary, kind, coalesced_count)

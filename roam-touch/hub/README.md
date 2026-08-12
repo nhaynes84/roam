@@ -18,7 +18,7 @@ store.py       SQLite event log, per channel, never hard-deleted
 transcript.py  pull the assistant's answer out of a session transcript;
                summarise it for Piper and for a glance
 hub.py         FastAPI service + WebSocket + the tmux poller
-bridge.py      hub events -> phone notifications, via roam-msg
+bridge.py      hub events -> phone notifications, via tools/roam-push
 roam-hub-hook  the Claude Code hook that posts receipts and outcomes
 tests/         pytest; tmux faked at channels._run, network at urlopen
 ```
@@ -81,7 +81,13 @@ silent.
 Until the Channels app exists, nothing subscribes to the hub, so from across the
 room it is a database. `bridge.py` is a WebSocket client that forwards the events
 worth interrupting someone for to ROAM Touch by **shelling out to
-`~/Projects/roam/tools/roam-msg`** — one push path, never a second implementation.
+`~/Projects/roam/tools/roam-push`** — one push path, never a second implementation.
+
+⚠️ `roam-push`, **not `roam-msg`**. They were the same program until the split:
+`roam-msg` is the client every agent calls and it now posts a `notice` to
+`POST /notify`, so a bridge that delivered through it would turn each
+notification into a new notice and feed itself forever. `roam-push` is the
+device transport, holds no policy, and nothing but the bridge runs it.
 
 ```bash
 cp com.talos.roam-bridge.plist ~/Library/LaunchAgents/
@@ -91,13 +97,14 @@ launchctl bootout   gui/$(id -u)/com.talos.roam-bridge      # stop
 tail -f ~/Library/Logs/roam-bridge.log
 ```
 
-* **What gets pushed**: `PUSH_KINDS` in `bridge.py` — currently `outcome` and
-  `error`. `receipt` is deliberately excluded: he typed it seconds ago, and
+* **What gets pushed**: `PUSH_KINDS` in `bridge.py` — currently `outcome`,
+  `error` and `notice` (a tool talking to him: `roam-msg "build finished"`).
+  `receipt` is deliberately excluded: he typed it seconds ago, and
   echoing it back to his arm is noise. It is a constant with a comment because it
   will get tuned.
 * **What it says**: the channel **label** then the event summary —
   `✳ Augment things: the suite is green — 122 tests`. The label is the point: which
-  session is talking, without unlocking anything. `roam-msg --pane` tags each
+  session is talking, without unlocking anything. `roam-push --tag` tags each
   channel separately so two sessions don't overwrite each other.
 * **What it will not do**: push an event the hub stamped as covered — an answer to
   something he typed at the keyboard. The bridge holds no opinion and asks nothing;

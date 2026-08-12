@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- ROAM bridge: hub events -> phone notifications via roam-msg.
+<!-- ROAM bridge: hub events -> phone notifications via tools/roam-push.
      Separate job from the hub on purpose: the hub must keep holding state
      even if the push path is broken, and restarting one must not restart
      the other. Install: see README.md. -->
@@ -18,11 +18,12 @@
     <key>ROAM_BRIDGE_HUB_URL</key><string>http://100.67.237.109:8787</string>
     <key>ROAM_BRIDGE_TOKEN_FILE</key><string>/Users/talos/Projects/roam/roam-touch/hub/hub-token.txt</string>
     <key>ROAM_BRIDGE_STATE_FILE</key><string>/Users/talos/Projects/roam/roam-touch/hub/bridge-state.json</string>
-    <key>ROAM_BRIDGE_ROAM_MSG</key><string>/Users/talos/Projects/roam/tools/roam-msg</string>
-    <key>ROAM_BRIDGE_ACTIVE_GRACE_S</key><string>120</string>
+    <!-- ⚠️ roam-push, never roam-msg: roam-msg posts a notice to the hub, so a
+         bridge delivering through it would notify itself in a loop. -->
+    <key>ROAM_BRIDGE_ROAM_PUSH</key><string>/Users/talos/Projects/roam/tools/roam-push</string>
     <key>ROAM_BRIDGE_MIN_INTERVAL_S</key><string>5</string>
     <key>ROAM_BRIDGE_LOG_LEVEL</key><string>info</string>
-    <!-- roam-msg needs adb and tmux on PATH. -->
+    <!-- roam-push needs adb on PATH. -->
     <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>
   <key>RunAtLoad</key><true/>
