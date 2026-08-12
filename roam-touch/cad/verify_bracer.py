@@ -28,7 +28,8 @@ cap.fix_normals()
 FLOOR, POCK_D, LIP_H = 2.2, 8.8, 2.4
 OUT_W, OUT_L, OUT_H = 75.1, 147.0, 13.4
 POCK_W = 70.3
-HULL_HW, HULL_Y0 = 40.0, 13.0
+HULL_HW, TEN_D, HULL_BELT = 40.0, 2.3, -3.0
+CARD_L, CARD_W, CARD_T = 85.60, 53.98, 0.76   # ISO/IEC 7810 ID-1
 # ★ Calibrated, not picked. The thinnest wall the FROZEN housing deliberately
 # has is 1.20 mm -- the 2.4 mm pocket wall behind the 1.2 mm button counterbore,
 # at the 1.5 mm ends where the bore does not pierce it. So the bar sits just
@@ -56,7 +57,6 @@ probes = [
     # coin toss, which is worse than no test at all.
     ("volume plunger in its bore",   (36.3, 80.0, FLOOR + 4), True),
     ("power plunger in its bore",    (36.3, 102.0, FLOOR + 4), True),
-    ("cap snap dimple, right wall",  (37.3, 5.0, OUT_H / 2), False),
     ("wall between the two buttons", (36.3, 94.0, FLOOR + 4), True),
     ("wall below volume opening",    (36.3, 60.0, FLOOR + 4), True),
     ("floor vent",                   (0, 73, 1.0), False),
@@ -88,9 +88,23 @@ probes = [
     ("arm-face skin under cavity",   (0.0, 60.0, -6.5), True),
     ("arm void below the skin",      (0.0, 60.0, -9.5), False),
     ("cavity open at the nose",      (0.0, 14.0, -4.0), False),
-    # The cap slides on over bare tray. Anything here fouls it -- and the swept
-    # interference test below is the real guard, this is the cheap one.
-    ("nothing below tray at cap",    (0.0, 5.0, -5.0), False),
+
+    # ------------------------------------------------------- cap tenon
+    # The nose steps IN by TEN_D below the belt so the cap's collar lands
+    # flush. If the step is missing the cap stands proud again; if it is too
+    # deep the collar rattles. Probed either side of the tenon's flank face.
+    ("tenon flank, deep side",       (37.2, 3.0, -8.0), True),
+    ("collar space outside tenon",   (39.0, 3.0, -8.0), False),
+    ("snap dimple in tenon flank",   (37.4, 7.0, -8.84), False),
+    ("full section above the belt",  (39.0, 3.0, -1.0), True),
+
+    # ------------------------------------------------------- card slots
+    ("card channel, mid",            (0.0, 40.0, -1.0), False),
+    ("card channel at the nose",     (0.0, 2.0, -1.0), False),
+    ("card rail web, deep side",     (29.5, 40.0, -1.0), True),
+    ("card rail web, shallow side",  (-29.5, 40.0, -1.0), True),
+    ("card back stop",               (0.0, 87.5, -1.0), True),
+    ("floor above the card channel", (0.0, 40.0, 1.0), True),
     ("thick arm band under strap",   (0.0, 34.0, -4.0), True),
     ("exhaust louvre is open",       (39.0, 56.0, -8.8), False),
     ("flank between two louvres",    (39.0, 61.0, -8.8), True),
@@ -127,8 +141,9 @@ _cb = len(cap.split(only_watertight=False))
 bad += _cb != 1
 print(f"  cap bodies      {_cb}  {'ok' if _cb == 1 else 'FAIL — cap is in pieces'}")
 print(f"  volume          {m.volume/1000:.1f} cm3")
-print(f"  PETG mass       {m.volume/1000*1.27:.0f} g   (+11 g cap, +143 g phone "
-      f"= {m.volume/1000*1.27+11+143:.0f} g on the arm)")
+_cap_g = cap.volume / 1000 * 1.27
+print(f"  PETG mass       {m.volume/1000*1.27:.0f} g   (+{_cap_g:.0f} g cap, +143 g phone "
+      f"= {m.volume/1000*1.27+_cap_g+143:.0f} g on the arm)")
 bb = m.bounds
 print(f"  bbox            {bb[1][0]-bb[0][0]:.1f} x {bb[1][1]-bb[0][1]:.1f} "
       f"x {bb[1][2]-bb[0][2]:.1f} mm")

@@ -8,6 +8,14 @@ the arm, flush with the tray sides at the belt line and flaring out below it,
 hollowed to a 2 mm skin with the arm saddle cut through its underside. V1 left
 that wedge open on two ribs and read as a tray on stilts.
 
+The END CAP is part of the same body, not a collar bolted to it: the hull's
+nose steps in by the cap's wall thickness below the belt line, so the cap's
+outer surface IS the hull's section and the joint has no step in it.
+
+The hollow under the tray carries TWO ID-1 CARDS (a bank card and a licence),
+in a channel formed by two C-rails hung from the tray floor. They load from
+the elbow end and the cap is what retains them.
+
 ★ Every hull facet is a plane PARALLEL TO THE ARM AXIS. That is what makes the
 low-poly styling free: stood on end, the entire outer body is vertical, so it
 needs no support and there is nothing curved to tessellate.
@@ -84,7 +92,6 @@ STRAP_Y = (34.0, 112.0)  # strap channel centres, from the elbow (open) end
 # side, so that flank is deep and mostly dead volume, while the -X flank
 # meets the arm within ~13 mm. All of it is derived from arm_z() so TILT
 # stays a real knob -- change it and the section follows.
-HULL_Y0 = 13.0       # hull starts here; ahead of it is bare tray for the cap
 HULL_HW = 40.0       # hull half width at the widest -- 2.4 mm proud of the tray
 HULL_SHOULDER = 2.0  # Z where the flank leaves the tray wall and rakes out
 HULL_BELT = -3.0     # Z of the shoulder crease
@@ -96,16 +103,26 @@ WALL_OUT = 2.0       # outer skin thickness
 # wall eats most of it. A thin skin everywhere plus a thick band under each
 # strap channel gets the weight back and still leaves 2.4 mm of floor beneath
 # the webbing. The step between them is a plane, so it cannot feather.
-WALL_ARM = 2.4       # arm-face skin over the open span
+# ⚠️ 2.0, not 2.4. At 2.4 the cavity floor rises to within 0.97 mm of the
+# card channel at the arm crown and leaves a membrane between them that the
+# wall check sat right on the limit of. 2.0 opens that to ~1.4 mm.
+WALL_ARM = 2.0       # arm-face skin over the open span
 WALL_ARM_STRAP = 4.4  # under the strap channels -- 2.2 of it is the channel
 STRAP_BAND = 3.0     # how far the thick band runs past the channel
 WALL_END = 3.0       # closing wall at the hand end
 CAV_Y1 = 3.0         # cavity stops this far short of the hand end
-RAKE = 14.0          # plan-view chamfer on the hull's nose corners
 LOUVER_W = 4.0       # exhaust slots in the deep (+X) flank
 LOUVER_Y = (56.0, 66.0, 76.0, 132.0, 142.0)
 
 CAP_D = 10.0         # end-cap slip depth
+CAP_W = 2.0          # cap side wall
+# ⚠️ 6 mm, not 2.4. The full-face trough is lofted into this plate, so a thin
+# plate makes the trough meet the outer face at a feather edge at the corners.
+# The answer is material, not a slicer setting: a thicker plate gives the scoop
+# real depth, a proper rim, and a gentler taper that prints cleanly. It also
+# suits the chunky retro-futurist read.
+CAP_T = 6.0          # cap end plate
+CAP_CLR = 0.30       # slip fit over the tenon
 # Strap runs in a channel on the UNDERSIDE of each rib, not on side flanges.
 # Flanges made the device 91 mm wide for no structural reason and were also
 # what the end cap collided with. This keeps the whole thing tray-width.
@@ -147,6 +164,9 @@ CAM_SVG = (11.22, 5.78, 1.50)               # cx, cy, r -- front camera
 PWR_SVG = (37.11, 46.01)                    # power button, y range, right edge
 VOL_SVG = (55.16, 72.91)                    # volume rocker, y range, right edge
 VENT_R = 6.0
+# ⚠️ 46, not 60. The card rails hang from this same ceiling at |X| >= 24.3;
+# a wider vent cuts their webs off the ceiling and leaves them floating.
+VENT_W = 46.0
 EPS = 0.1
 # ★ Owner's finishing pass, measured off RoamTouchModded.step: 1.5 mm chamfer
 # on every exterior edge. Do not lose this on the next regeneration -- it is
@@ -276,16 +296,25 @@ HULL_SEC = [
     ( SD * HULL_HW,    HULL_BELT),       # deep flank
     ( SD * OUT_W / 2,  HULL_SHOULDER),
 ]
-hull = prism(HULL_SEC, HULL_Y0, OUT_L)
 
-# Plan-view rake on the nose corners. A cut plane containing Z has no Z in its
-# normal, so it costs nothing in the print orientation, and it stops the hull
-# ending in a blunt square shoulder behind the cap.
-for _sx in (-1, 1):
-    _n = Vector(_sx, -1, 0).normalized()
-    _p0 = Vector(_sx * (HULL_HW - RAKE), HULL_Y0, 0)
-    hull -= Pos(_p0 + _n * 100.0) * Rot(0, 0, math.degrees(math.atan2(-1, _sx))) \
-        * Box(200, 200, 200)
+# ★★ The nose is a TENON, not a stub. V1 stopped the hull 13 mm short so the
+# old rectangular cap could collar the bare tray -- which left the cap reading
+# as a different object bolted onto a faceted body, with an open step at the
+# joint. Now the hull runs the whole length and the last CAP_D of it is stepped
+# IN by the cap's wall thickness, below the belt line only. The cap's collar
+# fills that step, so its outer surface is the hull's own section, continuous.
+#
+# ⚠️ Below the belt only. Above it the section is flush with the tray wall,
+# and the tray wall is 2.4 mm of frozen pocket -- there is nothing there to
+# rebate. So the belt crease IS the cap's top edge, which is why the joint
+# disappears: the surface turns inward at exactly the line where the cap ends.
+TEN_D = CAP_W + CAP_CLR              # how far the tenon steps in
+_above = bbox(-80, 80, -1, CAP_D + 1, HULL_BELT, 80)
+_below = bbox(-80, 80, -1, CAP_D + 1, -80, HULL_BELT)
+
+hull = prism(HULL_SEC, CAP_D, OUT_L)
+hull += prism(HULL_SEC, 0, CAP_D) & _above
+hull += prism(inset(HULL_SEC, TEN_D), 0, CAP_D) & _below
 
 part += hull
 
@@ -321,13 +350,59 @@ part -= arm
 # leaves 2.8 mm under the strap channel) and left OPEN at the nose -- a closed
 # cavity would put an unsupported roof across the whole section at the top of
 # the print, and an open one is also the intake for the floor vents.
-cav = prism(inset(HULL_SEC, WALL_OUT), HULL_Y0 - 1.0, OUT_L - CAV_Y1)
+cav = prism(inset(HULL_SEC, WALL_OUT), CAP_D, OUT_L - CAV_Y1)
+# Over the tenon the skin has to be measured off the STEPPED-IN face, or the
+# cavity would sit outside it and the tenon wall would come out negative.
+cav += prism(inset(HULL_SEC, WALL_OUT), -1.0, CAP_D) & _above
+cav += prism(inset(HULL_SEC, TEN_D + WALL_OUT), -1.0, CAP_D) & _below
 cav -= _tilt * (Pos(0, OUT_L / 2, ARM_AXIS_Z) * Rot(90, 0, 0) * Cylinder(
     ARM_CUT_R + WALL_ARM, OUT_L + 60))
 for y in STRAP_Y:
     cav -= _tilt * (Pos(0, y, ARM_AXIS_Z) * Rot(90, 0, 0) * Cylinder(
         ARM_CUT_R + WALL_ARM_STRAP, STRAP_W + 2 * STRAP_BAND))
+
+# ------------------------------------------------------------- card slots
+# ★ ID-1 cards (ISO/IEC 7810: 85.60 x 53.98 x 0.76) in the dead volume.
+# A card is 54 mm across and the ONLY place in this section with 54 mm of
+# clear span is the slab directly under the tray floor: above Z ~= -2.9 the
+# arm cut has fallen away entirely, so the cavity runs the full width there.
+# Everywhere else -- the deep flank void, the chine, the keel -- the section
+# is under 26 mm and no orientation of a card fits. So: one channel, flat,
+# under the floor, holding two cards.
+#
+# The channel is a pair of C-rails hung from the cavity ceiling rather than a
+# closed pocket. A pocket would need a floor spanning 54 mm and that floor is
+# 5 cm3 of PETG for no structural return; the rails only need to catch the
+# card's two long edges. They are prismatic along Y, so they cost nothing in
+# the print orientation.
+CARD_L, CARD_W, CARD_T = 85.60, 53.98, 0.76
+CARD_N = 2                 # cards carried
+CARD_CLR = 0.35            # per side around the card
+CARD_RAIL = 5.0            # web outboard of the card edge
+CARD_ENG = 2.5             # how far the ledge reaches under the card
+CARD_LEDGE = 1.4           # ledge thickness -- this is what carries the card
+CARD_STOP = 2.0            # back stop so a card cannot vanish up the cavity
+# ⚠️ The channel height is NOT free. Over each strap band the floor of this
+# channel is also the roof of the strap channel, and the crown of the arm cut
+# sits 3.09 mm below the tray floor there -- so every mm of card channel comes
+# straight off that membrane. 0.30 of slack leaves it 1.27 mm; more slack and
+# the wall check fails. Two flat ID-1 cards fit; an EMBOSSED bank card is
+# thicker than 0.76 at the digits and will only go in on its own.
+CARD_SLACK = 0.30          # total, over the whole stack
+CARD_SW = CARD_W + 2 * CARD_CLR
+CARD_SH = CARD_N * CARD_T + CARD_SLACK
+CARD_X0, CARD_X1 = -CARD_SW / 2, CARD_SW / 2
+CARD_Y1 = CARD_L + 1.0
+_card_z0 = -(CARD_SH + CARD_LEDGE)
+
+# keep these solid -- subtract them from the cavity before the cavity is cut
+for _xa, _xb in ((CARD_X0 - CARD_RAIL, CARD_X0 + CARD_ENG),
+                 (CARD_X1 - CARD_ENG, CARD_X1 + CARD_RAIL)):
+    cav -= bbox(_xa, _xb, -1.0, CARD_Y1 + CARD_STOP, _card_z0, 0.0)
+cav -= bbox(CARD_X0, CARD_X1, CARD_Y1, CARD_Y1 + CARD_STOP, _card_z0, 0.0)
+
 part -= cav
+part -= bbox(CARD_X0, CARD_X1, -10.0, CARD_Y1, -CARD_SH, 0.0)
 
 # Exhaust louvres in the deep flank -- the only way out for the air the floor
 # vents dump into the cavity, and the facet that keeps the flank from reading
@@ -423,8 +498,9 @@ part -= bbox(
 # Floor vents (cooling + weight). They now open into the hull cavity, which is
 # open at the nose -- so the floor under the phone breathes into a duct that
 # exhausts through the flank louvres instead of into a blind box.
-for (yc, ln) in ((24.0, 26.0), (73.0, 50.0), (135.0, 18.0)):
-    vent = extrude(RectangleRounded(60.0, ln, VENT_R), amount=FLOOR + 4)
+for (yc, ln, vw) in ((24.0, 26.0, VENT_W), (73.0, 50.0, VENT_W),
+                     (135.0, 18.0, 60.0)):   # aft of the card rails
+    vent = extrude(RectangleRounded(vw, ln, VENT_R), amount=FLOOR + 4)
     # ⚠️ The vent starts just BELOW the cavity ceiling, not 2 mm below it. The
     # old -2.0 was reaching into open air; now there is a hull under here and
     # the extra 1.6 mm was being taken out of the arm-face skin. Under a strap
@@ -443,23 +519,12 @@ for (yc, ln) in ((24.0, 26.0), (73.0, 50.0), (135.0, 18.0)):
 # ⚠️ USB-C is on this same end, so the cap carries a cable aperture. Without
 # it you would unclip the cap every time you charged, which is how a
 # removable part becomes a lost part.
-CAP_W = 2.0          # cap side wall
-# ⚠️ 6 mm, not 2.4. The full-face trough is lofted into this plate, so a thin
-# plate makes the trough meet the outer face at a feather edge at the corners.
-# The answer is material, not a slicer setting: a thicker plate gives the scoop
-# real depth, a proper rim, and a gentler taper that prints cleanly. It also
-# suits the chunky retro-futurist read.
-CAP_T = 6.0          # cap end plate
-CAP_CLR = 0.30       # slip fit over the tray
 CAP_BUMP_R = 1.6     # snap dome radius
-CAP_DIMPLE_D = 0.7   # how deep the dome sinks into the tray wall
-CAP_BUMP_Y = 5.0     # dome centre. ⚠️ Must sit clear of the slot ends (7.5) --
-# a dome overrunning the slot end makes a non-manifold shell there.
-# The cap walls are stiff (2 mm PETG, braced by the end plate), so the domes
-# have to sit on cantilever TONGUES or nothing can flex and the cap will not
-# go on -- which is exactly what the first version got wrong.
-CAP_TONGUE_H = 7.0   # tongue height, Z
-CAP_SLOT_W = 1.4     # relief slot around it
+CAP_DIMPLE_D = 0.7   # how deep the dome sinks into the tenon flank
+CAP_BUMP_Y = 7.0     # dome centre, out near the collar's free end
+CAP_SLOT_W = 1.4     # relief slot freeing the deep flank from the chine fold
+CAP_SLOT_ROOT = 2.5  # slot stops this far from the plate, leaving the root
+CAP_RAKE = 8.0       # plan-view rake across the plate's CAP_T of depth
 # USB-C plug shell is 8.34 x 2.56 mm with fully rounded ends. Cut that SHAPE
 # with ~1 mm of clearance, not a generic rectangle -- the taper does the work
 # of accommodating fat overmoulds, so the opening itself can be tight.
@@ -490,30 +555,69 @@ SPK_X = 17.0               # centre offset either side of the port
 # skews it slightly, which is the intent.
 TROUGH_INSET = 0.8         # margin left all round -- near edge to edge
 
-# Dimples in the tray's outer side walls. TRUNCATED CONES, not cylinders and
-# not spheres: a cylinder presents a sharp edge square to the travel direction
-# and will not go on at all, while a sphere rams a curved surface into a flat
-# one and OCCT emits a non-manifold shell there (verified -- removing the
-# spheres took both parts from 378 broken faces to zero). A cone gives the
-# same camming ramp out of faces the kernel handles cleanly.
-for _sx in (-1, 1):
-    part -= Pos(_sx * (OUT_W / 2 + 0.2), CAP_BUMP_Y, OUT_H / 2) \
+# ---------------------------------------------------- the cap's section
+# ★★ The cap's OUTER SURFACE IS THE HULL'S SECTION. V1's cap was a rectangular
+# collar sized to the bare tray, butted against a faceted body with a belt
+# line, chines and a raked nose -- it read as a different object bolted on, and
+# there was an open step at the joint. Now:
+#   * below the belt the hull steps in by TEN_D and the collar fills that step,
+#     so the outer surface runs straight through the joint with no change of
+#     width and no ledge;
+#   * the belt crease is the collar's top edge -- the surface turns inward at
+#     exactly the line where the cap stops, so the seam lands on a feature
+#     instead of in the middle of a flat face;
+#   * above the belt the cap is end plate only, flush with the tray's own walls
+#     and its top face. V1's collar stood 2.3 mm proud of the screen; it does
+#     not any more, because there is nothing to rebate in a 2.4 mm pocket wall.
+# ⚠️ The collar is a C, open on the arm side, cut by the SAME arm cylinder as
+# the hull. So it takes nothing out of the 4 mm compliant-pad relief -- its
+# arm-side edges lie exactly on the hull's own saddle.
+CAP_SEC_IN = inset(HULL_SEC, CAP_W)      # bore; TEN_D - CAP_W = CAP_CLR clear
+_cap_below = bbox(-80, 80, -CAP_T - 1, CAP_D + 1, -80, HULL_BELT)
+
+# Flank Z spans, per side. ⚠️ HANDED -- the shallow flank is ~9 mm tall and the
+# deep one ~12, so the snap features are placed per flank, never mirrored.
+_sh_bot = arm_z(-SD * HULL_HW)
+if _sh_bot is None:
+    _sh_bot = HULL_Z_SHAL
+FLANKS = ((-SD, (HULL_BELT + _sh_bot) / 2),
+          (SD, (HULL_BELT + HULL_Z_DEEP + HULL_CHINE) / 2))
+
+# Dimples in the TENON's flanks now, not the tray's. TRUNCATED CONES, not
+# cylinders and not spheres: a cylinder presents a sharp edge square to the
+# travel direction and will not go on at all, while a sphere rams a curved
+# surface into a flat one and OCCT emits a non-manifold shell there (verified
+# -- removing the spheres took both parts from 378 broken faces to zero).
+for _sd, _zc in FLANKS:
+    _sx = 1 if _sd > 0 else -1
+    part -= Pos(_sx * (HULL_HW - TEN_D + 0.2), CAP_BUMP_Y, _zc) \
         * Rot(0, -90 * _sx, 0) \
         * Cone(1.8, 1.0, CAP_DIMPLE_D + 0.2,
                align=(Align.CENTER, Align.CENTER, Align.MIN))
 
-# ★ A full collar, not a U: a bottom plate matching the top one. Four walls
-# means the tray slides into a closed rectangular mouth, so loading and
-# unloading reads like a magazine change instead of clipping a lid on. It also
-# roots the snap tongues at both ends instead of leaving them hanging.
-cap = bbox(-(OUT_W / 2 + CAP_CLR + CAP_W), OUT_W / 2 + CAP_CLR + CAP_W,
-           -CAP_T, CAP_D,
-           -(CAP_CLR + CAP_W), OUT_H + CAP_CLR + CAP_W)
-# hollow out the slot the tray slides into
-cap -= bbox(-(OUT_W / 2 + CAP_CLR), OUT_W / 2 + CAP_CLR,
-            -EPS, CAP_D + EPS, -CAP_CLR, OUT_H + CAP_CLR)
+# Collar: the wall between the tenon and the full section, below the belt.
+cap = (prism(HULL_SEC, 0.0, CAP_D) & _cap_below) \
+    - prism(CAP_SEC_IN, -EPS, CAP_D + EPS)
+# End plate: the whole face -- hull section below, tray section above.
+cap += prism(HULL_SEC, -CAP_T, 0.0)
+cap += bbox(-OUT_W / 2, OUT_W / 2, -CAP_T, 0.0, 0.0, OUT_H)
+# ⚠️ The saddle runs through the cap too. Without this the plate would close
+# off the elbow end of the arm channel and sit on the forearm.
+cap -= arm
+
+# Plan-view rake on the nose corners, carried over from the hull's nose (the
+# hull no longer has one -- the cap IS the nose now). A cut plane containing Z
+# has no Z in its normal, so it costs nothing in the print orientation, and it
+# is sized to finish exactly at Y=0 so it never reaches the collar and cannot
+# skin the corner off a 2 mm wall.
+for _sx in (-1, 1):
+    _n = Vector(_sx * CAP_T, -CAP_RAKE, 0).normalized()
+    _p0 = Vector(_sx * (HULL_HW - CAP_RAKE), -CAP_T, 0)
+    cap -= Pos(_p0 + _n * 100.0) \
+        * Rot(0, 0, math.degrees(math.atan2(_n.Y, _n.X))) * Box(200, 200, 200)
+
 # Cable aperture: a USB-C-shaped slot through the plate, flared on the outside
-# and tapered down to it so any head can find the port behind a 2.4 mm plate.
+# and tapered down to it so any head can find the port behind the plate.
 cap -= Pos(0, -CAP_T - EPS, USB_Z) * Rot(-90, 0, 0) * extrude(
     RectangleRounded(USB_W, USB_H, USB_H / 2 - 0.01),
     amount=CAP_T + CAP_D + 2 * EPS)
@@ -521,50 +625,44 @@ cap -= Pos(0, -CAP_T - EPS, USB_Z) * Rot(-90, 0, 0) * extrude(
 # comes out rotated 90 deg -- wide where the cap is thin, and it eats the plate.
 # ⚠️ Built as a LOFT, not extrude(taper=). OCCT's extrude_taper throws
 # Standard_TypeMismatch on a rounded profile at this angle (~64 deg).
-_cap_half_w = OUT_W / 2 + CAP_CLR + CAP_W
-_face_z0, _face_z1 = -(CAP_CLR + CAP_W), OUT_H + CAP_CLR + CAP_W
-_face_zc = (_face_z0 + _face_z1) / 2
-_trough_h = (_face_z1 - _face_z0) - 2 * TROUGH_INSET
+# The trough now spans the TRAY's part of the face rather than the whole of it:
+# the face is 39 mm tall in the new section and most of the lower half is hull
+# wedge that the saddle cuts away, so a full-face scoop would run off the edge.
+# Over the tray it is very nearly centred on the port, which also retires the
+# deliberate skew the old rectangular face needed.
+_trough_hw = OUT_W / 2 - TROUGH_INSET
+_trough_h = OUT_H - 2 * TROUGH_INSET
 cap -= loft([
-    Plane(origin=(0, -CAP_T - EPS, _face_zc), x_dir=(1, 0, 0), z_dir=(0, 1, 0))
-    * RectangleRounded(2 * (_cap_half_w - TROUGH_INSET), _trough_h, 2.0),
+    Plane(origin=(0, -CAP_T - EPS, OUT_H / 2), x_dir=(1, 0, 0), z_dir=(0, 1, 0))
+    * RectangleRounded(2 * _trough_hw, _trough_h, 2.0),
     Plane(origin=(0, -USB_LAND, USB_Z), x_dir=(1, 0, 0), z_dir=(0, 1, 0))
     * RectangleRounded(USB_W, USB_H, USB_H / 2 - 0.01),
 ])
-# No finger notches. The first attempt put them at the open end on the centre
-# line, which is exactly where the tongues root -- they cut the tongues clean
-# off and the cap came out as five loose pieces. They are not needed either:
-# the snap domes stand proud on the OUTSIDE too, so the grip point and the
-# press-here-to-release point are the same feature.
 # Speaker / mic apertures either side of the port, through the plate.
 for _sx in (-1, 1):
     cap -= Pos(_sx * SPK_X, -CAP_T - EPS, USB_Z) * Rot(-90, 0, 0) * extrude(
         RectangleRounded(SPK_W, SPK_H, SPK_H / 2 - 0.01), amount=CAP_T + 2 * EPS)
 
-# Relief slots that turn each side wall into a cantilever tongue, rooted at
-# the OPEN end so the tip near the end plate is the compliant bit. Without
-# these the wall is a plate braced on three sides and cannot open at all.
-_tz = CAP_TONGUE_H / 2 + CAP_SLOT_W / 2
-for _sx in (-1, 1):
-    xw0 = _sx * (OUT_W / 2 + CAP_CLR) if _sx > 0 else _sx * (OUT_W / 2 + CAP_CLR + CAP_W)
-    xw1 = _sx * (OUT_W / 2 + CAP_CLR + CAP_W) if _sx > 0 else _sx * (OUT_W / 2 + CAP_CLR)
-    for _sz in (-1, 1):                       # slot above and below the tongue
-        # ⚠️ starts at Y=0, NOT at the plate face -- running it through the end
-        # plate saws the plate into strips and the cap falls into five pieces.
-        cap -= bbox(min(xw0, xw1) - EPS, max(xw0, xw1) + EPS,
-                    0.0, CAP_D - 2.5,
-                    OUT_H / 2 + _sz * _tz - CAP_SLOT_W / 2,
-                    OUT_H / 2 + _sz * _tz + CAP_SLOT_W / 2)
-    # and free the tongue from the end plate, or it is built in at both ends
-    cap -= bbox(min(xw0, xw1) - EPS, max(xw0, xw1) + EPS,
-                0.0, CAP_SLOT_W,
-                OUT_H / 2 - _tz, OUT_H / 2 + _tz)
+# ★ No relief slots on the shallow side, and no tongues. The collar is a C, so
+# each flank is ALREADY a cantilever: bounded by the belt above, by the saddle
+# below, free at the open end, and rooted only in the end plate. V1 needed
+# tongues because its collar was a closed rectangle braced on four sides.
+# The deep side does need one slot -- there the collar wraps flank, chine and
+# keel into a folded section stiff enough to resist the 0.3 mm the dome has to
+# ride, so this frees the flank from the fold.
+cap -= bbox(SD * (HULL_HW - CAP_W) - 0.2 if SD > 0 else SD * HULL_HW - 0.2,
+            SD * HULL_HW + 0.2 if SD > 0 else SD * (HULL_HW - CAP_W) + 0.2,
+            CAP_SLOT_ROOT, CAP_D + EPS,
+            HULL_Z_DEEP + HULL_CHINE + 1.28,
+            HULL_Z_DEEP + HULL_CHINE + 1.28 + CAP_SLOT_W)
 
-# Snap noses on the tongues: cones rooted inside the wall (never coplanar with
-# a face) and protruding 0.6 mm past the inner surface, so they stand 0.3 mm
-# proud of the tray and seat into its dimples.
-for _sx in (-1, 1):
-    cap += Pos(_sx * (OUT_W / 2 + CAP_CLR + CAP_W / 2), CAP_BUMP_Y, OUT_H / 2) \
+# Snap noses: cones rooted inside the wall (never coplanar with a face) and
+# protruding 0.6 mm past the inner surface, so they stand 0.3 mm proud of the
+# tenon and seat into its dimples. Sat near the free end so the cantilever is
+# as long as the collar allows -- the strain at the root goes as 1/L^2.
+for _sd, _zc in FLANKS:
+    _sx = 1 if _sd > 0 else -1
+    cap += Pos(_sx * (HULL_HW - CAP_W / 2), CAP_BUMP_Y, _zc) \
         * Rot(0, -90 * _sx, 0) \
         * Cone(1.8, 0.9, CAP_W / 2 + 0.6,
                align=(Align.CENTER, Align.CENTER, Align.MIN))
@@ -608,8 +706,25 @@ for _name, _len, _pred in _groups:
     try:
         part = chamfer(_es, length=_len)
         print(f"chamfer    {_len} mm on {len(_es):3d} edges  ({_name})")
-    except Exception as exc:
-        print(f"chamfer    SKIPPED {_name}: {type(exc).__name__}")
+    except Exception:
+        # OCCT refuses mixed sets with no useful message. Retry edge by edge so
+        # one awkward crease costs one crease, not the whole group. Re-select
+        # each time -- chamfering changes the topology under us.
+        _done = 0
+        for _ in range(len(_es)):
+            _cands = ShapeList([e for e in part.edges() if _pred(e)])
+            _hit = False
+            for _e in _cands:
+                try:
+                    part = chamfer(ShapeList([_e]), length=_len)
+                    _done += 1
+                    _hit = True
+                    break
+                except Exception:
+                    continue
+            if not _hit:
+                break
+        print(f"chamfer    {_len} mm on {_done:3d} edges  ({_name}, one at a time)")
 
 # ----------------------------------------------------------------- export
 out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "out")
@@ -630,8 +745,9 @@ export_stl(_pp, os.path.join(out, "bracer_print.stl"))
 export_stl(_pc, os.path.join(out, "bracer_endcap_print.stl"))
 assert abs(_pp.bounding_box().min.Z) < 0.01, "bracer not sitting on the bed"
 assert abs(_pc.bounding_box().min.Z) < 0.01, "cap not sitting on the bed"
-print(f"end cap    {OUT_W + 2*(CAP_CLR+CAP_W):.1f} W x {CAP_D + CAP_T:.1f} L "
-      f"x {OUT_H + CAP_CLR + CAP_W:.1f} H mm  ~= {cap.volume/1000*1.27:.0f} g")
+_cbb = cap.bounding_box()
+print(f"end cap    {_cbb.size.X:.1f} W x {_cbb.size.Y:.1f} L x {_cbb.size.Z:.1f} H mm"
+      f"  ~= {cap.volume/1000*1.27:.0f} g")
 
 _bb = part.bounding_box()
 print(f"outer      {_bb.size.X:.1f} W x {_bb.size.Y:.1f} L x {_bb.size.Z:.1f} H mm")
