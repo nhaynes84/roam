@@ -68,6 +68,19 @@ SLOT_L, SLOT_W = 26.0, 3.6   # for 25 mm webbing
 
 JACK_W = 22.0        # 3.5 mm jack notch (sailfish jack is on the TOP edge)
 
+# print-in-place button plungers (see the build section)
+BTN_BORE_H = 4.0     # outer bore height, Z
+BTN_CB_H = 7.0       # counterbore height, Z -- the flange lives here
+BTN_CB_D = 1.2       # counterbore depth into the 2.4 mm wall
+BTN_CB_EXT = 3.0     # counterbore is this much longer than the button, Y
+BTN_CLR = 0.35       # all-round clearance so it comes off the bed loose
+BTN_PROUD = 0.6      # cap stands this far out from the shell, to find by feel
+# ⚠️ Flange sits FLUSH with the pocket wall, not proud of it. The Pixel's own
+# buttons protrude ~0.4 mm past the body -- about all the per-side clearance
+# there is -- so a flange poking into the pocket would foul them on insertion.
+# Flush means the phone's button does the reaching; travel comes from BTN_CLR.
+BTN_PRESS = 0.0
+
 # ------------------------------------------------- phone face features
 # Taken from the scale drawing File:Pixel_(2016).svg on Wikimedia Commons,
 # which is authored at 1 SVG unit = 1 mm and whose outline matches the spec
@@ -172,16 +185,44 @@ part -= Pos(fx(_cx), fy(_cy), FLOOR + POCK_D) * Cylinder(
     _cr + FEAT_TOL, (OUT_H + 10), align=(Align.CENTER, Align.CENTER, Align.MIN)
 )
 
-# Button apertures, right edge (+X): power ABOVE volume on this phone.
-# Two placed openings rather than one 55 mm slot -- the slot worked but it
-# left the phone's own edge on show, which is the "tray with a phone in it"
-# look. Sized for a finger now; a print-in-place actuator is a separate pass.
+# ---------------------------------------------- print-in-place buttons
+# Power (upper) and volume (lower) on the right edge (+X).
+#
+# A captured PLUNGER, not a flexure. A cantilever hinge would fatigue and,
+# worse, its layer lines land perpendicular to the bending axis in most
+# orientations -- that is the delamination direction and it would snap. A
+# plunger has no hinge to fatigue and does not care which way the part is
+# printed. It prints loose inside its bore and stays captive:
+#   * outward -- the flange is larger than the outer bore, it cannot pass
+#   * inward  -- the phone's own edge stops it
+# The flange IS the pad that presses the phone's button; no separate stem.
+# Needs support under the counterbore shoulder. That is fine: print
+# orientation should not get to dictate the mechanism.
+X_POCK = POCK_W / 2                # pocket wall, inner face
+X_OUT = OUT_W / 2                  # pocket wall, outer face
+Z_BTN = FLOOR + POCK_D / 2         # button centre line, mid phone thickness
+
 for (_b0, _b1) in (PWR_SVG, VOL_SVG):
-    part -= bbox(
-        POCK_W / 2 - 1.0, OUT_W / 2 + EPS,
-        fy(_b1) - FEAT_TOL, fy(_b0) + FEAT_TOL,
-        FLOOR + 0.8, OUT_H + 10,
-    )
+    y0, y1 = fy(_b1), fy(_b0)      # SVG runs top-down, model runs bottom-up
+    yc, ylen = (y0 + y1) / 2, (y1 - y0)
+
+    # outer bore (stem passes through) and inner counterbore (holds flange)
+    part -= bbox(X_POCK + BTN_CB_D, X_OUT + EPS,
+                 yc - ylen / 2, yc + ylen / 2,
+                 Z_BTN - BTN_BORE_H / 2, Z_BTN + BTN_BORE_H / 2)
+    part -= bbox(X_POCK - EPS, X_POCK + BTN_CB_D,
+                 yc - (ylen + BTN_CB_EXT) / 2, yc + (ylen + BTN_CB_EXT) / 2,
+                 Z_BTN - BTN_CB_H / 2, Z_BTN + BTN_CB_H / 2)
+
+    # the plunger itself, floating in that void with BTN_CLR all round
+    c = BTN_CLR
+    flange = bbox(X_POCK - BTN_PRESS, X_POCK + BTN_CB_D - c,
+                  yc - (ylen + BTN_CB_EXT) / 2 + c, yc + (ylen + BTN_CB_EXT) / 2 - c,
+                  Z_BTN - BTN_CB_H / 2 + c, Z_BTN + BTN_CB_H / 2 - c)
+    stem = bbox(X_POCK + BTN_CB_D - c, X_OUT + BTN_PROUD,
+                yc - ylen / 2 + c, yc + ylen / 2 - c,
+                Z_BTN - BTN_BORE_H / 2 + c, Z_BTN + BTN_BORE_H / 2 - c)
+    part += flange + stem
 
 # 3.5 mm headphone jack notch, hand end
 part -= bbox(
@@ -205,11 +246,56 @@ for y in RIB_Y:
             -2, WING_T + 2,
         )
 
+# ------------------------------------------------------- elbow end cap
+# The phone slides in at the elbow end, so without this it can slide out --
+# the strap is otherwise the only thing stopping it. REMOVABLE, not glued:
+# it is the service access. A U-section that slips over the outside of the
+# tray and snaps into two dimples, so nothing intrudes into the pocket
+# (there is only 0.4 mm per side in there) and no tool is needed.
+#
+# ⚠️ USB-C is on this same end, so the cap carries a cable aperture. Without
+# it you would unclip the cap every time you charged, which is how a
+# removable part becomes a lost part.
+CAP_D = 10.0         # how far it slips over the tray
+CAP_W = 2.0          # cap side wall
+CAP_T = 2.4          # cap end plate
+CAP_CLR = 0.30       # slip fit over the tray
+CAP_BUMP = 0.6       # snap bump / dimple depth
+CAP_BUMP_Y = 6.5     # bump centre, measured into the cap
+USB_W, USB_H = 13.0, 6.5   # clears a plug's overmould, not just the shell
+
+# dimples in the tray's outer side walls for the cap to snap into
+for _sx in (-1, 1):
+    part -= Pos(_sx * OUT_W / 2, CAP_BUMP_Y, OUT_H / 2) * Rot(0, 90, 0) * Cylinder(
+        3.2, 2 * CAP_BUMP, align=(Align.CENTER, Align.CENTER, Align.CENTER)
+    )
+
+cap = bbox(-(OUT_W / 2 + CAP_CLR + CAP_W), OUT_W / 2 + CAP_CLR + CAP_W,
+           -CAP_T, CAP_D, -CAP_CLR, OUT_H + CAP_CLR + CAP_W)
+# hollow it out to a U that slides over the tray
+cap -= bbox(-(OUT_W / 2 + CAP_CLR), OUT_W / 2 + CAP_CLR,
+            -EPS, CAP_D + EPS, -CAP_CLR - EPS, OUT_H + CAP_CLR)
+# cable aperture through the end plate
+cap -= bbox(-USB_W / 2, USB_W / 2, -CAP_T - EPS, CAP_D + EPS,
+            FLOOR - 1.0, FLOOR - 1.0 + USB_H)
+# finger notches so it can be pulled off
+for _sx in (-1, 1):
+    cap -= Pos(_sx * (OUT_W / 2 + CAP_CLR + CAP_W), CAP_D, OUT_H / 2) * Rot(0, 90, 0) \
+        * Cylinder(4.0, 2 * CAP_W + 1, align=(Align.CENTER, Align.CENTER, Align.CENTER))
+# snap bumps on the inner faces
+for _sx in (-1, 1):
+    cap += Pos(_sx * (OUT_W / 2 + CAP_CLR), CAP_BUMP_Y, OUT_H / 2) * Rot(0, 90, 0) \
+        * Cylinder(3.0, 2 * CAP_BUMP, align=(Align.CENTER, Align.CENTER, Align.CENTER))
+
 # ----------------------------------------------------------------- export
 out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "out")
 os.makedirs(out, exist_ok=True)
 export_step(part, os.path.join(out, "bracer.step"))
 export_stl(part, os.path.join(out, "bracer.stl"))
+export_step(cap, os.path.join(out, "bracer_endcap.step"))
+export_stl(cap, os.path.join(out, "bracer_endcap.stl"))
+print(f"end cap    {OUT_W + 2*(CAP_CLR+CAP_W):.1f} W x {CAP_D + CAP_T:.1f} L "
+      f"x {OUT_H + CAP_CLR + CAP_W:.1f} H mm  ~= {cap.volume/1000*1.27:.0f} g")
 
 print(f"outer      {OUT_W + 2*WING:.1f} W x {OUT_L:.1f} L x {OUT_H + SAG:.1f} H mm")
 print(f"tray       {OUT_W:.1f} x {OUT_L:.1f} x {OUT_H:.1f}")

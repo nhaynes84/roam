@@ -30,8 +30,13 @@ probes = [
     ("phone pocket interior",        (0, 70, FLOOR + 4), False),
     ("tray floor under phone",       (0, 34, 1.0), True),
     ("pocket wall, left",            (-36.3, 70, FLOOR + 4), True),
-    ("volume opening, right",        (36.3, 80.0, FLOOR + 4), False),
-    ("power opening, right",         (36.3, 102.0, FLOOR + 4), False),
+    # The plungers fill their bores, so these read SOLID. That they are not
+    # fused to the wall is asserted by the body count below, not by a probe --
+    # the running clearance is 0.35 mm and probing a gap that thin is a
+    # coin toss, which is worse than no test at all.
+    ("volume plunger in its bore",   (36.3, 80.0, FLOOR + 4), True),
+    ("power plunger in its bore",    (36.3, 102.0, FLOOR + 4), True),
+    ("cap snap dimple, right wall",  (37.3, 6.5, OUT_H / 2), False),
     ("wall between the two buttons", (36.3, 94.0, FLOOR + 4), True),
     ("wall below volume opening",    (36.3, 60.0, FLOOR + 4), True),
     ("floor vent",                   (0, 73, 1.0), False),
@@ -67,7 +72,12 @@ for (label, _, want), g in zip(probes, got):
 
 print("\n=== integrity ===")
 print(f"  watertight      {m.is_watertight}")
-print(f"  shells          {len(m.split(only_watertight=False))}")
+# 3 bodies = shell + 2 free-floating button plungers. If this drops to 1 the
+# plungers have fused to the wall and the buttons are decorative.
+_bodies = len(m.split(only_watertight=False))
+_body_ok = _bodies == 3
+bad += not _body_ok
+print(f"  bodies          {_bodies}  {'ok (shell + 2 plungers)' if _body_ok else 'FAIL — plungers fused?'}")
 print(f"  volume          {m.volume/1000:.1f} cm3")
 print(f"  PETG mass       {m.volume/1000*1.27:.0f} g   (+143 g phone "
       f"= {m.volume/1000*1.27+143:.0f} g on the arm)")
