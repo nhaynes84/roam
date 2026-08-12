@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 import bridge as bridge_mod
-from bridge import PUSH_KINDS, Bridge, Settings, State, compose, trim
+from bridge import BACKLOG_FLOOD_LIMIT, PUSH_KINDS, Bridge, Settings, State, compose, trim
 
 
 def settings_for(tmp_path: Path, **overrides) -> Settings:
@@ -23,7 +23,7 @@ def settings_for(tmp_path: Path, **overrides) -> Settings:
         token="t",
         state_file=tmp_path / "state.json",
         min_interval_s=0.0,
-        suppress_when_present=True,
+        suppress_when_covered=True,
         roam_msg=tmp_path / "roam-msg",
     )
     base.update(overrides)
@@ -55,22 +55,18 @@ class FakeClock:
         self.t += seconds
 
 
-def make_bridge(tmp_path, watched=(), phone=None, clock=None, covers_all=False, **overrides):
-    """`watched` is what the HUB says he can see -- the bridge never asks tmux."""
+def make_bridge(tmp_path, phone=None, clock=None, **overrides):
+    """The bridge holds no opinion about where he is: events carry the stamp."""
     phone = phone or FakePhone()
     bridge = Bridge(settings_for(tmp_path, **overrides), pusher=phone, clock=clock)
     bridge.labels = {"%0": "◑ Roam Touch rebuild discussion", "%1": "✳ Augment things"}
-    if watched or covers_all:
-        bridge.presence = {
-            "present": True,
-            "covers_all": covers_all,
-            "covered_panes": list(watched),
-            "sources": [],
-        }
     return bridge, phone
 
 
-def event(event_id: int, kind: str = "outcome", pane: str = "%1", **extra) -> dict:
+def event(event_id: int, kind: str = "outcome", pane: str = "%1", covered=False,
+          by=(), known=True, **extra) -> dict:
+    """An event as the hub sends it, carrying the coverage stamped when it
+    landed -- `covered=True` means he was looking at that channel at the time."""
     payload = {
         "id": event_id,
         "pane_id": pane,
@@ -78,6 +74,7 @@ def event(event_id: int, kind: str = "outcome", pane: str = "%1", **extra) -> di
         "body": "the long body",
         "summary": "the suite is green — 122 tests",
         "meta": {},
+        "coverage": {"known": known, "covered": covered, "by": list(by)},
         "ts": 1786515000.0,
     }
     payload.update(extra)
@@ -122,36 +119,47 @@ async def test_bookkeeping_kinds_are_not_pushed(tmp_path, kind):
 
 
 @pytest.mark.asyncio
-async def test_the_pane_he_is_sitting_in_is_suppressed(tmp_path):
-    """No buzz for the message appearing on the screen in front of him."""
-    bridge, phone = make_bridge(tmp_path, watched=["%1"])
-    await bridge.handle_event(event(14, pane="%1"))
+async def test_an_event_that_landed_while_he_watched_is_not_a_missed_message(tmp_path):
+    """He answered from the laptop. It was never missed, so it never buzzes."""
+    bridge, phone = make_bridge(tmp_path)
+    await bridge.handle_event(
+        event(14, pane="%1", covered=True, by=["tmux:/dev/ttys000"])
+    )
     assert phone.messages == []
     assert bridge.suppressed == 1
 
 
 @pytest.mark.asyncio
-async def test_another_pane_still_gets_through_while_he_watches_one(tmp_path):
-    bridge, phone = make_bridge(tmp_path, watched=["%0"])
-    await bridge.handle_event(event(15, pane="%1"))
+async def test_another_channel_still_gets_through_while_he_watches_one(tmp_path):
+    bridge, phone = make_bridge(tmp_path)
+    await bridge.handle_event(event(15, pane="%0", covered=True))
+    await bridge.handle_event(event(16, pane="%1", covered=False))
     assert [p for p, _ in phone.messages] == ["%1"]
 
 
 @pytest.mark.asyncio
 async def test_suppression_can_be_disabled(tmp_path):
-    bridge, phone = make_bridge(tmp_path, watched=["%1"], suppress_when_present=False)
-    await bridge.handle_event(event(16, pane="%1"))
+    bridge, phone = make_bridge(tmp_path, suppress_when_covered=False)
+    await bridge.handle_event(event(16, pane="%1", covered=True))
     assert len(phone.messages) == 1
 
 
 @pytest.mark.asyncio
-async def test_no_presence_information_means_push(tmp_path):
-    """A hub too old to report presence, or a bridge that just started."""
+async def test_an_unstamped_event_is_pushed(tmp_path):
+    """A hub too old to stamp, or a lookup that failed. Never silence."""
     phone = FakePhone()
     bridge = Bridge(settings_for(tmp_path), pusher=phone)
-    assert bridge.presence == {}
-    await bridge.handle_event(event(17))
+    await bridge.handle_event(event(17, known=False))
     assert len(phone.messages) == 1, "unknown must never mean silence"
+
+
+@pytest.mark.asyncio
+async def test_an_event_with_no_coverage_key_at_all_is_pushed(tmp_path):
+    bridge, phone = make_bridge(tmp_path)
+    bare = event(18)
+    del bare["coverage"]
+    await bridge.handle_event(bare)
+    assert len(phone.messages) == 1
 
 
 @pytest.mark.asyncio
@@ -164,59 +172,14 @@ async def test_an_unknown_pane_falls_back_to_its_id(tmp_path):
 @pytest.mark.asyncio
 async def test_the_app_being_foregrounded_silences_every_channel(tmp_path):
     """The panel already shows it. This is the ROAM app's own presence report."""
-    bridge, phone = make_bridge(tmp_path, covers_all=True)
-    await bridge.handle_event(event(19, pane="%1"))
-    await bridge.handle_event(event(20, pane="%0"))
+    bridge, phone = make_bridge(tmp_path)
+    await bridge.handle_event(event(19, pane="%1", covered=True, by=["roam-app"]))
+    await bridge.handle_event(event(20, pane="%0", covered=True, by=["roam-app"]))
     assert phone.messages == []
     assert bridge.suppressed == 2
 
 
-@pytest.mark.asyncio
-async def test_presence_arrives_over_the_socket_and_takes_effect(tmp_path):
-    bridge, phone = make_bridge(tmp_path)
-    await bridge.handle_event(event(21, pane="%1"))
-    assert len(phone.messages) == 1, "nothing known yet: push"
-    await bridge.handle_frame(
-        {
-            "type": "presence",
-            "present": True,
-            "covers_all": False,
-            "covered_panes": ["%1"],
-            "sources": [{"id": "tmux:/dev/ttys000", "kind": "tmux"}],
-        }
-    )
-    await bridge.handle_event(event(22, pane="%1"))
-    assert len(phone.messages) == 1, "he sat down in that pane; stop buzzing"
-
-
-@pytest.mark.asyncio
-async def test_presence_in_hello_is_honoured_immediately(tmp_path):
-    bridge, phone = make_bridge(tmp_path)
-    await bridge.handle_frame(
-        {
-            "type": "hello",
-            "latest_event_id": 0,
-            "channels": [],
-            "presence": {"present": True, "covers_all": True, "covered_panes": []},
-        }
-    )
-    await bridge.handle_event(event(23))
-    assert phone.messages == []
-
-
-@pytest.mark.asyncio
-async def test_when_he_walks_away_the_channel_starts_pushing_again(tmp_path):
-    bridge, phone = make_bridge(tmp_path, watched=["%1"])
-    await bridge.handle_event(event(24, pane="%1"))
-    assert phone.messages == []
-    await bridge.handle_frame(
-        {"type": "presence", "present": False, "covers_all": False, "covered_panes": []}
-    )
-    await bridge.handle_event(event(25, pane="%1"))
-    assert len(phone.messages) == 1
-
-
-# ---------------------------------------------------- the boxed backlog
+# ------------------------------------------- catching up on a backlog
 
 
 @pytest.mark.asyncio
@@ -234,20 +197,45 @@ async def test_a_small_backlog_is_delivered(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_a_big_backlog_stays_quiet_and_still_advances(tmp_path):
-    """15+ behind means he was working elsewhere and has already seen it."""
+async def test_a_backlog_he_was_present_for_passes_silently(tmp_path):
+    """Thirty answers he watched arrive in tmux are not thirty missed messages."""
     bridge, phone = make_bridge(tmp_path, min_interval_s=0.0)
     bridge.state.remember(100)
-    missed = [event(n, pane=f"%{n}") for n in range(101, 121)]  # 20 outcomes
-    await bridge.handle_frame({"type": "backlog", "events": missed})
-    assert phone.messages == [], "no ping; they are in the channels"
-    assert bridge.state.last_event_id == 120, "but we are caught up"
-    assert bridge.skipped_backlogs == 1
+    seen = [event(n, pane="%0", covered=True, by=["tmux-input"]) for n in range(101, 131)]
+    await bridge.handle_frame({"type": "backlog", "events": seen})
+    assert phone.messages == []
+    assert bridge.state.last_event_id == 130
+    assert bridge.skipped_backlogs == 0, "not the flood valve -- just not missed"
 
 
 @pytest.mark.asyncio
-async def test_the_boxing_counts_only_what_would_ping(tmp_path):
-    """Twenty events, three of which are pushable, is not a big backlog."""
+async def test_a_mixed_backlog_pushes_only_what_he_missed(tmp_path):
+    bridge, phone = make_bridge(tmp_path, min_interval_s=0.0)
+    bridge.state.remember(200)
+    mixed = [
+        event(201, pane="%0", covered=True, by=["tmux-input"]),
+        event(202, pane="%1", covered=False, summary="the one he missed"),
+        event(203, pane="%2", covered=True, by=["roam-app"]),
+    ]
+    await bridge.handle_frame({"type": "backlog", "events": mixed})
+    assert [p for p, _ in phone.messages] == ["%1"]
+    assert "the one he missed" in phone.messages[0][1]
+
+
+@pytest.mark.asyncio
+async def test_three_genuinely_missed_events_are_still_pushed(tmp_path):
+    """Size is not the arbiter: three missed messages are worth telling him."""
+    bridge, phone = make_bridge(tmp_path, min_interval_s=0.0)
+    bridge.state.remember(300)
+    await bridge.handle_frame(
+        {"type": "backlog", "events": [event(n, pane=f"%{n}") for n in (301, 302, 303)]}
+    )
+    assert len(phone.messages) == 3
+
+
+@pytest.mark.asyncio
+async def test_the_valve_counts_only_what_would_ping(tmp_path):
+    """Twenty events, three of which are pushable, is not a flood."""
     bridge, phone = make_bridge(tmp_path, min_interval_s=0.0)
     bridge.state.remember(200)
     events = [event(n, kind="sent", pane="%1") for n in range(201, 218)]
@@ -258,20 +246,23 @@ async def test_the_boxing_counts_only_what_would_ping(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_the_backlog_limit_is_configurable(tmp_path):
-    bridge, phone = make_bridge(tmp_path, min_interval_s=0.0, backlog_push_limit=2)
+async def test_the_flood_valve_is_a_circuit_breaker_not_the_rule(tmp_path):
+    """Only a pathological replay trips it, and it says so loudly."""
+    assert BACKLOG_FLOOD_LIMIT >= 50, "not a policy knob; policy is per-event"
+    bridge, phone = make_bridge(tmp_path, min_interval_s=0.0, backlog_flood_limit=2)
     bridge.state.remember(300)
     await bridge.handle_frame(
         {"type": "backlog", "events": [event(n, pane=f"%{n}") for n in range(301, 305)]}
     )
     assert phone.messages == []
     assert bridge.state.last_event_id == 304
+    assert bridge.skipped_backlogs == 1
 
 
 @pytest.mark.asyncio
 async def test_already_seen_events_do_not_count_towards_the_limit(tmp_path):
     """A replayed backlog after a reconnect is not 'being behind'."""
-    bridge, phone = make_bridge(tmp_path, min_interval_s=0.0, backlog_push_limit=3)
+    bridge, phone = make_bridge(tmp_path, min_interval_s=0.0, backlog_flood_limit=3)
     bridge.state.remember(420)
     old = [event(n, pane=f"%{n}") for n in range(400, 421)]
     fresh = [event(421, pane="%1")]

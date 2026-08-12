@@ -28,13 +28,19 @@ import time
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any, Callable, Iterable, Sequence
 
+from presence import UNKNOWN_COVERAGE
 from transcript import MAX_BODY_CHARS, cap_body, summarise
 
 DEFAULT_DB_PATH = Path(__file__).with_name("hub.sqlite")
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 5
+
+#: Where a channel's last inbound message came from. This is the whole
+#: notification rule: **reply where the last message came from.**
+INPUT_TMUX = "tmux"  # he typed it at the keyboard; the answer stays there
+INPUT_APP = "app"    # it came in over the API from ROAM; the answer goes there
 
 
 class EventKind(str, Enum):
@@ -67,6 +73,11 @@ class Event:
     meta: dict[str, Any] = field(default_factory=dict)
     ts: float = 0.0
     archived: bool = False
+    #: Was he already looking at this channel **when this landed**? Frozen at
+    #: creation, because by the time a sleeping phone reconnects, live presence
+    #: answers a different question. Governs notification only -- never whether
+    #: the event is stored, returned, or shown in the thread.
+    coverage: dict[str, Any] = field(default_factory=lambda: dict(UNKNOWN_COVERAGE))
 
     def to_dict(self, inline_limit: int | None = None) -> dict[str, Any]:
         """Summary always; body in full unless this is a bulk payload.
@@ -89,6 +100,7 @@ class Event:
             "body_chars": len(self.body),
             "body_truncated": truncated,
             "meta": self.meta,
+            "coverage": self.coverage,
             "ts": self.ts,
             "archived": self.archived,
         }
@@ -107,6 +119,10 @@ class StoredChannel:
     #: When this pane's visible output last changed. The liveness heartbeat:
     #: "working" and "hung" look identical without it.
     last_output_at: float | None = None
+    #: Where this channel's last inbound message came from -- `tmux` or `app`.
+    #: None until something arrives; unknown means notify.
+    last_input_source: str | None = None
+    last_input_at: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -117,12 +133,16 @@ class StoredChannel:
             "last_seen": self.last_seen,
             "archived": self.archived,
             "last_output_at": self.last_output_at,
+            "last_input_source": self.last_input_source,
+            "last_input_at": self.last_input_at,
         }
 
 
 def _row_to_event(row: sqlite3.Row) -> Event:
     raw_meta = row["meta"]
+    raw_coverage = row["coverage"]
     return Event(
+        coverage=json.loads(raw_coverage) if raw_coverage else dict(UNKNOWN_COVERAGE),
         id=row["id"],
         pane_id=row["pane_id"],
         kind=row["kind"],
@@ -143,13 +163,24 @@ def _row_to_channel(row: sqlite3.Row) -> StoredChannel:
         last_seen=row["last_seen"],
         archived=bool(row["archived"]),
         last_output_at=row["last_output_at"],
+        last_input_source=row["last_input_source"],
+        last_input_at=row["last_input_at"],
     )
 
 
 class Store:
     """SQLite-backed event log. Safe to share across threads."""
 
-    def __init__(self, path: str | Path = DEFAULT_DB_PATH) -> None:
+    def __init__(
+        self,
+        path: str | Path = DEFAULT_DB_PATH,
+        coverage_provider: Callable[[str], dict[str, Any]] | None = None,
+    ) -> None:
+        #: Asked "was he covered on this pane right now?" for every event, so
+        #: no call site can forget to stamp one. The hub points this at its
+        #: `Presence`; without one, every event records "unknown", which
+        #: notifies.
+        self.coverage_provider = coverage_provider
         self.path = Path(path)
         if str(self.path) != ":memory:":
             self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -174,6 +205,7 @@ class Store:
                 body     TEXT    NOT NULL DEFAULT '',
                 summary  TEXT    NOT NULL DEFAULT '',
                 meta     TEXT,
+                coverage TEXT,
                 ts       REAL    NOT NULL,
                 archived INTEGER NOT NULL DEFAULT 0
             );
@@ -186,7 +218,9 @@ class Store:
                 first_seen     REAL NOT NULL,
                 last_seen      REAL NOT NULL,
                 archived       INTEGER NOT NULL DEFAULT 0,
-                last_output_at REAL
+                last_output_at REAL,
+                last_input_source TEXT,
+                last_input_at  REAL
             );
 
             CREATE TABLE IF NOT EXISTS schema_meta (
@@ -203,10 +237,22 @@ class Store:
         }
         if "last_output_at" not in channel_columns:
             self._db.execute("ALTER TABLE channels ADD COLUMN last_output_at REAL")
+        # v4 -> v5: channels remember where their last message came from. NULL
+        # on existing rows means "unknown", which notifies.
+        if "last_input_source" not in channel_columns:
+            self._db.execute("ALTER TABLE channels ADD COLUMN last_input_source TEXT")
+            self._db.execute("ALTER TABLE channels ADD COLUMN last_input_at REAL")
+
+        # v3 -> v4: events gained `coverage`. Existing rows stay NULL, which
+        # reads back as "unknown" -- so anything replayed from before this
+        # existed notifies rather than being silently swallowed.
+        columns = {r["name"] for r in self._db.execute("PRAGMA table_info(events)")}
+        if "coverage" not in columns:
+            self._db.execute("ALTER TABLE events ADD COLUMN coverage TEXT")
+            columns.add("coverage")
 
         # v1 -> v2: events gained `summary`. Existing rows are backfilled so a
         # client never meets an event without one.
-        columns = {r["name"] for r in self._db.execute("PRAGMA table_info(events)")}
         if "summary" not in columns:
             self._db.execute(
                 "ALTER TABLE events ADD COLUMN summary TEXT NOT NULL DEFAULT ''"
@@ -245,6 +291,7 @@ class Store:
         meta: dict[str, Any] | None = None,
         ts: float | None = None,
         summary: str | None = None,
+        coverage: dict[str, Any] | None = None,
     ) -> Event:
         """Write one event and return it, with its assigned id.
 
@@ -264,12 +311,22 @@ class Store:
             meta = {**(meta or {}), "truncated_from": original_length}
         if summary is None:
             summary = summarise(body)
+        if coverage is None:
+            coverage = self._coverage_for(pane_id)
         payload = json.dumps(meta) if meta else None
         with self._lock:
             cur = self._db.execute(
-                "INSERT INTO events(pane_id, kind, body, summary, meta, ts) "
-                "VALUES(?, ?, ?, ?, ?, ?)",
-                (pane_id, kind_value, body, summary, payload, stamp),
+                "INSERT INTO events(pane_id, kind, body, summary, meta, coverage, ts) "
+                "VALUES(?, ?, ?, ?, ?, ?, ?)",
+                (
+                    pane_id,
+                    kind_value,
+                    body,
+                    summary,
+                    payload,
+                    json.dumps(coverage),
+                    stamp,
+                ),
             )
             self._db.commit()
             event_id = int(cur.lastrowid)
@@ -280,9 +337,21 @@ class Store:
             body=body,
             summary=summary,
             meta=meta or {},
+            coverage=coverage,
             ts=stamp,
             archived=False,
         )
+
+    def _coverage_for(self, pane_id: str) -> dict[str, Any]:
+        """Never let a broken provider stop an event being written -- and when
+        it breaks, record "unknown", which errs towards notifying."""
+        if self.coverage_provider is None:
+            return dict(UNKNOWN_COVERAGE)
+        try:
+            stamped = self.coverage_provider(pane_id)
+        except Exception:
+            return dict(UNKNOWN_COVERAGE)
+        return stamped if isinstance(stamped, dict) else dict(UNKNOWN_COVERAGE)
 
     def history(
         self,
@@ -410,6 +479,30 @@ class Store:
             self._db.execute(
                 "UPDATE channels SET last_output_at = ? WHERE pane_id = ?",
                 (float(ts), pane_id),
+            )
+            self._db.commit()
+
+    def set_channel_input(
+        self, pane_id: str, source: str, ts: float | None = None
+    ) -> None:
+        """Record where this channel's latest inbound message came from.
+
+        ★ The notification rule in one line: **reply where the last message
+        came from.** He typed the prompt in tmux, so the answer belongs in
+        tmux; he sent it from ROAM, so the answer belongs on ROAM. Switching
+        is just sending from the other place -- exactly like any messaging app,
+        and nothing has to infer where he is.
+
+        Durable on purpose: a hub restart must not turn a tmux conversation
+        into a phone conversation. There is deliberately **no expiry** -- a
+        stale answer still belongs to the conversation that asked for it.
+        """
+        stamp = time.time() if ts is None else float(ts)
+        with self._lock:
+            self._db.execute(
+                "UPDATE channels SET last_input_source = ?, last_input_at = ? "
+                "WHERE pane_id = ?",
+                (source, stamp, pane_id),
             )
             self._db.commit()
 

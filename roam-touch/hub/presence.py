@@ -1,37 +1,22 @@
-"""Where the user is, so the hub can decide whether his arm needs to buzz.
+"""Reported presence -- "I am looking at the panel right now".
 
-The rule the whole thing serves: **push to the arm only when he is not
-demonstrably already looking at the message.** That started as "don't notify
-about the tmux pane he is typing in" and generalises here into presence with
-named sources, because the Android client will want to say "I am foregrounded,
-stop notifying me" and that must not be a special case bolted on afterwards.
+Almost all of what this module used to do is gone, and deliberately. The rule
+that decides whether a notification reaches the arm is now **reply where the
+last message came from** (`store.set_channel_input`, `hub._coverage_for`): if he
+typed the prompt in tmux, the answer stays in tmux; if he sent it from ROAM, the
+answer goes to ROAM. Exactly like any messaging app.
 
-A *source* is one piece of evidence that he is somewhere:
+The tmux-client observation this module used to do -- watching `client_activity`,
+mapping ttys to logins via `who` -- was only ever a proxy for that question, and
+is deleted. So is `HIDIdleTime`, tested and rejected because it read 13.2 hours
+idle while he was actively typing over SSH.
 
-* **observed** -- the hub works it out. Today that is tmux: a client that has
-  taken input recently, covering the pane on its screen.
-* **reported** -- something tells the hub over `POST /presence`. The ROAM app
-  reporting foreground is the reason this exists; it covers *everything*,
-  because the panel already shows what a notification would say.
+What survives is the one signal the last-input rule cannot express: **the app
+saying it is foregrounded.** He can be looking at the panel without having sent
+anything, and buzzing about the screen already in his hand is noise. It can only
+ever *add* suppression on top of the last-input rule, so the two cannot disagree.
 
-Every source carries a TTL and is refreshed by whoever owns it. That is the
-extension point: a new source needs no new logic here, just a POST. Coverage is
-the union across live sources.
-
-## Decisions worth keeping
-
-* ⚠️ **No signal means push.** A missed message is worse than a redundant one,
-  so an empty registry is not "he must be here somewhere" -- it is "we do not
-  know, so tell him". `should_push()` returns True for an unknown pane.
-* ⚠️ **Only signals talos can actually observe.** macOS window focus and
-  "is he in the room" are not observable from here and are deliberately absent.
-  `HIDIdleTime` was tested and rejected: it read 13.2 hours idle while he was
-  actively typing, because he works over SSH and it measures *this* machine's
-  keyboard, not his.
-* A source that says nothing about panes (`panes=()`, `covers_all=False`) is
-  still presence -- it shows up in `/presence` and on the panel -- but it
-  suppresses nothing. Evidence he is at a keyboard somewhere is not evidence he
-  can see a given channel.
+⚠️ Unknown still means push. A missed message is worse than a redundant one.
 """
 
 from __future__ import annotations
@@ -43,11 +28,6 @@ from typing import Any, Iterable
 #: How long a reported source is believed without a refresh. The ROAM app
 #: re-posts while it is foregrounded; if it is killed, presence lapses.
 DEFAULT_TTL_S = 60.0
-
-#: Ids the hub owns. A reported source may not claim one, or a client could
-#: overwrite (or forge) an observed fact.
-OBSERVED_PREFIXES: tuple[str, ...] = ("tmux:",)
-
 
 @dataclass(frozen=True)
 class PresenceSource:
@@ -180,3 +160,8 @@ class Presence:
         return tuple(
             (s.id, s.kind, s.panes, s.covers_all) for s in self.live(now)
         )
+
+#: What to record on an event when nobody can say where the conversation is --
+#: a fresh pane, a store used without a hub, a lookup that failed. Notifies,
+#: because unknown means push.
+UNKNOWN_COVERAGE: dict[str, Any] = {"known": False, "covered": False, "by": []}

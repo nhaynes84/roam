@@ -33,10 +33,6 @@ class FakeTmux:
         self.server_running = True
         self.installed = True
         self.fail_send_with: str | None = None
-        #: attached clients: session -> epoch of that client's last input
-        self.clients: dict[str, float] = {}
-        #: session -> the pane currently on that client's screen
-        self.session_front_pane: dict[str, str] = {"main": "%0", "augment": "%1"}
 
     # -- test helpers ----------------------------------------------------
     def add_pane(self, pane_id, session="main", window=0, index=1, command="node",
@@ -69,16 +65,6 @@ class FakeTmux:
                 "\t".join((pid, sess, str(win), str(idx), cmd, title)) + "\n"
                 for pid, sess, win, idx, cmd, title in self.panes
             )
-        if sub == "list-clients":
-            # #{client_tty}\t#{client_session}\t#{client_activity}
-            return "".join(
-                f"/dev/tty{session}\t{session}\t{activity}\n"
-                for session, activity in self.clients.items()
-            )
-        if sub == "display-message":
-            session = args[args.index("-t") + 1]
-            pane = self.session_front_pane.get(session)
-            return f"{pane}\n" if pane else "\n"
         if sub == "capture-pane":
             pane_id = args[args.index("-t") + 1]
             return self.pane_output.get(pane_id, f"output of {pane_id}\n")
@@ -93,12 +79,6 @@ class FakeTmux:
 def fake_tmux(monkeypatch) -> FakeTmux:
     fake = FakeTmux()
     monkeypatch.setattr(channels_mod, "_run", fake)
-    # `who(1)` is a second boundary: it says where a login came from.
-    monkeypatch.setattr(
-        channels_mod,
-        "_who",
-        lambda: "talos  ttymain  Aug 11 20:17 (192.168.86.63)\n",
-    )
     return fake
 
 

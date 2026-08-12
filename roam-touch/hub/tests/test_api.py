@@ -575,56 +575,111 @@ def test_activity_polling_can_be_turned_off(settings, store, fake_tmux, auth):
         assert channel["idle_s"] is None
 
 
+# ------------------------------------------- reply where the last message came from
+
+
+def test_a_prompt_typed_in_tmux_marks_the_channel_as_a_keyboard_conversation(
+    client, auth, store
+):
+    """The UserPromptSubmit hook fired: he is sitting at the keyboard."""
+    client.post(
+        "/events",
+        json={"pane": "%0", "kind": "receipt", "body": "run the tests"},
+        headers=auth,
+    )
+    assert store.get_channel("%0").last_input_source == "tmux"
+    outcome = client.post(
+        "/events", json={"pane": "%0", "kind": "outcome", "body": "green"}, headers=auth
+    ).json()["event"]
+    assert outcome["coverage"]["covered"] is True, "he is reading it in tmux"
+    assert outcome["coverage"]["by"] == ["tmux-input"]
+
+
+def test_a_message_sent_from_the_app_moves_the_conversation_to_the_phone(
+    client, auth, store
+):
+    client.post("/channels/0/send", json={"text": "run the tests"}, headers=auth)
+    assert store.get_channel("%0").last_input_source == "app"
+    outcome = client.post(
+        "/events", json={"pane": "%0", "kind": "outcome", "body": "green"}, headers=auth
+    ).json()["event"]
+    assert outcome["coverage"]["covered"] is False, "the answer belongs on ROAM"
+    assert outcome["coverage"]["known"] is True
+
+
+def test_the_hook_echo_of_an_app_message_does_not_steal_the_conversation(
+    client, auth, store
+):
+    """Sending from the app types into the pane, which fires the same hook.
+
+    Left alone that echo would flip the channel back to 'keyboard' and silence
+    the very answer he is waiting for on the phone.
+    """
+    client.post("/channels/0/send", json={"text": "deploy it"}, headers=auth)
+    client.post(
+        "/events",
+        json={"pane": "%0", "kind": "receipt", "body": "deploy it"},
+        headers=auth,
+    )
+    assert store.get_channel("%0").last_input_source == "app"
+    outcome = client.post(
+        "/events", json={"pane": "%0", "kind": "outcome", "body": "done"}, headers=auth
+    ).json()["event"]
+    assert outcome["coverage"]["covered"] is False
+
+
+def test_a_channel_switches_source_mid_conversation(client, auth, store):
+    """He answers from the laptop; the conversation moves back to tmux."""
+    client.post("/channels/0/send", json={"text": "from the phone"}, headers=auth)
+    assert store.get_channel("%0").last_input_source == "app"
+    client.post(
+        "/events",
+        json={"pane": "%0", "kind": "receipt", "body": "actually, do this instead"},
+        headers=auth,
+    )
+    assert store.get_channel("%0").last_input_source == "tmux"
+    outcome = client.post(
+        "/events", json={"pane": "%0", "kind": "outcome", "body": "ok"}, headers=auth
+    ).json()["event"]
+    assert outcome["coverage"]["covered"] is True
+
+
+def test_no_recorded_source_means_notify(client, auth):
+    """An agent that speaks first on a fresh pane. Unknown must never be silence."""
+    event = client.post(
+        "/events", json={"pane": "%1", "kind": "outcome", "body": "unprompted"},
+        headers=auth,
+    ).json()["event"]
+    assert event["coverage"]["covered"] is False
+
+
+def test_the_channel_says_where_its_conversation_is(client, auth):
+    client.post("/channels/0/send", json={"text": "hello"}, headers=auth)
+    channel = client.get("/channels/0", headers=auth).json()["channel"]
+    assert channel["last_input_source"] == "app"
+    assert channel["last_input_at"] > 0
+
+
+def test_coverage_never_hides_an_event_from_history(client, auth):
+    """Coverage governs notification only -- never storage or display."""
+    client.post(
+        "/events", json={"pane": "%0", "kind": "receipt", "body": "typed"}, headers=auth
+    )
+    client.post(
+        "/events", json={"pane": "%0", "kind": "outcome", "body": "the answer"},
+        headers=auth,
+    )
+    bodies = [
+        e["body"] for e in client.get("/channels/0/history", headers=auth).json()["events"]
+    ]
+    assert "the answer" in bodies
+
+
 # ----------------------------------------------------------------- presence
 
 
-def test_presence_is_empty_until_something_says_otherwise(client, auth, fake_tmux):
-    fake_tmux.clients = {}
-    body = wait_for(
-        lambda: (p := client.get("/presence", headers=auth).json())
-        and not p["sources"]
-        and p
-    )
-    assert body["present"] is False
-    assert body["covered_panes"] == []
-
-
-def test_a_tmux_client_typing_becomes_presence(client, auth, fake_tmux):
-    """The observed source: he is in that session, looking at that pane."""
-    fake_tmux.clients = {"main": time.time()}
-    body = wait_for(
-        lambda: (p := client.get("/presence", headers=auth).json())
-        and p["sources"]
-        and p
-    )
-    assert body["present"] is True
-    assert body["covered_panes"] == ["%0"]
-    source = body["sources"][0]
-    assert source["kind"] == "tmux"
-    assert source["id"].startswith("tmux:")
-    assert source["detail"]["session"] == "main"
-    assert source["detail"]["origin"] == "192.168.86.63", "where he is, not just that"
-
-
-def test_a_client_he_left_an_hour_ago_is_not_presence(client, auth, fake_tmux):
-    fake_tmux.clients = {"augment": time.time() - 4000}
-    time.sleep(0.3)
-    body = client.get("/presence", headers=auth).json()
-    assert [s for s in body["sources"] if s["detail"].get("session") == "augment"] == []
-
-
-def test_presence_lapses_when_he_stops_typing(client, auth, fake_tmux):
-    fake_tmux.clients = {"main": time.time()}
-    wait_for(lambda: client.get("/presence", headers=auth).json()["sources"])
-    fake_tmux.clients = {"main": time.time() - 4000}  # walked away
-    lapsed = wait_for(
-        lambda: not client.get("/presence", headers=auth).json()["present"]
-    )
-    assert lapsed
-
-
 def test_the_app_can_report_itself_foregrounded(client, auth):
-    """First-class from the start: this is how the client says 'stop'."""
+    """The one signal last-input cannot express: looking without sending."""
     resp = client.post(
         "/presence",
         json={"source": "roam-app", "kind": "app", "covers_all": True, "ttl_s": 60},
@@ -632,30 +687,28 @@ def test_the_app_can_report_itself_foregrounded(client, auth):
     )
     assert resp.status_code == 200
     assert resp.json()["presence"]["covers_all"] is True
-    assert client.get("/presence", headers=auth).json()["covers_all"] is True
+
+    event = client.post(
+        "/events", json={"pane": "%1", "kind": "outcome", "body": "x"}, headers=auth
+    ).json()["event"]
+    assert event["coverage"]["covered"] is True
+    assert "roam-app" in event["coverage"]["by"]
 
     gone = client.delete("/presence/roam-app", headers=auth)
     assert gone.json()["removed"] is True
-    assert gone.json()["presence"]["covers_all"] is False
+    after = client.post(
+        "/events", json={"pane": "%1", "kind": "outcome", "body": "y"}, headers=auth
+    ).json()["event"]
+    assert after["coverage"]["covered"] is False
 
 
 def test_a_reported_source_can_name_specific_panes(client, auth):
     client.post(
-        "/presence",
-        json={"source": "desk-panel", "panes": ["0", "%1"]},
-        headers=auth,
+        "/presence", json={"source": "desk-panel", "panes": ["0", "%1"]}, headers=auth
     )
     body = client.get("/presence", headers=auth).json()
     covered = {p for s in body["sources"] if s["id"] == "desk-panel" for p in s["panes"]}
-    assert covered == {"%0", "%1"}, "pane ids are normalised like everywhere else"
-
-
-def test_a_client_cannot_forge_an_observed_source(client, auth):
-    resp = client.post(
-        "/presence", json={"source": "tmux:/dev/ttys000", "covers_all": True}, headers=auth
-    )
-    assert resp.status_code == 400
-    assert client.delete("/presence/tmux:x", headers=auth).status_code == 400
+    assert covered == {"%0", "%1"}
 
 
 def test_presence_requires_a_token(client):
@@ -665,18 +718,15 @@ def test_presence_requires_a_token(client):
 
 def test_status_carries_presence(client, auth):
     client.post("/presence", json={"source": "roam-app", "covers_all": True}, headers=auth)
-    body = client.get("/status", headers=auth).json()
-    assert body["presence"]["covers_all"] is True
+    assert client.get("/status", headers=auth).json()["presence"]["covers_all"] is True
 
 
 def test_presence_is_pushed_over_the_websocket(client, auth):
     with client.websocket_connect("/ws", headers=auth) as ws:
         hello = ws.receive_json()
-        assert "presence" in hello, "the client knows where he is from frame one"
+        assert "presence" in hello
         client.post(
-            "/presence",
-            json={"source": "roam-app", "covers_all": True},
-            headers=auth,
+            "/presence", json={"source": "roam-app", "covers_all": True}, headers=auth
         )
         frame = next_frame(ws, "presence", limit=30, where=lambda f: f["covers_all"])
         assert frame["present"] is True

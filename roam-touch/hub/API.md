@@ -81,6 +81,7 @@ the TTS and the panel say the same thing.
   "summary": "Tailscale beats the BLE permission wall — it just worked from here with no pairing. One thing worth knowing: roam-msg returned nothing at all…",
   "body_chars": 319,
   "body_truncated": false,
+  "coverage": {"known": true, "covered": false, "by": [], "last_input": "app"},
   "meta": {"source": "claude-hook", "session_id": "44c6d5f1"},
   "ts": 1786511500.066308,
   "archived": false
@@ -98,6 +99,7 @@ the TTS and the panel say the same thing.
 * `body_chars` — the true length of the full body, whatever `body` you were sent.
 * `body_truncated` — `true` when this payload's `body` was trimmed for bulk
   delivery. Fetch `GET /events/{id}` to expand.
+* `coverage` — whether this needed a notification when it landed. See above.
 * `ts` — epoch seconds, UTC, float.
 * `meta` — free-form JSON object; may be `{}`. Never `null`. On a hook-posted
   outcome it carries `session_id`, `prompt_id`, `transcript_path` and:
@@ -142,6 +144,8 @@ rather than dropping it.
   "last_seen": 1786511488.84,
   "last_output_at": 1786511500.31,
   "idle_s": 2.4,
+  "last_input_source": "app",
+  "last_input_at": 1786511490.0,
   "event_count": 7,
   "last_event": { "...Event, or null..." }
 }
@@ -152,6 +156,8 @@ rather than dropping it.
   when no title is set.
 * `live` — the pane exists on the host right now. `window`, `index` and `command`
   are `null` when it does not.
+* `last_input_source` — `tmux` | `app` | null: where this channel's conversation
+  is happening, and therefore where its next answer will be delivered.
 * `status` — `"idle"` | `"working"` | `"dead"`:
   * `dead` — the pane is gone. History is still readable; sending returns 404.
   * `working` — the last event was a `sent` or `receipt`; the agent owes an
@@ -186,40 +192,55 @@ minutes reads as idle, and a `tail -f` reads as busy forever. Treat a climbing
 `idle_s` as "nothing is coming out", which is exactly the input to "should I kill
 it?", and never as proof of death.
 
-### Presence
+### ★ Where a reply goes: `coverage`
 
-Where the user is, so nothing buzzes his arm about a screen he is already
-reading. A **source** is one piece of evidence, and coverage is the union across
-live sources.
+**Reply where the last message came from.** Every event carries the answer,
+stamped by the hub when the event happened:
 
 ```json
-{
-  "present": true,
-  "covers_all": false,
-  "covered_panes": ["%0"],
-  "sources": [
-    {"id": "tmux:/dev/ttys000", "kind": "tmux", "panes": ["%0"], "covers_all": false,
-     "since": 1786516400.1, "last_seen": 1786516490.0, "idle_s": 1.2,
-     "expires_in_s": 4.8,
-     "detail": {"session": "main", "front_pane": "%0", "origin": "192.168.86.63"}}
-  ],
-  "server_time": 1786516491.2
-}
+"coverage": {"known": true, "covered": true, "by": ["tmux-input"], "last_input": "tmux"}
 ```
 
-* `covered_panes` — he can already see these; do not notify about them.
-* `covers_all` — a source sees *everything* (the panel is open in front of him).
-* Sources expire. Whoever owns one refreshes it; TTLs are seconds-to-a-minute, so
-  presence lapses on its own rather than sticking.
-* **The client is expected to report its own presence** — see `POST /presence`.
-* ⚠️ **No sources means push.** An empty snapshot is "we don't know", and a missed
-  message is worse than a redundant one. Never read absence as presence.
-* Observed today: `tmux` (a client that has taken input within 120 s, covering the
-  pane on its screen; `detail.origin` is where that login came from). Deliberately
-  **not** observed: macOS window focus and whether he is in the room — talos cannot
-  see either. `HIDIdleTime` was tried and rejected: it reported 13.2 hours idle
-  while he was actively typing, because he works over SSH and it measures this
-  machine's keyboard.
+* `covered: true` — the conversation is already somewhere he can see it, so this
+  should **not** raise a notification. He typed the prompt in tmux, so he is
+  reading the answer in tmux.
+* `covered: false` — he sent the message from ROAM, so ROAM is where the answer
+  belongs. **Notify.**
+* `known: false` — nothing recorded (a fresh pane, an agent that spoke first).
+  ⚠️ **Treat as notify.** A missed message is worse than a redundant one.
+* `by` — what covered it: `tmux-input`, or the id of a reported presence source.
+* `last_input` — `tmux` | `app` | null, the channel's conversation location at
+  the time.
+
+Switching is just sending from the other place: send from the app and the channel
+moves to `app`; type in tmux and it moves back. Nothing infers where he is.
+
+⚠️ **Coverage governs notification only.** A covered event is stored, returned by
+history, and shown in the thread exactly like any other — it simply never buzzes.
+
+The stamp is frozen at event time on purpose: by the time a sleeping client
+reconnects, live state answers a different question. That is what makes a backlog
+answerable — push the ones he genuinely missed, pass over the ones he watched
+arrive, however many there are.
+
+### Presence (optional, reported)
+
+The one thing the last-input rule cannot express: he is **looking** at the panel
+without having sent anything. A client may report that, and it only ever adds
+coverage.
+
+```json
+{"present": true, "covers_all": true, "covered_panes": [],
+ "sources": [{"id": "roam-app", "kind": "app", "panes": [], "covers_all": true,
+              "since": 1786516400.1, "last_seen": 1786516490.0, "idle_s": 1.2,
+              "expires_in_s": 4.8, "detail": {"device": "pixel"}}],
+ "server_time": 1786516491.2}
+```
+
+Sources expire; whoever owns one refreshes it. The hub observes nothing here —
+earlier versions watched tmux clients and `HIDIdleTime`; both are deleted, the
+first because the last-input rule answers the question directly and the second
+because it read 13.2 hours idle while he was actively typing over SSH.
 
 ---
 
@@ -346,22 +367,20 @@ stop notifying me"** — first-class, not a later special case.
  "detail": {"device": "pixel"}}
 ```
 
-* `source` — a stable id you own. Ids beginning `tmux:` are the hub's own
-  observations and are rejected with `400`.
+* `source` — a stable id you own.
 * `panes` — cover specific channels instead of everything (bare `3` or `%3`).
 * `ttl_s` — 1–3600. Re-post to stay present; stop posting (or `DELETE`) to lapse.
   Pick a TTL a few times your refresh interval so a crash lapses quickly.
 * Returns `{"source": …, "presence": <snapshot>}` and pushes a `presence` frame.
 
 **Recommended client behaviour**: `POST` with `covers_all: true` on foreground and
-every ~30 s while foregrounded; `DELETE /presence/{source}` on background. Then the
-bridge stops notifying while you are looking at the panel, and resumes when you put
-it down — with no logic duplicated in the client.
+every ~30 s while foregrounded; `DELETE /presence/{source}` on background. Sending
+a message already moves that channel to `app`, so this is only for the case where
+he is watching without typing.
 
 ### `DELETE /presence/{source}`
 
-`{"removed": true, "presence": <snapshot>}`. `400` for a `tmux:` source (the hub
-owns those; they expire on their own).
+`{"removed": true, "presence": <snapshot>}`.
 
 ### `GET /events`
 

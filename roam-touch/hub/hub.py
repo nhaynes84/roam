@@ -41,8 +41,15 @@ from starlette.concurrency import run_in_threadpool
 
 import channels as channels_mod
 from channels import Channel, TmuxError
-from presence import DEFAULT_TTL_S, OBSERVED_PREFIXES, Presence
-from store import DEFAULT_DB_PATH, EventKind, Store, StoredChannel
+from presence import DEFAULT_TTL_S, UNKNOWN_COVERAGE, Presence
+from store import (
+    DEFAULT_DB_PATH,
+    INPUT_APP,
+    INPUT_TMUX,
+    EventKind,
+    Store,
+    StoredChannel,
+)
 from transcript import INLINE_BODY_CHARS
 
 HUB_DIR = Path(__file__).resolve().parent
@@ -84,10 +91,10 @@ class Settings(BaseSettings):
     capture_lines: int = 200
     history_limit: int = 200
 
-    #: How long after his last keystroke a tmux client still counts as "he is
-    #: sitting there". Stop typing for this long and the arm starts buzzing
-    #: again, which is the behaviour you want when you walk away mid-task.
-    presence_grace_s: float = 120.0
+    #: How long after the hub types a message into a pane the resulting hook
+    #: receipt is still recognised as the echo of that send rather than as him
+    #: typing at the keyboard.
+    echo_window_s: float = 60.0
 
     log_level: str = "info"
 
@@ -269,6 +276,10 @@ def channel_view(
         # answer that a bare status can never give.
         "last_output_at": last_output_at,
         "idle_s": idle_s,
+        # Where this channel's conversation is happening, and therefore where
+        # its next answer will be delivered.
+        "last_input_source": stored.last_input_source if stored else None,
+        "last_input_at": stored.last_input_at if stored else None,
         "event_count": store.event_count(pane_id),
         "last_event": last.to_dict(INLINE_BODY_CHARS) if last else None,
     }
@@ -324,9 +335,13 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        app.state.presence = Presence()
         app.state.store = store or Store(settings.db_path)
         app.state.broadcaster = Broadcaster()
-        app.state.presence = Presence()
+        # Every event is stamped with the coverage in force when it happened.
+        # Doing it here rather than at each call site means a new event kind
+        # cannot quietly ship unstamped.
+        app.state.store.coverage_provider = _coverage_for
         app.state.settings = settings
         app.state.token = token
         app.state.started_at = time.time()
@@ -356,6 +371,64 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
 
     def _publish(message: dict[str, Any]) -> None:
         app.state.broadcaster.publish(message)
+
+    def _note_prompt_origin(st: Store, pane_id: str, prompt: str) -> None:
+        """A prompt was submitted in this pane. Was it him, or was it us?
+
+        The `UserPromptSubmit` hook fires either way -- when he types at the
+        keyboard *and* when the hub types the app's message into the pane. Left
+        alone, the echo of an app message would flip the channel back to
+        "he's at the keyboard" and silence the very answer he is waiting for on
+        the phone.
+
+        So: a receipt whose text matches the message we just sent is that echo,
+        and changes nothing. Anything else is him typing.
+
+        Edge case, accepted: typing the *same text by hand* within the echo
+        window keeps the channel on `app` and produces one redundant
+        notification. That is the harmless direction.
+        """
+        recent = st.history(pane_id, limit=6)
+        typed = (prompt or "").strip()
+        cutoff = time.time() - settings.echo_window_s
+        for event in reversed(recent):
+            if event.kind != EventKind.SENT.value or event.ts < cutoff:
+                continue
+            if not typed or event.body.strip() == typed:
+                return  # our own send coming back; the conversation stays put
+            break
+        st.set_channel_input(pane_id, INPUT_TMUX)
+
+    def _coverage_for(pane_id: str) -> dict[str, Any]:
+        """Should an event on this channel reach his arm? Decided **now**, and
+        frozen onto the event, because a backlog replayed tomorrow must be
+        judged by where the conversation was when it happened.
+
+        ★ **Reply where the last message came from.** He typed the prompt in
+        tmux, so he is reading the answer in tmux -- covered, no buzz. He sent
+        it from ROAM, so that is where the conversation is -- not covered, push.
+        Switching is just sending from the other place. Nothing infers where he
+        is; the message itself says.
+
+        The one thing that rule cannot express is him *looking* at the panel
+        without having sent anything, so a reported presence source
+        (`POST /presence`) can also cover a channel. It only ever adds
+        suppression, so the two can never disagree.
+
+        ⚠️ No recorded source means **push**: a fresh pane, or an agent that
+        spoke first. A missed message is worse than a redundant one.
+        """
+        stored = app.state.store.get_channel(pane_id)
+        source = stored.last_input_source if stored else None
+        reported = app.state.presence.covers(pane_id)
+        if source is None and reported is None:
+            return dict(UNKNOWN_COVERAGE)
+        by: list[str] = []
+        if source == INPUT_TMUX:
+            by.append("tmux-input")
+        if reported is not None:
+            by.append(reported.id)
+        return {"known": True, "covered": bool(by), "by": by, "last_input": source}
 
     def _publish_presence() -> None:
         _publish({"type": "presence", **app.state.presence.snapshot()})
@@ -422,14 +495,6 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
         This is how the ROAM app says "I am foregrounded, stop notifying me" --
         first-class from the start, not a special case added later.
         """
-        if payload.source.startswith(OBSERVED_PREFIXES):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    f"'{payload.source}' is in a namespace the hub observes; "
-                    "pick another id"
-                ),
-            )
         panes = [normalise_pane_id(p) for p in payload.panes]
         source = app.state.presence.report(
             payload.source,
@@ -447,11 +512,6 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
     )
     async def delete_presence(source: str = PathParam(...)) -> dict[str, Any]:
         """The app backgrounding, a device going away."""
-        if source.startswith(OBSERVED_PREFIXES):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="the hub owns that source; it expires on its own",
-            )
         removed = app.state.presence.forget(source)
         if removed:
             _publish_presence()
@@ -515,6 +575,11 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail=f"tmux refused the send: {exc}",
             ) from exc
+        # The conversation moved here: he sent this from the app, so the answer
+        # belongs on the app. Recorded before the event, so the event's own
+        # stamp already reflects the switch.
+        st.remember_channel(pane_id, live.label, live.session)
+        st.set_channel_input(pane_id, INPUT_APP)
         event = st.append(
             pane_id,
             EventKind.SENT,
@@ -627,6 +692,8 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
                 live.label if live else pane_id,
                 live.session if live else "",
             )
+        if payload.kind == EventKind.RECEIPT.value:
+            _note_prompt_origin(st, pane_id, payload.body)
         event = st.append(pane_id, payload.kind, payload.body, payload.meta)
         _publish_event(event)
         return {"event": event.to_dict()}
@@ -785,33 +852,6 @@ def _sample_activity(
     return moved
 
 
-def _observe_presence(
-    presence: Presence, clients: list[Any], grace_s: float, ttl_s: float
-) -> None:
-    """Turn attached tmux clients into presence sources.
-
-    A client is only reported while it has taken input within `grace_s`, and
-    the source is refreshed every poll with a short TTL -- so coverage lapses a
-    couple of seconds after the grace window instead of lingering.
-
-    `origin` (from `who`) is carried through as detail: it is the difference
-    between "he is somewhere" and "he is on the laptop at 192.168.86.63, in the
-    main session, looking at %0".
-    """
-    for client in clients:
-        if not client.front_pane:
-            continue
-        if grace_s and client.idle_s() > grace_s:
-            continue
-        presence.report(
-            f"tmux:{client.tty}",
-            kind="tmux",
-            panes=(client.front_pane,),
-            ttl_s=ttl_s,
-            detail=client.to_dict(),
-        )
-
-
 async def _poll_forever(app: FastAPI) -> None:
     """Watch tmux so clients never have to.
 
@@ -866,16 +906,9 @@ async def _poll_forever(app: FastAPI) -> None:
                             {"type": "event", "event": event.to_dict()}
                         )
 
-            # Presence: observe tmux, expire whatever has lapsed, and tell
-            # clients only when the picture actually changed.
+            # Presence is reported, not observed, so the poller only has to
+            # expire what has lapsed and say so when that changes anything.
             before = presence.signature()
-            clients = await run_in_threadpool(channels_mod.tmux_clients)
-            _observe_presence(
-                presence,
-                clients,
-                settings.presence_grace_s,
-                ttl_s=max(2.0, settings.poll_interval * 3),
-            )
             presence.sweep()
             if presence.signature() != before:
                 broadcaster.publish({"type": "presence", **presence.snapshot()})

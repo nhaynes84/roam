@@ -13,7 +13,7 @@ was asleep catches up by event id.
 Client contract: **[API.md](API.md)**. Read that before writing any client.
 
 ```
-channels.py    tmux: discover panes, send keys, capture output, who's watching
+channels.py    tmux: discover panes, send keys, capture output
 store.py       SQLite event log, per channel, never hard-deleted
 transcript.py  pull the assistant's answer out of a session transcript;
                summarise it for Piper and for a glance
@@ -93,16 +93,13 @@ tail -f ~/Library/Logs/roam-bridge.log
   `✳ Augment things: the suite is green — 122 tests`. The label is the point: which
   session is talking, without unlocking anything. `roam-msg --pane` tags each
   channel separately so two sessions don't overwrite each other.
-* **What it will not do**: buzz about something he is already looking at. The bridge
-  does not work that out itself — **the hub owns presence** (see below) and the
-  bridge is one more consumer of it, which is why the Android app saying "I am
-  foregrounded" needs no bridge change at all. `ROAM_BRIDGE_SUPPRESS_WHEN_PRESENT=false`
-  pushes regardless.
-* **What it will not do either**: dump a backlog on him. If it reconnects more than
-  `BACKLOG_PUSH_LIMIT` (15) pushable events behind, it catches up **silently** —
-  being that far behind is itself evidence he was working elsewhere and has already
-  seen it. The events are in the hub and the channel history, which is where he
-  will look.
+* **What it will not do**: push an event the hub stamped as covered — an answer to
+  something he typed at the keyboard. The bridge holds no opinion and asks nothing;
+  it reads the stamp. `ROAM_BRIDGE_SUPPRESS_WHEN_COVERED=false` pushes regardless.
+* **Catching up**: every event decides for itself from its own stamp, so three
+  missed answers still buzz and thirty he watched arrive do not.
+  `BACKLOG_FLOOD_LIMIT` (50) is only a circuit breaker against a pathological
+  replay, not the rule.
 * **Rate**: at most one notification per `ROAM_BRIDGE_MIN_INTERVAL_S` (default 5 s).
   Events arriving inside the window are coalesced per channel — newest wins, with
   `(+N more)` — so a burst cannot machine-gun the phone.
@@ -111,29 +108,33 @@ tail -f ~/Library/Logs/roam-bridge.log
   current latest id, because nobody wants a week of old outcomes on their arm at
   startup.
 
-## Presence — where he is
+## Where a reply goes
 
-`presence.py`. The hub tracks where the user is interacting so nothing notifies
-him about a screen he is already reading. Sources are named, carry a TTL, and
-combine by union; new ones need no new logic, just a `POST /presence`.
+**Reply where the last message came from.** Per channel, exactly like any
+messaging app:
 
-| source | kind | how | covers |
-|---|---|---|---|
-| `tmux:/dev/ttys000` | observed | a tmux client that has taken input within `ROAM_HUB_PRESENCE_GRACE_S` (120 s); `who(1)` supplies where that login came from | the pane on its screen |
-| `roam-app` | reported | the client POSTs while foregrounded | everything (`covers_all`) |
+* he typed the prompt in tmux (the `UserPromptSubmit` hook says so) → he is
+  reading the answer there → **no push**;
+* he sent it from ROAM (`POST /channels/{pane}/send`) → that is where the
+  conversation is → **push**.
 
-* ⚠️ **No sources means push.** A missed message is worse than a redundant one, so
-  an empty registry is "we do not know", never "he must be here". `Presence.should_push`
-  returns True for anything uncovered, and a hub restart forgets everything — failing
-  towards notifying.
-* ⚠️ **Only what talos can observe.** macOS window focus and "is he in the room" are
-  not knowable from here and are absent by choice. `HIDIdleTime` *was* tried and
-  rejected: it read **13.2 hours idle while he was actively typing**, because he
-  works over SSH and it measures this machine's keyboard, not his. A signal that
-  wrong is worse than no signal.
-* A source with no panes and no `covers_all` is still presence (it shows on
-  `/presence`) but suppresses nothing: evidence he is at *a* keyboard is not
-  evidence he can see *this* channel.
+The hub stamps that decision onto every event as `coverage` when the event
+happens, so a backlog is still answerable days later: push what he genuinely
+missed, pass over what he watched arrive. Coverage governs **notification only**
+— every event is stored and shown in the thread regardless.
+
+Sending from the app types into the pane, which fires the same hook, so the hub
+recognises that echo (same text, inside `ROAM_HUB_ECHO_WINDOW_S`) and does not
+let it flip the channel back to the keyboard.
+
+⚠️ **No recorded source means notify.** A fresh pane, an agent that speaks first,
+a failed lookup — a missed message is worse than a redundant one.
+
+`POST /presence` remains for the one case this cannot express: he is *looking* at
+the panel without having sent anything. It only ever adds coverage. The hub
+observes nothing itself — the tmux-client watching and `HIDIdleTime` that earlier
+versions used are both deleted (the latter read 13.2 hours idle while he was
+actively typing over SSH).
 
 ## Auth and binding
 

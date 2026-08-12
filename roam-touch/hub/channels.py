@@ -14,7 +14,6 @@ from __future__ import annotations
 import hashlib
 import socket
 import subprocess
-import time
 from dataclasses import dataclass, asdict
 
 #: tmux gives every pane the local hostname as its default title, so a bare
@@ -165,122 +164,6 @@ def _paste(pane_id: str, text: str) -> None:
     # -p bracketed paste (the TUI sees one paste, not N keystrokes),
     # -d delete the buffer afterwards so transcripts don't pile up in tmux.
     _tmux("paste-buffer", "-p", "-d", "-b", buf, "-t", pane_id)
-
-
-@dataclass(frozen=True)
-class TmuxClient:
-    """An attached tmux client -- one human, at one screen, somewhere."""
-
-    tty: str
-    session: str
-    activity: float      # epoch of this client's last input
-    front_pane: str      # what is actually on its screen right now
-    origin: str = ""     # where it is connected from, per who(1)
-
-    def idle_s(self, now: float | None = None) -> float:
-        return max(0.0, (time.time() if now is None else now) - self.activity)
-
-    def to_dict(self) -> dict:
-        return {
-            "tty": self.tty,
-            "session": self.session,
-            "activity": self.activity,
-            "front_pane": self.front_pane,
-            "origin": self.origin,
-        }
-
-
-def _who() -> str:
-    """`who(1)` output. Separate boundary so tests can patch it."""
-    try:
-        proc = subprocess.run(
-            ("who",), capture_output=True, text=True, timeout=5
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
-        return ""
-    return proc.stdout
-
-
-def _login_origins() -> dict[str, str]:
-    """tty -> where that login came from.
-
-    `who` reports `talos ttys000 Aug 11 20:17 (192.168.86.63)` for an SSH
-    session. It is how the hub can say *where* he is, not just that he is
-    somewhere. A local console login has no origin and that is fine.
-    """
-    origins: dict[str, str] = {}
-    for line in _who().splitlines():
-        parts = line.split()
-        if len(parts) < 2:
-            continue
-        tty = parts[1]
-        if parts[-1].startswith("(") and parts[-1].endswith(")"):
-            origins[tty] = parts[-1][1:-1]
-    return origins
-
-
-def tmux_clients() -> list[TmuxClient]:
-    """Every attached tmux client, with what it is showing and when it last
-    took input. The hub's only observed presence signal."""
-    try:
-        listing = _tmux(
-            "list-clients", "-F", "#{client_tty}\t#{client_session}\t#{client_activity}"
-        )
-    except TmuxError:
-        return []
-    origins = _login_origins()
-    clients: list[TmuxClient] = []
-    for line in listing.splitlines():
-        parts = line.split("\t")
-        if len(parts) < 3:
-            continue
-        tty, session, activity = parts[0], parts[1], parts[2]
-        if not session:
-            continue
-        try:
-            last_input = float(activity)
-        except ValueError:
-            last_input = 0.0
-        try:
-            front = _tmux("display-message", "-p", "-t", session, "#{pane_id}").strip()
-        except TmuxError:
-            front = ""
-        clients.append(
-            TmuxClient(
-                tty=tty,
-                session=session,
-                activity=last_input,
-                front_pane=front,
-                origin=origins.get(tty.replace("/dev/", ""), ""),
-            )
-        )
-    return clients
-
-
-def watched_panes(grace_s: float = 120.0) -> set[str]:
-    """Panes a human is plausibly sitting in front of right now.
-
-    Two facts, both straight from tmux, no guessing:
-
-    * `list-clients` gives each attached client's session and
-      `client_activity` -- the epoch of its last *input*. A client nobody has
-      typed into for an hour is not being watched.
-    * `display-message -t <session> '#{pane_id}'` gives that session's current
-      window's active pane -- what is actually on that client's screen.
-
-    So a pane is "watched" when it is the front pane of a client that has taken
-    input within `grace_s`. Pass `grace_s=0` to drop the recency test.
-
-    ⚠️ Known limit: tmux cannot see whether the terminal is the frontmost macOS
-    window, or whether the human is in the room. Recent typing is the strongest
-    signal available without polling the window server.
-    """
-    now = time.time()
-    return {
-        client.front_pane
-        for client in tmux_clients()
-        if client.front_pane and (not grace_s or client.idle_s(now) <= grace_s)
-    }
 
 
 def screen_digest(pane_id: str) -> str:

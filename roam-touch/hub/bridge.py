@@ -10,8 +10,9 @@ Two rules it exists to honour:
 * **The channel label leads the message.** "✳ Augment things: build finished"
   tells you which session is talking without unlocking anything. A notification
   that does not say who is speaking is noise.
-* **Never buzz someone about the screen they are already looking at.** See
-  `channels.watched_panes` for what "looking at" can honestly mean.
+* **Reply where the last message came from.** He typed the prompt in tmux, so
+  the answer stays in tmux; he sent it from ROAM, so the answer buzzes on ROAM.
+  The hub stamps that onto every event as `coverage`; the bridge just reads it.
 
 It shells out to `~/Projects/roam/tools/roam-msg` and never reimplements it:
 one push path, not two.
@@ -48,17 +49,21 @@ PUSH_KINDS: tuple[str, ...] = ("outcome", "error")
 #: Prefixes by kind. An error must not read like an answer.
 KIND_PREFIX: dict[str, str] = {"error": "⚠️ "}
 
-#: How far behind the bridge may be and still push what it missed.
+#: ⚠️ A circuit breaker, **not the rule**.
 #:
-#: Owner, 2026-08-11: *"let's in fact box it not by time but by message count,
-#: if we're 15 messages behind, presumably I've just been talking to you via
-#: laptop or some other means; keep it in the channel but no need to ping me."*
-#: Being far behind is itself evidence he was working somewhere else and has
-#: already seen it, so a big backlog is dropped rather than fired at his arm.
-#: The events are not lost -- they are in the hub and in the channel history,
-#: which is where he will look. Counted in *pushable* events (outcomes and
-#: errors), because that is the number of buzzes it would cause. Will be tuned.
-BACKLOG_PUSH_LIMIT = 15
+#: The rule is per-event coverage: an event that landed while he was covered is
+#: never pushed, and an event that landed while he was absent always is --
+#: whether that is one event or thirty. Owner, 2026-08-11: *"15 was just an
+#: example… we need a source to verify if I genuinely missed 3 messages or I
+#: just responded on my laptop and don't need notified."* Backlog size was his
+#: proxy for that question; `coverage` on each event answers it directly, so
+#: size no longer decides anything.
+#:
+#: This remains only to stop a pathological flood -- a hub outage replaying
+#: hundreds of genuinely-uncovered events -- from machine-gunning the phone.
+#: Reaching it means something is wrong, so it logs a warning, and the events
+#: are still in the hub and the channel history.
+BACKLOG_FLOOD_LIMIT = 50
 
 
 class Settings(BaseSettings):
@@ -72,11 +77,11 @@ class Settings(BaseSettings):
     state_file: Path = HUB_DIR / "bridge-state.json"
     roam_msg: Path = Path.home() / "Projects/roam/tools/roam-msg"
 
-    #: Honour the hub's presence: don't push what he is already looking at.
-    #: False pushes everything regardless of where he is.
-    suppress_when_present: bool = True
-    #: How far behind is "too far to bother him with" (see BACKLOG_PUSH_LIMIT).
-    backlog_push_limit: int = BACKLOG_PUSH_LIMIT
+    #: Honour the hub's coverage stamp: don't push into a conversation that is
+    #: already happening somewhere he can see. False pushes everything.
+    suppress_when_covered: bool = True
+    #: Circuit breaker only -- see BACKLOG_FLOOD_LIMIT.
+    backlog_flood_limit: int = BACKLOG_FLOOD_LIMIT
 
     #: Rate limit: at most one notification per this many seconds. Events that
     #: arrive inside the window are coalesced per channel, newest wins.
@@ -224,10 +229,6 @@ class Bridge:
         self._pusher = pusher or (
             lambda text, pane: push_via_roam_msg(settings, text, pane)
         )
-        #: Where the hub says he is. The bridge does not ask tmux itself: the
-        #: hub owns presence, the bridge is one more client of it, and the
-        #: ROAM app's own "I am foregrounded" arrives through the same door.
-        self.presence: dict[str, Any] = {}
         self.labels: dict[str, str] = {}
         #: pane_id -> (summary, kind, coalesced_count)
         self._queue: dict[str, tuple[str, str, int, int]] = {}
@@ -252,20 +253,27 @@ class Bridge:
     def wants(self, event: dict[str, Any]) -> bool:
         return event.get("kind") in PUSH_KINDS
 
-    def is_watched(self, pane_id: str) -> bool:
-        """Is he already looking at this?
+    def was_covered(self, event: dict[str, Any]) -> bool:
+        """Was the conversation already where this event landed?
 
-        ⚠️ Unknown means **no** -- push. A missed message is worse than a
-        redundant one, so an empty or absent presence snapshot (a hub too old
-        to send one, a bridge that just started) must never mean silence.
+        The hub stamps the answer onto the event when it happens, from one
+        rule -- **reply where the last message came from**. He typed the prompt
+        in tmux, so he is reading the answer there; he sent it from ROAM, so
+        that is where it goes.
+
+        The bridge therefore holds no opinion and asks nothing: a live push and
+        a replayed one read the same stamp, so nothing is judged twice, and a
+        backlog is answerable however old it is.
+
+        ⚠️ Unknown means **not covered** -- push. A hub too old to stamp, a
+        failed lookup, a fresh pane: none of them may become silence.
         """
-        if not self.settings.suppress_when_present:
+        if not self.settings.suppress_when_covered:
             return False
-        if not self.presence:
-            return False
-        if self.presence.get("covers_all"):
-            return True  # the panel itself is open; it already shows this
-        return pane_id in set(self.presence.get("covered_panes") or ())
+        coverage = event.get("coverage")
+        if isinstance(coverage, dict) and coverage.get("known"):
+            return bool(coverage.get("covered"))
+        return False
 
     def enqueue(self, event: dict[str, Any]) -> None:
         pane_id = event.get("pane_id") or ""
@@ -283,14 +291,10 @@ class Bridge:
         kind = frame.get("type")
         if kind == "hello":
             self.learn_channels(frame.get("channels"))
-            if frame.get("presence") is not None:
-                self.presence = frame["presence"]
             if self.state.last_event_id is None:
                 # First ever run: start from now. Replaying a week of outcomes
                 # onto someone's arm is not a welcome.
                 self.state.remember(int(frame.get("latest_event_id") or 0))
-        elif kind == "presence":
-            self.presence = frame
         elif kind in ("channels",):
             self.learn_channels(frame.get("channels"))
         elif kind == "channel":
@@ -301,11 +305,16 @@ class Bridge:
             await self.handle_event(frame.get("event") or {})
 
     async def handle_backlog(self, events: list[dict[str, Any]]) -> None:
-        """Catch up. If we are a long way behind, catch up *silently*.
+        """Catch up on what happened while we were away.
 
-        See `BACKLOG_PUSH_LIMIT`: a big backlog means he was working somewhere
-        else and has already seen this. The events still land in the hub and the
-        channel history; the arm just stays quiet.
+        Each event decides for itself, from the coverage stamped on it when it
+        happened: the ones he was present for pass silently, the ones he
+        genuinely missed are pushed. Size is not the arbiter -- three missed
+        outcomes are worth telling him about, and thirty answered from the
+        laptop are not.
+
+        `BACKLOG_FLOOD_LIMIT` is the only size check left, and it is a circuit
+        breaker: see its comment.
         """
         fresh = [
             e
@@ -313,12 +322,13 @@ class Bridge:
             if isinstance(e.get("id"), int)
             and (self.state.last_event_id is None or e["id"] > self.state.last_event_id)
         ]
-        pushable = sum(1 for e in fresh if self.wants(e))
-        if pushable > self.settings.backlog_push_limit:
-            log.info(
-                "%d missed notifications (>%d): staying quiet, they are in the channels",
-                pushable,
-                self.settings.backlog_push_limit,
+        missed = sum(1 for e in fresh if self.wants(e) and not self.was_covered(e))
+        if missed > self.settings.backlog_flood_limit:
+            log.warning(
+                "%d genuinely missed notifications (>%d) -- flood valve tripped, "
+                "staying quiet; they are all in the channels",
+                missed,
+                self.settings.backlog_flood_limit,
             )
             for event in fresh:
                 if isinstance(event.get("id"), int):
@@ -338,10 +348,17 @@ class Bridge:
         if not self.wants(event):
             return
         pane_id = event.get("pane_id") or ""
-        if self.is_watched(pane_id):
-            # He is looking at this pane right now. The screen already told him.
+        if self.was_covered(event):
+            # He was looking at this channel when it landed. It was never a
+            # missed message -- it stays in the thread, it just never buzzes.
             self.suppressed += 1
-            log.info("suppressed %s from watched pane %s", event.get("kind"), pane_id)
+            by = ",".join((event.get("coverage") or {}).get("by") or []) or "presence"
+            log.info(
+                "not a missed message: %s on %s was covered by %s",
+                event.get("kind"),
+                pane_id,
+                by,
+            )
             return
         self.enqueue(event)
         await self.drain()
@@ -448,12 +465,12 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
     log.info(
-        "roam-bridge %s -> %s (push %s; presence suppression %s; backlog limit %d)",
+        "roam-bridge %s -> %s (push %s; coverage suppression %s; flood valve %d)",
         BRIDGE_VERSION,
         settings.hub_url,
         "/".join(PUSH_KINDS),
-        "on" if settings.suppress_when_present else "off",
-        settings.backlog_push_limit,
+        "on" if settings.suppress_when_covered else "off",
+        settings.backlog_flood_limit,
     )
     asyncio.run(Bridge(settings).run())
 

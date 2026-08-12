@@ -1,15 +1,15 @@
-"""Presence: where the user is, and therefore whether his arm should buzz.
+"""Reported presence -- the app saying "I am looking at the panel".
 
-The decisions being defended here are the ones that make the device wearable:
-never notify about what he is already looking at, always notify when we do not
-know, and let a new source (the ROAM app) join without a special case.
+The last-input rule (test_api / test_bridge) decides almost everything now.
+What is left here is the one case it cannot express: he is looking at the
+panel without having sent anything.
 """
 
 from __future__ import annotations
 
 import pytest
 
-from presence import DEFAULT_TTL_S, OBSERVED_PREFIXES, Presence, PresenceSource
+from presence import DEFAULT_TTL_S, Presence, PresenceSource
 
 
 class Clock:
@@ -52,8 +52,8 @@ def test_a_source_that_covers_nothing_suppresses_nothing(presence):
 # ----------------------------------------------------------------- coverage
 
 
-def test_a_tmux_source_covers_only_its_pane(presence):
-    presence.report("tmux:/dev/ttys000", kind="tmux", panes=["%0"])
+def test_a_reported_source_covers_only_its_panes(presence):
+    presence.report("desk-panel", kind="app", panes=["%0"])
     assert presence.should_push("%0") is False
     assert presence.should_push("%1") is True
 
@@ -67,17 +67,17 @@ def test_the_app_foregrounded_covers_everything(presence):
 
 
 def test_several_sources_union_their_coverage(presence):
-    presence.report("tmux:/dev/ttys000", kind="tmux", panes=["%0"])
-    presence.report("tmux:/dev/ttys002", kind="tmux", panes=["%1"])
+    presence.report("roam-app", kind="app", panes=["%0"])
+    presence.report("desk-panel", kind="app", panes=["%1"])
     assert presence.covered_panes() == {"%0", "%1"}
     assert presence.should_push("%2") is True
 
 
 def test_covers_names_the_source_that_did_it(presence):
-    presence.report("tmux:/dev/ttys000", kind="tmux", panes=["%0"])
+    presence.report("roam-app", kind="app", panes=["%0"])
     source = presence.covers("%0")
-    assert source is not None and source.id == "tmux:/dev/ttys000"
-    assert source.kind == "tmux"
+    assert source is not None and source.id == "roam-app"
+    assert source.kind == "app"
 
 
 # --------------------------------------------------------------------- ttl
@@ -132,31 +132,27 @@ def test_a_source_needs_an_id(presence):
 
 def test_snapshot_describes_the_situation(presence, clock):
     presence.report(
-        "tmux:/dev/ttys000",
-        kind="tmux",
-        panes=["%0"],
-        ttl_s=6,
-        detail={"session": "main", "origin": "192.168.86.63"},
+        "roam-app", kind="app", panes=["%0"], ttl_s=6, detail={"device": "pixel"}
     )
     clock.advance(2)
     snap = presence.snapshot()
     assert snap["present"] is True
     assert snap["covered_panes"] == ["%0"]
     source = snap["sources"][0]
-    assert source["kind"] == "tmux"
+    assert source["kind"] == "app"
     assert source["idle_s"] == 2.0
     assert source["expires_in_s"] == 4.0
-    assert source["detail"]["origin"] == "192.168.86.63", "where, not just whether"
+    assert source["detail"]["device"] == "pixel"
 
 
 def test_the_signature_ignores_timestamps(presence, clock):
     """Continuous typing must not become a firehose of presence frames."""
-    presence.report("tmux:/dev/ttys000", kind="tmux", panes=["%0"], ttl_s=60)
+    presence.report("roam-app", kind="app", panes=["%0"], ttl_s=60)
     before = presence.signature()
     clock.advance(1)
-    presence.report("tmux:/dev/ttys000", kind="tmux", panes=["%0"], ttl_s=60)
+    presence.report("roam-app", kind="app", panes=["%0"], ttl_s=60)
     assert presence.signature() == before
-    presence.report("tmux:/dev/ttys000", kind="tmux", panes=["%1"], ttl_s=60)
+    presence.report("roam-app", kind="app", panes=["%1"], ttl_s=60)
     assert presence.signature() != before, "a real change still shows"
 
 
@@ -165,11 +161,6 @@ def test_signature_changes_when_a_source_lapses(presence, clock):
     before = presence.signature()
     clock.advance(11)
     assert presence.signature() != before
-
-
-def test_observed_namespace_is_named_so_the_hub_can_defend_it():
-    assert "tmux:" in OBSERVED_PREFIXES
-    assert "roam-app".startswith(OBSERVED_PREFIXES) is False
 
 
 def test_default_ttl_is_short_enough_to_lapse_but_long_enough_to_hold():
