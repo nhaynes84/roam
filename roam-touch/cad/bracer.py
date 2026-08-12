@@ -1,31 +1,30 @@
 """
 ROAM Touch -- forearm bracer cradle for a Google Pixel (sailfish, 2016).
 
-V1 form factor: a flat tray that holds the phone, carried on two transverse
-saddle ribs that conform to the forearm, with an open span between them for
-airflow. Strap anchors are slots in flat wings either side.
+Form: the phone housing (pocket, screen aperture, sensor holes, print-in-place
+buttons, jack notch) is a frozen tray. Around and under it sits a FACETED OUTER
+HULL that encloses the tilt wedge -- one low-poly prism running the length of
+the arm, flush with the tray sides at the belt line and flaring out below it,
+hollowed to a 2 mm skin with the arm saddle cut through its underside. V1 left
+that wedge open on two ribs and read as a tray on stilts.
 
-Print orientation: STANDING ON THE ELBOW END. Measured, not guessed --
-verify_bracer.py compares four orientations by unsupported face area:
+★ Every hull facet is a plane PARALLEL TO THE ARM AXIS. That is what makes the
+low-poly styling free: stood on end, the entire outer body is vertical, so it
+needs no support and there is nothing curved to tessellate.
 
-    standing on elbow end    13.3 cm2 support   8.4 cm2 bed   147 mm tall  <-- use
-    on its side              36.4 cm2           5.9 cm2        91 mm
-    pocket down              88.5 cm2          16.2 cm2        30 mm
-    pocket up               105.9 cm2           0.6 cm2        30 mm
-
-Pocket-up is the intuitive choice and the worst one: the part ends up balanced
-on four thin rib-tip edges, so the slicer supports nearly the whole underside.
-Standing it on end makes every wall vertical. Use a brim -- it is 147 mm tall
-on a small footprint. Layer lines then run across the arm axis, which is the
-weak direction in bending; the strap carries that load, not the tray, but do
-not stand on it.
+Print orientation: STANDING ON THE HAND END, on a brim. Measured, not guessed --
+verify_bracer.py scores five orientations by unsupported face area, and the
+hand end wins on both support and bed contact because the hull's closed end is
+down there and the cavity opens upward at the nose. (⚠️ the two end-on rotations
+were labelled backwards until 2026-08-12; -pi/2 about X is the HAND end.)
 
 Geometry note -- the constraint that drives the shape:
-a ~75 mm wide flat tray on a 90 mm diameter forearm has ~20 mm of sagitta.
-That wedge is unavoidable for a rigid slab; the ribs carry it instead of a
-solid block, which saves the weight and gives the phone a cooling gap.
+a ~75 mm wide flat tray on a 90 mm diameter forearm has ~20 mm of sagitta, and
+the 20 deg tilt adds its own. That wedge is unavoidable for a rigid slab. What
+is optional is whether it is solid: as a 2 mm shell it costs about what the two
+open ribs did, and the void inside is the duct the floor vents exhaust into.
 
-ARM_R is nominal, NOT critical, and that is deliberate. Every rib face is cut
+ARM_R is nominal, NOT critical, and that is deliberate. Every arm face is cut
 FOAM (4 mm) proud of where skin would be, for closed-cell foam or stick-on TPU.
 A forearm is not a cylinder -- it tapers, and its cross-section reconfigures as
 you pronate, because the radius crosses the ulna. A shell fitted rigidly to one
@@ -68,11 +67,43 @@ TILT = 20.0          # degrees
 
 ARM_R = 45.0         # nominal forearm radius, mm (90 mm dia)
 GAP = 8.0            # air gap between arm and tray underside, at the crown
-FOAM = 4.0           # compliant pad thickness on EVERY rib face -- see below
-RIB_W = 62.0         # rib span across the arm
-RIB_T = 28.0         # rib thickness along the arm -- wide enough to host the
-                     # strap channel, and more contact area is more comfortable
-RIB_Y = (34.0, 112.0)  # rib centres, from the elbow (open) end
+FOAM = 4.0           # compliant pad thickness on EVERY arm face -- see below
+STRAP_Y = (34.0, 112.0)  # strap channel centres, from the elbow (open) end
+
+# ------------------------------------------------------------------- hull
+# ★ The outer body. V1 carried the tray on two open saddle ribs; the tilt
+# wedge was left as exposed structure and it read as a tray on stilts. This
+# is the same wedge, enclosed: one faceted prism running the length of the
+# arm, flush with the tray sides at the belt line and flaring out below it.
+#
+# LOW POLY IS NOT ONLY STYLING. Every facet is a plane parallel to the arm
+# axis, so the whole skin is vertical in the print orientation below -- no
+# overhang anywhere on the outer body, and nothing to tessellate.
+#
+# The section is HANDED, like TILT: the arm falls away from the +X (button)
+# side, so that flank is deep and mostly dead volume, while the -X flank
+# meets the arm within ~13 mm. All of it is derived from arm_z() so TILT
+# stays a real knob -- change it and the section follows.
+HULL_Y0 = 13.0       # hull starts here; ahead of it is bare tray for the cap
+HULL_HW = 40.0       # hull half width at the widest -- 2.4 mm proud of the tray
+HULL_SHOULDER = 2.0  # Z where the flank leaves the tray wall and rakes out
+HULL_BELT = -3.0     # Z of the shoulder crease
+HULL_KEEL = 24.0     # |X| where the keel facet turns up into the deep chine
+HULL_CHINE = 11.0    # how far up the deep flank that chine lands
+WALL_OUT = 2.0       # outer skin thickness
+# ⚠️ Two arm-face wall thicknesses, not one. A single generous value leaves the
+# shallow flank almost solid -- that flank is only 5-13 mm deep, so 4.5 mm of
+# wall eats most of it. A thin skin everywhere plus a thick band under each
+# strap channel gets the weight back and still leaves 2.4 mm of floor beneath
+# the webbing. The step between them is a plane, so it cannot feather.
+WALL_ARM = 2.4       # arm-face skin over the open span
+WALL_ARM_STRAP = 4.4  # under the strap channels -- 2.2 of it is the channel
+STRAP_BAND = 3.0     # how far the thick band runs past the channel
+WALL_END = 3.0       # closing wall at the hand end
+CAV_Y1 = 3.0         # cavity stops this far short of the hand end
+RAKE = 14.0          # plan-view chamfer on the hull's nose corners
+LOUVER_W = 4.0       # exhaust slots in the deep (+X) flank
+LOUVER_Y = (56.0, 66.0, 76.0, 132.0, 142.0)
 
 CAP_D = 10.0         # end-cap slip depth
 # Strap runs in a channel on the UNDERSIDE of each rib, not on side flanges.
@@ -140,11 +171,30 @@ OUT_H = FLOOR + POCK_D + LIP_H
 ARM_CUT_R = ARM_R + FOAM
 ARM_AXIS_Z = -(ARM_R + GAP + FOAM)
 
-# How far the ribs hang below the tray at their outer tips. The tilt drops one
-# tip further, so allow for it or the rib blank is too short and the arm cut
-# leaves a hole where material should be.
-SAG = -(ARM_AXIS_Z + math.sqrt(ARM_CUT_R ** 2 - (RIB_W / 2) ** 2)) \
-      + (RIB_W / 2) * math.sin(math.radians(abs(TILT)))
+# The arm cut is a cylinder rotated by TILT about (0, -(GAP+FOAM)) on the tray
+# centre line. Closed form for its axis, and for the height of its surface at
+# any X -- the hull section is built off this so TILT stays parametric.
+_T = math.radians(TILT)
+ARM_CX = -ARM_R * math.sin(_T)
+ARM_CZ = -(GAP + FOAM) - ARM_R * math.cos(_T)
+
+
+def arm_z(x, r=None):
+    """Z of the arm-cut surface at X, or None where the cylinder does not
+    reach. Material lives ABOVE this line."""
+    r = ARM_CUT_R if r is None else r
+    d = r ** 2 - (x - ARM_CX) ** 2
+    return ARM_CZ + math.sqrt(d) if d > 0 else None
+
+
+# Deep (+X) flank: the arm has fallen away entirely by the time it gets out
+# there, so the depth is set by the tilt, not by the cylinder.
+HULL_Z_DEEP = -(GAP + FOAM) - HULL_HW * math.sin(abs(_T))
+# Shallow (-X) flank: run it just past where the arm cut will form the edge,
+# so the cylinder makes that chine rather than a stray sliver of blank.
+_shallow = arm_z(-HULL_HW if TILT >= 0 else HULL_HW)
+HULL_Z_SHAL = (_shallow - 1.5) if _shallow is not None else HULL_Z_DEEP
+SAG = -HULL_Z_DEEP    # how far the hull hangs below the tray
 
 
 # --------------------------------------- SVG face coords -> model coords
@@ -167,16 +217,79 @@ def bbox(x0, x1, y0, y1, z0, z1):
     )
 
 
+def inset(pts, d):
+    """Mitred inward offset of a simple polygon by d.
+
+    Hand-rolled rather than a 2D offset op because a mitre keeps every corner
+    SHARP -- an arc-filleted offset would round the inside of the shell and
+    make the wall thicker than d at every crease, which is exactly where a
+    minimum-wall check needs to be able to trust the number. Every facet ends
+    up exactly d thick, measured perpendicular to itself.
+    """
+    n = len(pts)
+    area = sum(pts[i][0] * pts[(i + 1) % n][1] - pts[(i + 1) % n][0] * pts[i][1]
+               for i in range(n)) / 2.0
+    s = 1.0 if area > 0 else -1.0          # interior is left of each edge if CCW
+    lines = []
+    for i in range(n):
+        (x0, z0), (x1, z1) = pts[i], pts[(i + 1) % n]
+        ex, ez = x1 - x0, z1 - z0
+        ln = math.hypot(ex, ez)
+        nx, nz = -ez / ln * s, ex / ln * s
+        lines.append((x0 + nx * d, z0 + nz * d, ex, ez))
+    out = []
+    for i in range(n):
+        px, pz, ex, ez = lines[i - 1]
+        qx, qz, fx_, fz_ = lines[i]
+        den = ex * fz_ - ez * fx_
+        if abs(den) < 1e-9:
+            out.append((qx, qz))
+            continue
+        t = ((qx - px) * fz_ - (qz - pz) * fx_) / den
+        out.append((px + ex * t, pz + ez * t))
+    return out
+
+
+def prism(pts, y0, y1):
+    """Extrude an (X, Z) polygon along +Y. Plane.XZ maps local u,v -> X,Z and
+    its normal is -Y, so the extrude amount is negated to travel +Y."""
+    return Pos(0, y0, 0) * extrude(Plane.XZ * Polygon(*pts, align=None),
+                                   amount=-(y1 - y0))
+
+
 # ------------------------------------------------------------------ build
 # Tray body: Y = 0 at the elbow (open) end, Y = OUT_L at the hand end.
 part = bbox(-OUT_W / 2, OUT_W / 2, 0, OUT_L, 0, OUT_H)
 
 
-# Saddle ribs
-for y in RIB_Y:
-    part += bbox(-RIB_W / 2, RIB_W / 2, y - RIB_T / 2, y + RIB_T / 2, -SAG, 0)
+# ------------------------------------------------------------------- hull
+# The faceted outer body. SD is the deep side -- the flank the arm falls away
+# from, which is +X for a positive TILT and swaps with it.
+SD = 1.0 if TILT >= 0 else -1.0
+HULL_SEC = [
+    (-SD * OUT_W / 2,  HULL_SHOULDER),   # leaves the tray wall here
+    (-SD * HULL_HW,    HULL_BELT),       # shallow shoulder crease
+    (-SD * HULL_HW,    HULL_Z_SHAL),     # shallow flank, ends at the arm
+    (-SD * 8.0,        HULL_Z_DEEP),     # underbody rake
+    ( SD * HULL_KEEL,  HULL_Z_DEEP),     # keel
+    ( SD * HULL_HW,    HULL_Z_DEEP + HULL_CHINE),  # deep lower chine
+    ( SD * HULL_HW,    HULL_BELT),       # deep flank
+    ( SD * OUT_W / 2,  HULL_SHOULDER),
+]
+hull = prism(HULL_SEC, HULL_Y0, OUT_L)
 
-# Carve the forearm (plus the foam allowance) out of the ribs.
+# Plan-view rake on the nose corners. A cut plane containing Z has no Z in its
+# normal, so it costs nothing in the print orientation, and it stops the hull
+# ending in a blunt square shoulder behind the cap.
+for _sx in (-1, 1):
+    _n = Vector(_sx, -1, 0).normalized()
+    _p0 = Vector(_sx * (HULL_HW - RAKE), HULL_Y0, 0)
+    hull -= Pos(_p0 + _n * 100.0) * Rot(0, 0, math.degrees(math.atan2(-1, _sx))) \
+        * Box(200, 200, 200)
+
+part += hull
+
+# Carve the forearm (plus the foam allowance) out of the hull.
 _pivot = -(GAP + FOAM)          # crown contact, on the tray centre line
 _tilt = Pos(0, 0, _pivot) * Rot(0, TILT, 0) * Pos(0, 0, -_pivot)
 arm = _tilt * (Pos(0, OUT_L / 2, ARM_AXIS_Z) * Rot(90, 0, 0) * Cylinder(
@@ -184,21 +297,45 @@ arm = _tilt * (Pos(0, OUT_L / 2, ARM_AXIS_Z) * Rot(90, 0, 0) * Cylinder(
 ))
 part -= arm
 
-# Strap channel: a second, larger cylinder over just the rib's centre band
-# carves a groove into each rib's arm-facing face. The webbing lies in there,
-# between rib and arm, and wraps the forearm -- no flanges, no threading.
-for y in RIB_Y:
+# Strap channel: a second, larger cylinder over just a band of the arm face
+# carves a transverse groove. The webbing lies in there, between hull and arm,
+# and wraps the forearm -- no flanges, no threading. On the deep side the arm
+# has already fallen below the keel by X ~= 25, so the strap walks out into
+# open air under the hull rather than needing a slot cut for it.
+for y in STRAP_Y:
     part -= _tilt * (Pos(0, y, ARM_AXIS_Z) * Rot(90, 0, 0) * Cylinder(
         ARM_CUT_R + STRAP_D, STRAP_W))
 
 # Retaining bars across the channel so the strap cannot fall out when it is
 # off your arm. Trimmed back to the arm surface by re-cutting the arm after.
-for y in RIB_Y:
+for y in STRAP_Y:
     for sx in (-1, 1):
         part += bbox(sx * BAR_X - BAR_W / 2, sx * BAR_X + BAR_W / 2,
                      y - STRAP_W / 2, y + STRAP_W / 2,
                      -SAG - 1, 0)
 part -= arm
+
+# ------------------------------------------------------------------- shell
+# ★ The wedge is dead volume, so hollow it. The cavity is the same faceted
+# section inset by WALL_OUT, bounded away from the arm face by WALL_ARM (which
+# leaves 2.8 mm under the strap channel) and left OPEN at the nose -- a closed
+# cavity would put an unsupported roof across the whole section at the top of
+# the print, and an open one is also the intake for the floor vents.
+cav = prism(inset(HULL_SEC, WALL_OUT), HULL_Y0 - 1.0, OUT_L - CAV_Y1)
+cav -= _tilt * (Pos(0, OUT_L / 2, ARM_AXIS_Z) * Rot(90, 0, 0) * Cylinder(
+    ARM_CUT_R + WALL_ARM, OUT_L + 60))
+for y in STRAP_Y:
+    cav -= _tilt * (Pos(0, y, ARM_AXIS_Z) * Rot(90, 0, 0) * Cylinder(
+        ARM_CUT_R + WALL_ARM_STRAP, STRAP_W + 2 * STRAP_BAND))
+part -= cav
+
+# Exhaust louvres in the deep flank -- the only way out for the air the floor
+# vents dump into the cavity, and the facet that keeps the flank from reading
+# as a slab. Raked, and clear of the strap bands and the button bay.
+_lv_z0, _lv_z1 = HULL_Z_DEEP + HULL_CHINE, HULL_BELT   # the deep flank's span
+for _ly in LOUVER_Y:
+    part -= Pos(SD * HULL_HW, _ly, (_lv_z0 + _lv_z1) / 2) * Rot(-18, 0, 0) \
+        * Box(30.0, LOUVER_W, (_lv_z1 - _lv_z0) - 5.0)
 
 # Phone pocket -- runs out the elbow end so the phone slides in
 part -= bbox(-POCK_W / 2, POCK_W / 2, -10, POCK_L, FLOOR, FLOOR + POCK_D)
@@ -283,10 +420,17 @@ part -= bbox(
     FLOOR + 0.8, OUT_H + 10,
 )
 
-# Floor vents (cooling + weight), clear of the ribs
-for (yc, ln) in ((73.0, 50.0), (135.0, 18.0)):
-    vent = extrude(RectangleRounded(52.0, ln, VENT_R), amount=FLOOR + 4)
-    part -= Pos(0, yc, -2) * vent
+# Floor vents (cooling + weight). They now open into the hull cavity, which is
+# open at the nose -- so the floor under the phone breathes into a duct that
+# exhausts through the flank louvres instead of into a blind box.
+for (yc, ln) in ((24.0, 26.0), (73.0, 50.0), (135.0, 18.0)):
+    vent = extrude(RectangleRounded(60.0, ln, VENT_R), amount=FLOOR + 4)
+    # ⚠️ The vent starts just BELOW the cavity ceiling, not 2 mm below it. The
+    # old -2.0 was reaching into open air; now there is a hull under here and
+    # the extra 1.6 mm was being taken out of the arm-face skin. Under a strap
+    # band that left 1.05 mm of wall over the channel -- found by the minimum
+    # wall check, not visible in any render.
+    part -= Pos(0, yc, -0.4) * vent
 
 
 # ------------------------------------------------------- elbow end cap
@@ -326,6 +470,11 @@ USB_Z = FLOOR + PH_T / 2   # port sits mid phone thickness, NOT near the floor
 # slim cable head ever reaches the port -- a funnel lets fat overmoulds seat,
 # and it reads as a designed feature instead of a punched hole.
 USB_FLARE = 5.0            # per side, so a ~10 mm spread down to the opening
+# ⚠️ The trough must stop SHORT of the plate's inner face, not run out to it.
+# Landing the taper exactly on the far face makes the scoop meet the slot
+# asymptotically -- a feather edge, measured at 0.01 mm by the wall check.
+# This leaves a straight land at the throat, so the taper ends on material.
+USB_LAND = 2.0             # straight throat before the plate breaks through
 # Speaker and mic sit either side of the USB port on the bottom edge. Blocking
 # them with a solid plate would muffle the one output the device has.
 SPK_W, SPK_H = 13.0, 2.6
@@ -379,7 +528,7 @@ _trough_h = (_face_z1 - _face_z0) - 2 * TROUGH_INSET
 cap -= loft([
     Plane(origin=(0, -CAP_T - EPS, _face_zc), x_dir=(1, 0, 0), z_dir=(0, 1, 0))
     * RectangleRounded(2 * (_cap_half_w - TROUGH_INSET), _trough_h, 2.0),
-    Plane(origin=(0, EPS, USB_Z), x_dir=(1, 0, 0), z_dir=(0, 1, 0))
+    Plane(origin=(0, -USB_LAND, USB_Z), x_dir=(1, 0, 0), z_dir=(0, 1, 0))
     * RectangleRounded(USB_W, USB_H, USB_H / 2 - 0.01),
 ])
 # No finger notches. The first attempt put them at the open end on the centre
@@ -424,34 +573,41 @@ for _sx in (-1, 1):
 # Chamfer the outer envelope only: edges lying on the side walls, the top
 # face or the underside. Feature edges (pocket, apertures, channel, plungers)
 # are deliberately left sharp -- chamfering those would eat clearances.
-def _on_envelope(e):
+# ⚠️ The hull creases are NOT rounded -- a chamfer on a facet crease is just a
+# third facet, so the low-poly read survives, but a fillet would not. They get
+# a smaller chamfer than the tray rim so the crease still reads as a crease.
+CREASE = 1.0
+
+
+def _is_crease(e):
+    """A long Y-running edge sitting on one of the hull section's corners."""
     c = e.center()
-    return (abs(abs(c.X) - OUT_W / 2) < 0.02
-            or abs(c.Z) < 0.02
-            or abs(c.Z - OUT_H) < 0.02)
+    if e.length < 30 or c.Z > HULL_SHOULDER - 0.5:
+        return False
+    return any(abs(c.X - vx) < 0.3 and abs(c.Z - vz) < 0.3 for vx, vz in HULL_SEC)
+
 
 # OCCT refuses the whole envelope in one operation (ValueError), so chamfer in
-# groups -- vertical corners, then the top rim, then the underside rim. Each
-# group is attempted independently so one awkward set cannot lose the others.
-_groups = {
-    "vertical corners": lambda e: abs(abs(e.center().X) - OUT_W / 2) < 0.02 and e.length > 50,
-    # Only the OUTER boundary of the top/bottom faces. Filtering on Z alone
-    # also catches the screen aperture and button openings, and OCCT refuses
-    # the mixed set outright.
-    "top rim":          lambda e: abs(e.center().Z - OUT_H) < 0.02 and (
-                            abs(abs(e.center().X) - OUT_W / 2) < 0.02
-                            or abs(e.center().Y - OUT_L) < 0.02),
-    "underside rim":    lambda e: abs(e.center().Z) < 0.02 and (
-                            abs(abs(e.center().X) - OUT_W / 2) < 0.02
-                            or abs(e.center().Y - OUT_L) < 0.02),
-}
-for _name, _pred in _groups.items():
+# groups. Each group is attempted independently so one awkward set cannot lose
+# the others.
+_groups = [
+    # Only the OUTER boundary of the top face. Filtering on Z alone also
+    # catches the screen aperture and button openings, and OCCT refuses the
+    # mixed set outright.
+    ("tray top rim", CHAMFER,
+     lambda e: abs(e.center().Z - OUT_H) < 0.02 and (
+         abs(abs(e.center().X) - OUT_W / 2) < 0.02
+         or abs(e.center().Y - OUT_L) < 0.02)),
+    ("hull creases", CREASE, _is_crease),
+]
+for _name, _len, _pred in _groups:
     _es = ShapeList([e for e in part.edges() if _pred(e)])
     if not _es:
+        print(f"chamfer    no edges matched ({_name})")
         continue
     try:
-        part = chamfer(_es, length=CHAMFER)
-        print(f"chamfer    {CHAMFER} mm on {len(_es):3d} edges  ({_name})")
+        part = chamfer(_es, length=_len)
+        print(f"chamfer    {_len} mm on {len(_es):3d} edges  ({_name})")
     except Exception as exc:
         print(f"chamfer    SKIPPED {_name}: {type(exc).__name__}")
 
@@ -462,11 +618,25 @@ export_step(part, os.path.join(out, "bracer.step"))
 export_stl(part, os.path.join(out, "bracer.stl"))
 export_step(cap, os.path.join(out, "bracer_endcap.step"))
 export_stl(cap, os.path.join(out, "bracer_endcap.stl"))
+
+# ★ Also export both parts ROTATED INTO PRINT ORIENTATION, bed at Z=0. Renders
+# taken off these are the ones worth looking at -- printability is judged in
+# the orientation it prints in, not the one it was modelled in.
+# ⚠️ Rot(-90,0,0) sends +Y to -Z, so the hand end goes to the bed. Verified
+# against the bounding box below rather than assumed.
+_pp = Pos(0, 0, OUT_L) * Rot(-90, 0, 0) * part
+_pc = Pos(0, 0, CAP_T) * Rot(90, 0, 0) * cap
+export_stl(_pp, os.path.join(out, "bracer_print.stl"))
+export_stl(_pc, os.path.join(out, "bracer_endcap_print.stl"))
+assert abs(_pp.bounding_box().min.Z) < 0.01, "bracer not sitting on the bed"
+assert abs(_pc.bounding_box().min.Z) < 0.01, "cap not sitting on the bed"
 print(f"end cap    {OUT_W + 2*(CAP_CLR+CAP_W):.1f} W x {CAP_D + CAP_T:.1f} L "
       f"x {OUT_H + CAP_CLR + CAP_W:.1f} H mm  ~= {cap.volume/1000*1.27:.0f} g")
 
-print(f"outer      {OUT_W:.1f} W x {OUT_L:.1f} L x {OUT_H + SAG:.1f} H mm")
+_bb = part.bounding_box()
+print(f"outer      {_bb.size.X:.1f} W x {_bb.size.Y:.1f} L x {_bb.size.Z:.1f} H mm")
 print(f"tray       {OUT_W:.1f} x {OUT_L:.1f} x {OUT_H:.1f}")
 print(f"pocket     {POCK_W:.1f} x {POCK_L:.1f} x {POCK_D:.1f}")
-print(f"rib drop   {SAG:.2f} mm  (ARM_R={ARM_R}, GAP={GAP}, RIB_W={RIB_W})")
+print(f"hull drop  {SAG:.2f} mm deep side, {-HULL_Z_SHAL:.2f} shallow "
+      f"(TILT={TILT}, ARM_R={ARM_R}, GAP={GAP})")
 print(f"volume     {part.volume/1000:.1f} cm3  ~= {part.volume/1000*1.27:.0f} g PETG")
