@@ -1,22 +1,33 @@
 package com.roam.touch;
 
-import android.app.Activity;
 import android.app.admin.DevicePolicyManager;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.graphics.Color;
 import android.os.Bundle;
 import android.util.Log;
-import android.util.TypedValue;
-import android.view.Gravity;
-import android.widget.TextView;
+
+import androidx.activity.ComponentActivity;
+
+import com.roam.touch.channels.HubService;
+import com.roam.touch.channels.Roam;
+import com.roam.touch.channels.ui.ChannelsAppKt;
 
 /**
- * Nexus — the ROAM home screen. Still a near-empty shell: it reports whether the package
- * holds device-owner status, registers itself as the persistent home activity, and
- * carries the escape hatch. Channels and Home get built on top of it later.
+ * Nexus — the ROAM home screen. It owns two separable jobs and keeps them separable:
+ *
+ * <ol>
+ *   <li><b>Device policy.</b> Device-owner status, the persistent home registration and
+ *       the escape hatch. All of it below, all of it unchanged from the shell version.
+ *   <li><b>Channels.</b> The actual UI, which lives entirely in
+ *       {@code com.roam.touch.channels} and is attached here in one line.
+ * </ol>
+ *
+ * <p>⚠️ This class extends {@code ComponentActivity} rather than {@code Activity} only
+ * because Compose needs a {@code LifecycleOwner} and a {@code SavedStateRegistryOwner}.
+ * The component name {@code com.roam.touch/.MainActivity} is unchanged, so neither the
+ * device-owner grant nor the pinned home activity is affected — both key on the name.
  *
  * <p><b>Not a kiosk.</b> The normal Android base stays: notification shade, Settings and
  * recents all remain reachable. No lock-task, no hidden launcher, no stripped SystemUI —
@@ -39,7 +50,7 @@ import android.widget.TextView;
  * Handling the intent in both entry points is what makes the command above work.
  * Do not "simplify" either of them away.
  */
-public class MainActivity extends Activity {
+public class MainActivity extends ComponentActivity {
 
     /** Boolean intent extra; when true, the app gives up device-owner status. */
     public static final String EXTRA_CLEAR_DEVICE_OWNER = "clear_device_owner";
@@ -48,6 +59,13 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         handleIntent(getIntent());
+
+        // The connection, the socket and the voice outlive this Activity: the launcher
+        // is torn down and rebuilt constantly, and an outcome landing while the screen
+        // is off still has to be heard. HubService owns all of it.
+        Roam.INSTANCE.init(this);
+        HubService.Companion.start(this);
+        ChannelsAppKt.installChannelsUi(this);
     }
 
     @Override
@@ -71,14 +89,8 @@ public class MainActivity extends Activity {
             setAsPersistentHome(dpm, pkg);
         }
 
-        TextView tv = new TextView(this);
-        tv.setText(owner ? "Nexus\ndevice owner: YES" : "Nexus\ndevice owner: no");
-        tv.setGravity(Gravity.CENTER);
-        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22);
-        tv.setTextColor(Color.WHITE);
-        tv.setBackgroundColor(Color.BLACK);
-        setContentView(tv);
-
+        // No longer painted on screen — the panel belongs to Channels. logcat is where
+        // this is checked from now on:  adb logcat -s RoamNexus
         Log.i(NexusDeviceAdminReceiver.TAG, "device owner = " + owner);
     }
 

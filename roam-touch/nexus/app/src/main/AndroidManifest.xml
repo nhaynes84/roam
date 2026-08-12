@@ -1,11 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!--
+      Tailscale is the only network this app uses, and the hub is plain HTTP on a
+      WireGuard-encrypted tailnet address (see HubConfig). INTERNET is the whole
+      network surface; there is no cleartext exception needed on API 29 because
+      usesCleartextTraffic defaults to true below targetSdk 28+... it does not, so it
+      is declared explicitly rather than left to a default nobody can recall.
+    -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- The panel has to come back after a reboot without anyone tapping anything. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
     <application
         android:allowBackup="false"
+        android:icon="@drawable/ic_launcher_roam"
         android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@android:style/Theme.DeviceDefault">
+        android:usesCleartextTraffic="true"
+        android:theme="@style/Theme.Roam">
 
         <!--
           singleTop is load-bearing, not cosmetic: a device-owner package cannot be
@@ -16,7 +31,9 @@
             android:name=".MainActivity"
             android:exported="true"
             android:label="@string/app_name"
-            android:launchMode="singleTop">
+            android:launchMode="singleTop"
+            android:theme="@style/Theme.Roam"
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -66,6 +83,25 @@
             <intent-filter>
                 <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
                 <action android:name="android.app.action.PROFILE_PROVISIONING_COMPLETE" />
+            </intent-filter>
+        </receiver>
+
+        <!--
+          Holds the hub socket and the voice while the panel is not on screen. Without
+          it the two things the wearer actually asked for — hear the outcome with the
+          screen off, and never mistake a dead link for a quiet one — both die at the
+          first doze window.
+        -->
+        <service
+            android:name=".channels.HubService"
+            android:exported="false" />
+
+        <receiver
+            android:name=".channels.BootReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
 

@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+#
+# roam-emu — the QA target for Channels.
+#
+# ★ The emulator is the DEFAULT test target. The Pixel is the owner's device: he wears
+#   it, he reads real channels on it, and an agent reinstalling an APK under him is an
+#   interruption, not a test. Use the Pixel only for final confirmation.
+#
+# Android 10 / API 29, arm64, so it matches sailfish and runs natively on Apple silicon
+# (no x86 translation — it is genuinely fast).
+#
+#   ./tools/roam-emu start        boot the AVD headless-ish and wait for it
+#   ./tools/roam-emu install      build the debug APK and install it on the emulator
+#   ./tools/roam-emu shot out.png screenshot the emulator
+#   ./tools/roam-emu logcat       follow the app's own log tags
+#   ./tools/roam-emu stop         shut the AVD down
+#   ./tools/roam-emu serial       print the adb serial, for `adb -s "$(…)" …`
+#
+# ⚠️ Neither JAVA_HOME nor the Android SDK is on PATH on talos by default. This script
+#    sets both; do not assume a bare `adb`/`emulator` works in an interactive shell.
+set -euo pipefail
+
+export JAVA_HOME="${JAVA_HOME:-/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home}"
+export ANDROID_HOME="${ANDROID_HOME:-/opt/homebrew/share/android-commandlinetools}"
+export ANDROID_SDK_ROOT="$ANDROID_HOME"
+PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
+
+AVD="${ROAM_AVD:-roam-api29}"
+PORT="${ROAM_EMU_PORT:-5560}"          # even port; the serial is emulator-<port>
+SERIAL="emulator-$PORT"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+serial() { echo "$SERIAL"; }
+
+running() { adb devices | grep -q "^$SERIAL[[:space:]]*device$"; }
+
+start() {
+  if running; then echo "$SERIAL already up"; return; fi
+  echo "booting $AVD on $SERIAL …"
+  # -no-snapshot-load: a cold boot every time, so a green run is never a stale image.
+  # -gpu swiftshader_indirect: reliable on headless/ssh sessions where there is no GL.
+  nohup "$ANDROID_HOME/emulator/emulator" -avd "$AVD" -port "$PORT" \
+      -no-snapshot-load -no-boot-anim -gpu swiftshader_indirect \
+      >/tmp/roam-emu.log 2>&1 &
+  adb wait-for-device
+  # wait-for-device returns at adbd, not at a usable home screen.
+  for _ in $(seq 1 120); do
+    [ "$(adb -s "$SERIAL" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ] && break
+    sleep 2
+  done
+  adb -s "$SERIAL" shell settings put global window_animation_scale 0 || true
+  adb -s "$SERIAL" shell settings put global transition_animation_scale 0 || true
+  adb -s "$SERIAL" shell settings put global animator_duration_scale 0 || true
+  echo "up: $SERIAL"
+}
+
+install() {
+  (cd "$HERE" && ./gradlew :app:assembleDebug -q)
+  adb -s "$SERIAL" install -r "$HERE/app/build/outputs/apk/debug/app-debug.apk"
+  # ⚠️ On the emulator Nexus is NOT device owner and NOT the home activity — it is an
+  # ordinary app, which is exactly what makes it a safe place to test. Launch it by name.
+  adb -s "$SERIAL" shell am start -n com.roam.touch/.MainActivity >/dev/null
+}
+
+case "${1:-start}" in
+  start)   start ;;
+  install) install ;;
+  shot)    adb -s "$SERIAL" exec-out screencap -p > "${2:-emu.png}"; echo "wrote ${2:-emu.png}" ;;
+  logcat)  adb -s "$SERIAL" logcat -s RoamNexus RoamChannels RoamTts AndroidRuntime ;;
+  stop)    adb -s "$SERIAL" emu kill || true ;;
+  serial)  serial ;;
+  *)       sed -n '2,25p' "${BASH_SOURCE[0]}"; exit 1 ;;
+esac
