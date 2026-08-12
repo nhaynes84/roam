@@ -30,6 +30,8 @@ OUT_W, OUT_L, OUT_H = 75.1, 147.0, 13.4
 POCK_W = 70.3
 HULL_HW, TEN_D, HULL_BELT = 40.0, 2.3, -2.0
 GUARD_H, GUARD_HW = 15.0, 41.5
+PACK_T, PACK_W, PACK_L = 10.0, 54.0, 85.6
+PACK_Z1, PACK_Z0 = -3.62, -14.02
 GZ1 = OUT_H + GUARD_H
 WIN_X, BEZEL_CHAM, LIP_H = 32.03, 1.5, 2.4
 SIGHT = BEZEL_CHAM / LIP_H
@@ -46,7 +48,7 @@ CARD_L, CARD_W, CARD_T = 85.60, 53.98, 0.76   # ISO/IEC 7810 ID-1
 # permanently red harness or quietly relaxing the shell's number too.
 MIN_WALL = 1.15
 MIN_WALL_PLUNGER = 0.8
-CAP_D, CAP_T = 10.0, 6.0
+CAP_D, CAP_T = 10.0, 12.0
 
 Z_FACE = FLOOR + POCK_D          # phone front face
 probes = [
@@ -79,63 +81,77 @@ probes = [
     ("hand-end wall, far side",      (-25.0, 145.8, FLOOR + 4), True),
     ("hand-end wall at centre",      (0.0, 145.8, FLOOR + 4), True),
     ("headphone jack notch",         (22.0, 145.8, FLOOR + 4), False),
-    ("elbow end open for insertion", (0, 1.0, FLOOR + 4), False),
+    ("USB end open for insertion",   (0, 1.0, FLOOR + 4), False),
     ("no hull above the belt line",  (39.0, 60.0, 6.0), False),
 
     # ------------------------------------------------------------ outer hull
     # ⚠️ Depths are asymmetric: TILT drops the +X side, so the same feature
     # sits at very different Z on each side. Probed, not assumed.
-    ("hull skin, deep flank",        (39.0, 60.0, -10.0), True),
-    ("outside the deep flank",       (42.0, 60.0, -10.0), False),
-    ("hull cavity, deep side",       (34.0, 60.0, -12.0), False),
-    ("hull cavity, over the arm",    (0.0, 60.0, -3.0), False),
-    ("arm-face skin under cavity",   (0.0, 60.0, -6.5), True),
-    ("arm void below the skin",      (0.0, 60.0, -9.5), False),
-    ("cavity open at the nose",      (0.0, 14.0, -4.0), False),
+    ("hull skin, deep flank",        (-39.0, 60.0, -20.0), True),
+    ("outside the deep flank",       (-44.0, 60.0, -20.0), False),
+    ("hull cavity, deep side",       (-34.0, 60.0, -25.0), False),
+    ("hull cavity, over the arm",    (0.0, 60.0, -18.0), False),
+    ("arm-face skin under cavity",   (0.0, 60.0, -21.5), True),
+    ("arm void below the skin",      (0.0, 60.0, -25.0), False),
+    ("cavity open at the nose",      (0.0, 14.0, -18.0), False),
+    # ★ Card ACCESS. The channel must open at the USB end, because that is
+    # the wrist -- the end his free hand reaches. If this ever reads solid
+    # the cards load from the elbow end and that is an ergonomic failure,
+    # not a naming one.
+    ("card channel opens at USB end", (0.0, -5.0, -1.0), False),
+    ("card stop is at the far end",  (0.0, 87.5, -1.0), True),
+    # ★ The power pack. Same C-rail pattern under the cards, loads from the
+    # USB end, cap retains it. If the mid probe reads solid the pocket has
+    # closed up and nothing buyable goes in the device.
+    ("pack pocket, mid",             (0.0, 45.0, -7.5), False),
+    ("pack pocket at its full width", (-26.0, 45.0, -7.5), False),
+    ("pack rail web",                (-30.0, 45.0, -7.5), True),
+    ("pack opens at the USB end",    (0.0, -5.0, -7.5), False),
+    ("pack stop at the far end",     (0.0, 89.0, -7.5), True),
+    ("cable slot through the floor", (35.0, 8.0, 1.0), False),
+    ("floor beside the cable slot",  (35.0, 25.0, 1.0), True),
 
     # ------------------------------------------------------- cap tenon
     # The nose steps IN by TEN_D below the belt so the cap's collar lands
     # flush. If the step is missing the cap stands proud again; if it is too
     # deep the collar rattles. Probed either side of the tenon's flank face.
-    ("tenon flank, deep side",       (37.2, 3.0, -8.0), True),
-    ("collar space outside tenon",   (39.0, 3.0, -8.0), False),
-    ("snap dimple in tenon flank",   (37.4, 7.0, -13.8), False),
-    ("full section above the belt",  (38.5, 3.0, -1.0), True),
+    ("tenon flank, deep side",       (-37.2, 3.0, -8.0), True),
+    ("collar space outside tenon",   (-39.0, 3.0, -8.0), False),
+    ("snap dimple in tenon flank",   (-37.4, 7.0, -22.95), False),
+    ("full section above the belt",  (-38.5, 3.0, -1.0), True),
 
     # ------------------------------------------------------- card slots
     ("card channel, mid",            (0.0, 40.0, -1.0), False),
     ("card channel at the nose",     (0.0, 2.0, -1.0), False),
     ("card rail web, deep side",     (29.5, 40.0, -1.0), True),
     ("card rail web, shallow side",  (-29.5, 40.0, -1.0), True),
-    ("card back stop",               (0.0, 87.5, -1.0), True),
     ("floor above the card channel", (0.0, 40.0, 1.0), True),
-    ("thick arm band under strap",   (0.0, 34.0, -4.0), True),
+    ("thick arm band under strap",   (0.0, 34.0, -20.0), True),
     # ------------------------------------------------- ribs and visor
     # The canted louvres are gone; these are the proud ribs that replaced them.
-    ("deep-flank rib",               (41.0, 60.0, -17.07), True),
-    ("cap chin is raked back",       (-4.0, 60.0, -20.0), False),
-    ("gap between the ribs",         (41.0, 60.0, -13.80), False),
-    ("nothing beyond the ribs",      (42.5, 60.0, -17.07), False),
+    ("deep-flank rib",               (-41.0, 60.0, -19.7), True),
+    ("gap between the ribs",         (-41.0, 60.0, -22.95), False),
+    ("nothing beyond the ribs",      (-44.0, 60.0, -19.7), False),
     # The high guard: three-sided, screen sunk deep inside it.
-    ("guard wall, shallow side",     (-39.0, 73.0, OUT_H + 6.0), True),
+    ("guard wall, deep/outboard",    (-39.0, 73.0, OUT_H + 6.0), True),
     ("guard wall near the crest",    (-38.5, 73.0, OUT_H + 13.0), True),
     ("screen well is open",          (0.0, 73.0, OUT_H + 6.0), False),
     # ★ THREE-sided. If this reads solid a guard has appeared on the deep
     # flank and the whole point of the section is gone.
-    ("deep flank has NO guard",      (39.0, 73.0, OUT_H + 6.0), False),
+    ("shallow flank has NO guard",   (39.0, 73.0, OUT_H + 6.0), False),
     ("scoop has cut the wall back",  (-34.5, 73.0, OUT_H + 6.0), False),
     ("...but not at its base",       (-34.5, 73.0, OUT_H + 0.4), True),
-    ("elbow brow",                   (0.0, 8.0, OUT_H + 3.0), True),
-    ("hand brow",                    (0.0, 145.0, OUT_H + 3.0), True),
-    ("crest ramps down at the hand", (-39.0, 144.0, OUT_H + 13.0), False),
-    ("crest ramps down at the elbow", (-39.0, 4.0, OUT_H + 13.0), False),
+    ("USB-end brow",                 (0.0, 8.0, OUT_H + 3.0), True),
+    ("jack brow",                    (0.0, 145.0, OUT_H + 3.0), True),
+    ("crest ramps down at the jack", (39.0, 144.0, OUT_H + 13.0), False),
+    ("crest ramps down at the USB",  (39.0, 4.0, OUT_H + 13.0), False),
     ("nothing above the crest",      (-39.0, 73.0, GZ1 + 1.0), False),
     # Strap runs in a channel under the hull instead of through side flanges,
     # so the device is tray-width. The bars bridge that channel.
-    ("strap channel is open, +X",    (14.0, 34, -13.7), False),
-    ("retaining bar fills it, +X",   (20.0, 34, -18.8), True),
-    ("strap channel is open, -X",    (-14.0, 34, -4.2), False),
-    ("retaining bar fills it, -X",   (-20.0, 34, -4.4), True),
+    ("strap channel is open, deep",  (-20.0, 34, -36.0), False),
+    ("retaining bar fills it, deep", (-14.0, 34, -30.0), True),
+    ("strap channel is open, shal",  (20.0, 34, -17.7), False),
+    ("retaining bar fills it, shal", (14.0, 34, -18.0), True),
 ]
 
 pts = np.array([p for _, p, _ in probes])
@@ -296,9 +312,9 @@ def classify(mid, part_name):
         if FLOOR + POCK_D - 1.5 < z < OUT_H + 0.3:
             return "sensor apertures + bezel loft (FROZEN)"
         if abs(y) < 0.3:
-            return "elbow mouth / cap joint"
+            return "USB-end mouth / cap joint"
         if abs(y - OUT_L) < 0.3:
-            return "hand end = the print bed"
+            return "jack end = the print bed"
         if 2.0 < z < OUT_H - 0.5 and abs(x) > 30.0:
             return "button bay + jack (FROZEN)"
         if z < -0.5 and abs(x) < 30.0:
@@ -318,8 +334,10 @@ def classify(mid, part_name):
             return "collar joint faces"
         if z < 0.0:
             return "hull section creases + chin rake"
-        if abs(y + CAP_T) < 0.3 and abs(x) < 30.0 and 0.0 < z < OUT_H:
-            return "USB trough / speaker mouths"
+        if abs(y + CAP_T) < 0.4:
+            return "cap face panel + speaker/mic mouths"
+        if -CAP_T < y < 0.5 and 0.0 < z < OUT_H:
+            return "internal cable pocket"
     return "UNCLASSIFIED"
 
 
@@ -363,7 +381,10 @@ for _nm, _mesh in (("bracer", _parts[0]), ("end cap", cap)):
     # geometry, not ours, and failing on it would just train us to ignore this.
     _sh = [(l, mid, a) for l, mid, a in sharp_exterior_edges(_mesh, deg=90.0)
            if "FROZEN" not in classify(mid, _nm)]
-    _worst = min(((180.0 - a, l, mid) for l, mid, a in _sh), default=None)
+    # ⚠️ key=, not a bare min. The tuples carry a numpy midpoint, so a tie on
+    # the angle makes min() compare arrays and raise.
+    _worst = min(((180.0 - a, l, mid) for l, mid, a in _sh),
+                 key=lambda r: r[0], default=None)
     if _worst is None:
         print(f"  ok    {_nm:<22} no crease under 90 deg included")
         continue
@@ -379,10 +400,11 @@ for _nm, _mesh in (("bracer", _parts[0]), ("end cap", cap)):
 # the viewing cone -- that is what a well IS. So measure the cone instead of
 # asserting it away: fire rays from just inside the display's near edge and
 # find the last angle that escapes the guard.
-# For reference the frozen bezel alone allows 32 deg; the guard is on the
-# SHALLOW flank, which is the side the eye sits on for a right-arm fit, so this
-# number is the one to argue about if the guard is ever on the wrong side.
-VIEW_MIN_DEG = 15.0
+# ★ Since 2026-08-12 the guard is on the DEEP, OUTBOARD flank and the eye side
+# is the open one. The number that matters is the EYE SIDE: it has to clear the
+# 32 deg the frozen bezel allows, otherwise the guard is costing him nothing to
+# look at. The guard-side number is just the shade depth.
+VIEW_MIN_DEG = 30.0   # the eye side must not be the limiting factor
 
 print("\n=== viewing cone off the display's near edge ===")
 _edge_x = -(WIN_X - 0.2)          # just inside the live area, guard side
@@ -394,10 +416,8 @@ for _d in np.arange(0.0, 70.0, 0.5):
     if _parts[0].ray.intersects_any(_o, _dir)[0]:
         break
     _best = _d
-_view_ok = _best >= VIEW_MIN_DEG
-bad += not _view_ok
-print(f"  {'ok  ' if _view_ok else 'FAIL'}  toward the guard  {_best:4.1f} deg "
-      f"(min {VIEW_MIN_DEG}; frozen bezel alone gives 32)")
+# The guard side is informational -- it is SUPPOSED to be shaded.
+print(f"        guard side (outboard, shaded)  {_best:4.1f} deg")
 _best2 = 0.0
 for _d in np.arange(0.0, 70.0, 0.5):
     _t = math.radians(_d)
@@ -406,7 +426,10 @@ for _d in np.arange(0.0, 70.0, 0.5):
     if _parts[0].ray.intersects_any(_o, _dir)[0]:
         break
     _best2 = _d
-print(f"        open (deep) flank  {_best2:4.1f} deg")
+_view_ok = _best2 >= VIEW_MIN_DEG
+bad += not _view_ok
+print(f"  {'ok  ' if _view_ok else 'FAIL'}  EYE SIDE (inboard, open)      {_best2:4.1f} deg "
+      f"(min {VIEW_MIN_DEG}; frozen bezel alone gives 32)")
 
 # ------------------------------------------------ end cap vs tray clearance
 # The cap has to slide the whole way on, not just fit once it is there. Sweep
@@ -439,8 +462,12 @@ orients = {
     # ⚠️ these two were labelled the wrong way round until 2026-08-12.
     # rotation_matrix(-pi/2, X) sends +Y to -Z, so it stands the part on its
     # HAND end. The docstring had been quoting the winner under the other name.
-    "standing on hand end":    trimesh.transformations.rotation_matrix(-math.pi/2, [1, 0, 0]),
-    "standing on elbow end":   trimesh.transformations.rotation_matrix(math.pi/2, [1, 0, 0]),
+    # ⚠️ Named by the FROZEN FEATURE at each end, not by anatomy. -pi/2 about
+    # X sends +Y to -Z, so it stands the part on Y=OUT_L -- the JACK end,
+    # which is the ELBOW as worn. This label has now been wrong twice in
+    # both directions; the feature name cannot be.
+    "standing on jack end (elbow)":  trimesh.transformations.rotation_matrix(-math.pi/2, [1, 0, 0]),
+    "standing on USB end (wrist)":   trimesh.transformations.rotation_matrix(math.pi/2, [1, 0, 0]),
     "on its side":             trimesh.transformations.rotation_matrix(math.pi/2, [0, 1, 0]),
 }
 for name, T in orients.items():
@@ -456,7 +483,7 @@ for name, T in orients.items():
     print(f"  {name:<26} unsupported {a[need].sum()/100:7.1f} cm2   "
           f"bed contact {bed_area/100:5.1f} cm2   "
           f"height {q.bounds[1][2]-zmin:5.1f} mm")
-    if name == "standing on hand end" and need.any():
+    if name.startswith("standing on jack") and need.any():
         # ★ Name the worst face, not just the total. "27 cm2 of overhang" is
         # not actionable; "the guard's hand ramp, 4.9 cm2 at 44 deg" is.
         _idx = np.argsort(-a * need)[:4]
