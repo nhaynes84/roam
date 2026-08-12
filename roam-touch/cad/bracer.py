@@ -102,6 +102,10 @@ PWR_SVG = (37.11, 46.01)                    # power button, y range, right edge
 VOL_SVG = (55.16, 72.91)                    # volume rocker, y range, right edge
 VENT_R = 6.0
 EPS = 0.1
+# ★ Owner's finishing pass, measured off RoamTouchModded.step: 1.5 mm chamfer
+# on every exterior edge. Do not lose this on the next regeneration -- it is
+# most of what makes the thing read as a designed object rather than a blank.
+CHAMFER = 1.5
 
 # --------------------------------------------------------------- derived
 POCK_L = PH_L + 2 * CLR
@@ -375,6 +379,41 @@ for _sx in (-1, 1):
         * Rot(0, -90 * _sx, 0) \
         * Cone(1.8, 0.9, CAP_W / 2 + 0.6,
                align=(Align.CENTER, Align.CENTER, Align.MIN))
+
+# ------------------------------------------------------- edge treatment
+# Chamfer the outer envelope only: edges lying on the side walls, the top
+# face or the underside. Feature edges (pocket, apertures, channel, plungers)
+# are deliberately left sharp -- chamfering those would eat clearances.
+def _on_envelope(e):
+    c = e.center()
+    return (abs(abs(c.X) - OUT_W / 2) < 0.02
+            or abs(c.Z) < 0.02
+            or abs(c.Z - OUT_H) < 0.02)
+
+# OCCT refuses the whole envelope in one operation (ValueError), so chamfer in
+# groups -- vertical corners, then the top rim, then the underside rim. Each
+# group is attempted independently so one awkward set cannot lose the others.
+_groups = {
+    "vertical corners": lambda e: abs(abs(e.center().X) - OUT_W / 2) < 0.02 and e.length > 50,
+    # Only the OUTER boundary of the top/bottom faces. Filtering on Z alone
+    # also catches the screen aperture and button openings, and OCCT refuses
+    # the mixed set outright.
+    "top rim":          lambda e: abs(e.center().Z - OUT_H) < 0.02 and (
+                            abs(abs(e.center().X) - OUT_W / 2) < 0.02
+                            or abs(e.center().Y - OUT_L) < 0.02),
+    "underside rim":    lambda e: abs(e.center().Z) < 0.02 and (
+                            abs(abs(e.center().X) - OUT_W / 2) < 0.02
+                            or abs(e.center().Y - OUT_L) < 0.02),
+}
+for _name, _pred in _groups.items():
+    _es = ShapeList([e for e in part.edges() if _pred(e)])
+    if not _es:
+        continue
+    try:
+        part = chamfer(_es, length=CHAMFER)
+        print(f"chamfer    {CHAMFER} mm on {len(_es):3d} edges  ({_name})")
+    except Exception as exc:
+        print(f"chamfer    SKIPPED {_name}: {type(exc).__name__}")
 
 # ----------------------------------------------------------------- export
 out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "out")
