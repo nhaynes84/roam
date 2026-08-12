@@ -9,6 +9,9 @@ import com.roam.touch.channels.Roam
 import com.roam.touch.channels.SendResult
 import com.roam.touch.channels.model.Event
 import com.roam.touch.channels.tts.Speaker
+import com.roam.touch.ha.HaHome
+import com.roam.touch.ha.HaRepository
+import com.roam.touch.ha.HaState
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
@@ -26,10 +29,37 @@ data class Toast(val text: String, val bad: Boolean)
 class ChannelsViewModel(
     private val repo: HubRepository = Roam.repository,
     private val speaker: Speaker = Roam.speaker,
+    /**
+     * ⚠️ Resolved lazily, unlike the two above. Every existing Channels test constructs
+     * this view model with its own fake hub and speaker and never touches Home
+     * Assistant; an eager `Roam.homeAssistant` default would make all of them fail on
+     * an uninitialised singleton, which is a test suite paying for a feature it does
+     * not use. App #2 is loaded when app #2 is opened.
+     */
+    haProvider: () -> HaRepository = { Roam.homeAssistant },
 ) : ViewModel() {
+
+    private val ha: HaRepository by lazy(haProvider)
 
     val state: StateFlow<ChannelsState> = repo.state
     val link: StateFlow<HubLink> = repo.link
+
+    /** App #2. See [com.roam.touch.channels.ui.HomeAssistantScreen]. */
+    val haHome: StateFlow<HaHome> get() = ha.home
+
+    fun refreshHa() {
+        viewModelScope.launch { ha.refresh() }
+    }
+
+    /**
+     * A tap on an entity tile. The repository owns the optimism (it has none — it waits
+     * for the states HA reports back), so this only surfaces the failure.
+     */
+    fun tapHa(entity: HaState) {
+        viewModelScope.launch {
+            ha.act(entity)?.let { toasts.send(Toast("${entity.friendlyName} — $it", bad = true)) }
+        }
+    }
 
     /**
      * Which message is being spoken, or null.
@@ -50,6 +80,11 @@ class ChannelsViewModel(
 
     private val toasts = Channel<Toast>(Channel.BUFFERED)
     val messages: Flow<Toast> = toasts.receiveAsFlow()
+
+    /** For failures the UI notices itself — a launcher tile that will not start. */
+    fun notify(text: String, bad: Boolean = true) {
+        viewModelScope.launch { toasts.send(Toast(text, bad)) }
+    }
 
     fun openThread(paneId: String) {
         viewModelScope.launch {

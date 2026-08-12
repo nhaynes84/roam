@@ -8,6 +8,10 @@ import com.roam.touch.channels.net.HubSocket
 import com.roam.touch.channels.tts.Speaker
 import com.roam.touch.channels.tts.TtsSpeaker
 import com.roam.touch.channels.tts.WyomingTts
+import com.roam.touch.ha.HaApi
+import com.roam.touch.ha.HaConfig
+import com.roam.touch.ha.HaEntities
+import com.roam.touch.ha.HaRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.plus
@@ -28,6 +32,13 @@ object Roam {
     lateinit var device: DeviceStateMonitor
         private set
     lateinit var speaker: Speaker
+        private set
+
+    /**
+     * App #2. Shares nothing with the hub but the process — different server, different
+     * token, different failure modes — so it gets its own repository and its own client.
+     */
+    lateinit var homeAssistant: HaRepository
         private set
 
     /** Long-lived, process scoped. Cancelled only when the process dies. */
@@ -56,6 +67,13 @@ object Roam {
             WyomingTts(BuildConfig.TTS_HOST, BuildConfig.TTS_PORT, BuildConfig.TTS_VOICE),
             scope,
         )
+
+        val haConfig = HaConfig(
+            baseUrl = BuildConfig.HA_URL,
+            token = BuildConfig.HA_TOKEN,
+            pinned = HaEntities.parsePinned(BuildConfig.HA_ENTITIES),
+        )
+        homeAssistant = HaRepository(HaApi(haConfig), haConfig)
     }
 
     /** True once [init] has run; guards the UI against a cold-start race. */

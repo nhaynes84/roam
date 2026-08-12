@@ -8,15 +8,21 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.ui.draw.clip
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -137,6 +143,81 @@ fun TypingEllipsis(
             )
         }
     }
+}
+
+/**
+ * ★ The way back to Channels, in the same place on every secondary screen.
+ *
+ * Channels is the app; everything else is a detour. The rule from the product thesis is
+ * that he must never be lost in a sub-screen on a device strapped to his arm, so the
+ * return is a tile-sized target in the top-left with the destination *named* — not a
+ * bare chevron he has to remember the meaning of, and not only the hardware Back key.
+ */
+@Composable
+fun BackToChannelsBar(
+    title: String,
+    onBack: () -> Unit,
+    trailing: @Composable (() -> Unit)? = null,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(RoamColors.Surface)
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(
+            Modifier
+                .clip(RoundedCornerShape(9.dp))
+                .clickable(onClick = onBack)
+                .background(RoamColors.SurfaceRaised)
+                .defaultMinSize(minHeight = 44.dp)
+                .padding(horizontal = 12.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(7.dp),
+        ) {
+            Icon(
+                imageVector = Icons.Filled.ArrowBack,
+                contentDescription = "back to channels",
+                tint = RoamColors.Attention,
+                modifier = Modifier.size(19.dp),
+            )
+            Text(
+                "CHANNELS",
+                style = androidx.compose.material3.MaterialTheme.typography.labelMedium,
+                color = RoamColors.Attention,
+            )
+        }
+        Text(
+            title,
+            style = androidx.compose.material3.MaterialTheme.typography.labelLarge,
+            color = RoamColors.TextSecondary,
+            modifier = Modifier.weight(1f),
+        )
+        trailing?.invoke()
+    }
+}
+
+/**
+ * A chip that is a button. Same shape language as [StateChip] — which is the point: he
+ * learns one visual rule, that a rounded outline with a word in it is a thing you press.
+ */
+@Composable
+fun ActionChip(
+    text: String,
+    color: Color,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    StateChip(
+        text = text,
+        color = color,
+        modifier = modifier
+            .clip(RoundedCornerShape(7.dp))
+            .clickable(onClick = onClick)
+            .defaultMinSize(minHeight = 34.dp),
+    )
 }
 
 /** A plain status dot for the states that are not animated. */

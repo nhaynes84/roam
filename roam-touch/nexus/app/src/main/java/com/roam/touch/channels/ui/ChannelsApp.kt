@@ -44,14 +44,25 @@ fun installChannelsUi(activity: ComponentActivity) {
     }
 }
 
+/**
+ * Where the panel is.
+ *
+ * ★ [Channels] is home and everything else is a detour with one obvious way back — see
+ * [BackToChannelsBar]. There is no nav stack and no navigation library, because there
+ * are three destinations and a wearer who must never be lost in one of them.
+ */
+enum class Screen { Channels, Apps, HomeAssistant }
+
 @Composable
 fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
     val state by vm.state.collectAsStateWithLifecycle()
     val link by vm.link.collectAsStateWithLifecycle()
     val battery by Roam.device.battery.collectAsStateWithLifecycle()
     val speakingEventId by vm.speakingEventId.collectAsStateWithLifecycle()
+    val haHome by vm.haHome.collectAsStateWithLifecycle()
     val nowMs = rememberTicker()
 
+    var screen by remember { mutableStateOf(Screen.Channels) }
     var openPane by remember { mutableStateOf<String?>(null) }
     var toast by remember { mutableStateOf<Toast?>(null) }
 
@@ -79,7 +90,19 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
         if (link.isOnline) openPane?.let { vm.refreshThread(it) }
     }
 
-    BackHandler(enabled = openPane != null) { openPane = null; vm.stopSpeaking() }
+    // Ask HA the moment that screen is opened, not at process start: a token-less or
+    // unreachable server must not cost anything on a device whose main job is Channels.
+    LaunchedEffect(screen) {
+        if (screen == Screen.HomeAssistant) vm.refreshHa()
+    }
+
+    // Back always unwinds toward Channels, in one step, from anywhere.
+    BackHandler(enabled = openPane != null || screen != Screen.Channels) {
+        when {
+            openPane != null -> { openPane = null; vm.stopSpeaking() }
+            else -> screen = Screen.Channels
+        }
+    }
 
     Box(Modifier.fillMaxSize()) {
         if (channel != null) {
@@ -101,13 +124,28 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
             Box(Modifier.fillMaxWidth().align(Alignment.TopCenter)) {
                 if (!link.isOnline) LinkBanner(link, nowMs)
             }
-        } else {
-            ChannelListScreen(
+        } else when (screen) {
+            Screen.Channels -> ChannelListScreen(
                 state = state,
                 link = link,
                 battery = battery,
                 nowMs = nowMs,
                 onOpen = { openPane = it.paneId; vm.openThread(it.paneId) },
+                onOpenApps = { screen = Screen.Apps },
+                onOpenHomeAssistant = { screen = Screen.HomeAssistant },
+            )
+
+            Screen.Apps -> AppsScreen(
+                onBack = { screen = Screen.Channels },
+                onOpenHomeAssistant = { screen = Screen.HomeAssistant },
+                onMessage = { vm.notify(it) },
+            )
+
+            Screen.HomeAssistant -> HomeAssistantScreen(
+                home = haHome,
+                onBack = { screen = Screen.Channels },
+                onRefresh = vm::refreshHa,
+                onTap = vm::tapHa,
             )
         }
 

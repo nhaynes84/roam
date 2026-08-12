@@ -52,13 +52,15 @@ fun ChannelListScreen(
     battery: BatteryState,
     nowMs: Long,
     onOpen: (Channel) -> Unit,
+    onOpenApps: () -> Unit,
+    onOpenHomeAssistant: () -> Unit,
 ) {
     Column(
         Modifier
             .fillMaxSize()
             .background(RoamColors.Background)
     ) {
-        ListTopBar(state, battery)
+        ListTopBar(state, battery, onOpenApps, onOpenHomeAssistant)
         LinkBanner(link, nowMs)
 
         val ordered = Queue.order(state, nowMs)
@@ -80,10 +82,19 @@ fun ChannelListScreen(
     }
 }
 
+/**
+ * ★ Channels keeps the title; the two doors off it are chips, and they are small.
+ *
+ * HA gets its own chip rather than living one level down under APPS because it is the
+ * thing he reaches for while walking past a light switch — two taps to turn a lamp off
+ * is one tap too many. Everything else is behind APPS, where it belongs.
+ */
 @Composable
 private fun ListTopBar(
     state: ChannelsState,
     battery: BatteryState,
+    onOpenApps: () -> Unit,
+    onOpenHomeAssistant: () -> Unit,
 ) {
     Row(
         Modifier
@@ -91,6 +102,7 @@ private fun ListTopBar(
             .background(RoamColors.Surface)
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
     ) {
         Text(
             "CHANNELS",
@@ -99,10 +111,12 @@ private fun ListTopBar(
         )
         val unread = state.totalUnread()
         if (unread > 0) {
-            Spacer(Modifier.width(9.dp))
+            Spacer(Modifier.width(2.dp))
             UnreadBadge(unread)
         }
         Spacer(Modifier.weight(1f))
+        ActionChip("HA", RoamColors.Attention, onClick = onOpenHomeAssistant)
+        ActionChip("APPS", RoamColors.TextSecondary, onClick = onOpenApps)
         // No voice-mode control here. The app never speaks unless he taps play on a
         // specific message, so there is no mode to be in.
         BatteryChip(battery)
