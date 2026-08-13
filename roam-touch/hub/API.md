@@ -519,10 +519,23 @@ stop notifying me"** — first-class, not a later special case.
   Pick a TTL a few times your refresh interval so a crash lapses quickly.
 * Returns `{"source": …, "presence": <snapshot>}` and pushes a `presence` frame.
 
-**Recommended client behaviour**: `POST` with `covers_all: true` on foreground and
-every ~30 s while foregrounded; `DELETE /presence/{source}` on background. Sending
-a message already moves that channel to `app`, so this is only for the case where
-he is watching without typing.
+**Recommended client behaviour**: `POST` with **`panes: [<the channel actually on
+screen>]`** on foreground, again whenever that changes, and every ~30 s while
+foregrounded; `DELETE /presence/{source}` on background. Sending a message already
+moves that channel to `app`, so this is only for the case where he is watching
+without typing.
+
+> ⚠️⚠️ **Do not send `covers_all: true` from a client with a screen.** This section
+> recommended exactly that, and ROAM Touch followed it: the app claimed it covered
+> every channel at once, the hub correctly concluded nothing was worth interrupting
+> the wearer for, and **his arm went silent for a day**. The buzz path was never
+> broken — it was never asked to run, and the only symptom was an absence, which is
+> the hardest kind of bug to notice.
+>
+> `covers_all` means *"I am showing the wearer everything, all of it, right now."*
+> Almost nothing is. A client showing one channel covers **one** channel; a client
+> on a list or a settings screen covers **none**. The owner's rule: *"haptic and buzz
+> when I'm actually on that device, and I'm not in the active channel at the time."*
 
 ### `DELETE /presence/{source}`
 
