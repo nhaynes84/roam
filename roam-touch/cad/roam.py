@@ -96,11 +96,17 @@ TUBE_BORE_R = PACK_D / 2 + PACK_CLR        # 14.70
 TUBE_R = TUBE_BORE_R + TUBE_WALL           # 17.20
 TUBE_LEN = PACK_L + 5.0                    # end clearance for the lead
 
-# ⚠️ X is set by the pocket, not by looks: the bore may not eat the tray wall.
-# Minimum is pocket edge + a real wall + bore radius. This leaves 2.65 mm
-# between the phone pocket and the pack bore, and overlaps the tray's outer
-# face by 2.25 mm so the two fuse on a face rather than kiss on a tangent line.
-TUBE_X = 52.5
+# ⚠️⚠️ NEGATIVE X, and that is not a style choice — it is the only side free.
+# The power and volume plungers live in the +X wall and stand BTN_PROUD past it;
+# the jack notch is in the +X quartile of the top edge too. A tube on that side
+# buries all three. Worn on his RIGHT arm, this also puts the tall element on
+# the outboard edge, away from his torso when the arm comes across to read.
+#
+# ⚠️ Magnitude is set by the pocket, not by looks: the bore may not eat the tray
+# wall. Minimum is pocket edge + a real wall + bore radius. This leaves 2.65 mm
+# between the phone pocket and the pack bore, and overlaps the tray's outer face
+# so the two fuse across a face rather than kissing on a tangent line.
+TUBE_X = -52.5
 TUBE_Z = TUBE_R            # sits on the same flat base plane as the tray
 
 # --------------------------------------------------------------- derived
@@ -264,11 +270,8 @@ def pack_tube() -> Part:
     # read: "you should see most of the tube shape". Its upper two thirds stay
     # a bare cylinder; only the dead space underneath becomes structure — which
     # the flat base wanted anyway, for the sleeve to mount to.
-    web = Pos(0, 0, 0) * Box(
-        TUBE_X - POCK_W / 2 - WALL, TUBE_LEN, TUBE_Z - 8.5,
-        align=(Align.MIN, Align.MIN, Align.MIN))
-    web = Pos(POCK_W / 2 + WALL, 0, 0) * Box(
-        TUBE_X - POCK_W / 2 - WALL, TUBE_LEN, 8.7,
+    web = Pos(TUBE_X, 0, 0) * Box(
+        abs(TUBE_X) - POCK_W / 2 - WALL, TUBE_LEN, 8.7,
         align=(Align.MIN, Align.MIN, Align.MIN))
     return (tube + web) - bore
 
@@ -304,7 +307,9 @@ if __name__ == "__main__":
     sx0, sy0, sx1, sy1 = face_rect(SCREEN_SVG)
     print(f"  pack tube  bore d{2 * TUBE_BORE_R:.1f} x {TUBE_LEN:.1f} long, "
           f"OD {2 * TUBE_R:.1f}, centre X {TUBE_X:.1f}")
-    print(f"             pocket wall to bore  {TUBE_X - TUBE_BORE_R - POCK_W / 2:.2f} mm")
+    print(f"             pocket wall to bore  "
+          f"{abs(TUBE_X) - TUBE_BORE_R - POCK_W / 2:.2f} mm  (tube on -X, "
+          f"opposite the buttons)")
     print(f"             stands {2 * TUBE_R - OUT_H:+.1f} mm proud of the tray face")
     print(f"  screen ap. {sx1 - sx0:.1f} x {sy1 - sy0:.1f} "
           f"(margins L/R {fx(SCREEN_SVG[0]) + PH_W / 2:.2f} / "
