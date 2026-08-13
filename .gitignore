@@ -19,3 +19,6 @@ roam-touch/hub/*.sqlite
 roam-touch/hub/*.sqlite-wal
 roam-touch/hub/*.sqlite-shm
 .pytest_cache/
+
+# Per-agent worktrees (EnterWorktree / manual `git worktree add`)
+.claude/worktrees/
