@@ -253,6 +253,35 @@ class ControlRouterTest {
         assertEquals("volume up", volumeUp.label)
     }
 
+    /**
+     * ★★ **The whole loop on the earbud.** Owner: *"when I'm using earbuds, I don't have
+     * to click the phone. I could just do, like, double or triple tap."* Headset firmware
+     * already collapses a double tap into MEDIA_NEXT before Android sees it, so binding
+     * send to that is the whole feature.
+     */
+    @Test
+    fun `a double tap can be bound to send`() {
+        profile(tap to ControlAction.PUSH_TO_TALK, next to ControlAction.SEND)
+
+        assertEquals(ControlDecision.Consumed, down(KeyEvent.KEYCODE_MEDIA_NEXT))
+        assertEquals(
+            ControlDecision.Perform(ControlAction.SEND),
+            up(KeyEvent.KEYCODE_MEDIA_NEXT),
+        )
+    }
+
+    /** ⚠️ And binding send must not disturb the tap that opens the microphone. */
+    @Test
+    fun `send and push to talk coexist on different gestures`() {
+        profile(tap to ControlAction.PUSH_TO_TALK, next to ControlAction.SEND)
+
+        down(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
+        assertEquals(
+            ControlDecision.Perform(ControlAction.PUSH_TO_TALK),
+            up(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE),
+        )
+    }
+
     // --- ⚠️⚠️ the keycode Android decided to send us this time ----------------
 
     /**

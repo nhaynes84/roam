@@ -71,11 +71,17 @@ class ControlsScreenTest {
 
         compose.onNodeWithText("push to talk").assertIsDisplayed()
         compose.onNodeWithText("tap").assertIsDisplayed()
-        compose.onNodeWithText("next channel").assertIsDisplayed()
-        compose.onNodeWithText("previous channel").assertIsDisplayed()
-        compose.onNodeWithText("cancel").assertIsDisplayed()
-        // Three of the four actions are unbound, and each says so.
-        assertEquals(3, compose.onAllNodes(hasText("not bound")).fetchSemanticsNodes().size)
+        compose.onNodeWithText("send").assertExists()
+        compose.onNodeWithText("next channel").assertExists()
+        compose.onNodeWithText("previous channel").assertExists()
+        // ⚠️ `assertExists`, not `assertIsDisplayed`, from here down: SEND made a fifth
+        // action and the list now runs past the bottom of a 411 dp landscape window. It
+        // is scrollable, so this still asserts every action is offered — but the screen
+        // has quietly become one he has to scroll, which is worth knowing on a device
+        // he reads at arm's length.
+        compose.onNodeWithText("cancel").assertExists()
+        // Four of the five actions are unbound, and each says so.
+        assertEquals(4, compose.onAllNodes(hasText("not bound")).fetchSemanticsNodes().size)
     }
 
     /** ★★ One binding, changed in place — no wizard to walk. */

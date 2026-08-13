@@ -90,6 +90,20 @@ enum class ControlAction(val label: String) {
      * entering LISTENING are what stop it from being open *unnoticed*.
      */
     PUSH_TO_TALK("push to talk"),
+
+    /**
+     * ★★ **Send the transcript, without touching the phone.**
+     *
+     * Owner: *"I need a push-to-talk mapping option for send. So when I'm using earbuds,
+     * I don't have to click the phone. I could just do, like, double or triple tap."*
+     * Bind it to a double tap and the whole loop — talk, stop, send — happens on the
+     * earbud, which is the entire point of a device you are not sitting in front of.
+     *
+     * ⚠️ Does nothing unless there is a transcript waiting. It is the confirm step, not a
+     * shortcut past it: the words and their destination are still shown and still have to
+     * be agreed to, they just get agreed to from an earbud.
+     */
+    SEND("send"),
     NEXT_CHANNEL("next channel"),
     PREVIOUS_CHANNEL("previous channel"),
     CANCEL("cancel"),

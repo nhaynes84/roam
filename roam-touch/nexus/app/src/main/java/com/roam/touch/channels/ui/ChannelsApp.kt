@@ -240,6 +240,13 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
 
             override fun pushToTalkStop() = vm.pttRelease()
 
+            /**
+             * ⚠️ The same confirm the SEND button performs — not a bypass of it. The
+             * transcript and its destination are on screen either way; this only means he
+             * does not have to reach the screen to agree.
+             */
+            override fun send() = vm.pttConfirm()
+
             override fun nextChannel() = step(+1)
             override fun previousChannel() = step(-1)
 

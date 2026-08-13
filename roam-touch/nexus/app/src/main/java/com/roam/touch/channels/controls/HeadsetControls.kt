@@ -44,6 +44,9 @@ interface ControlSurface {
     /** Release. Ends the recording and goes to the confirm step. */
     fun pushToTalkStop()
 
+    /** Confirm and send the pending transcript. No-op when there is not one. */
+    fun send()
+
     fun nextChannel()
     fun previousChannel()
     fun cancel()
@@ -230,6 +233,7 @@ class HeadsetControls(
         }
         when (action) {
             ControlAction.PUSH_TO_TALK -> target.pushToTalkToggle()
+            ControlAction.SEND -> target.send()
             ControlAction.NEXT_CHANNEL -> target.nextChannel()
             ControlAction.PREVIOUS_CHANNEL -> target.previousChannel()
             ControlAction.CANCEL -> target.cancel()
