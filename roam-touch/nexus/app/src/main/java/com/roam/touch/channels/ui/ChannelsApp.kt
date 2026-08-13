@@ -24,6 +24,8 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.SaveableStateHolder
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -103,6 +105,9 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
     // `LazyColumn` item, so scrolling the card off screen disposed it and silently
     // collapsed the answer. Nothing in the list can reach this.
     var readingEventId by rememberSaveable { mutableStateOf<Long?>(null) }
+
+    // ★ Where he was in each open thread. See [rememberThreadPlaces].
+    val threadPlaces = rememberThreadPlaces(openPane)
 
     // --- the headset as a control surface ---------------------------------
     val controls = Roam.controls
@@ -375,6 +380,19 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
                 Screen.Channels -> Unit // unreachable: guarded by the branch condition
             }
         } else if (channel != null) {
+            // ★★ **Coming back from the reader must land him where he left, not at the
+            // newest message.** The reader is drawn *instead of* the thread, so the
+            // thread is disposed and everything it remembered — scroll position, whether
+            // it had settled — went with it; on the way back it called itself freshly
+            // opened and jumped to the bottom. He walked into the reader from somewhere
+            // and got returned somewhere else.
+            //
+            // ⚠️ Keyed on the pane, and dropped when he leaves it (below), so *opening* a
+            // channel still lands on the newest message. That half is his too: *"when i
+            // enter and receive messages, it doesn't autoscroll to the latest message,
+            // bad experience."* Both halves are the same rule — put him where he was
+            // going, and a channel he opens is a channel he opens at the end.
+            threadPlaces.SaveableStateProvider(channel.paneId) {
             ThreadScreen(
                 shell = shell,
                 state = state,
@@ -407,6 +425,7 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
                 onPttCancel = vm::pttCancel,
                 onPttDismiss = vm::pttDismiss,
             )
+            }
         } else {
             // Nothing open and no detour: the list itself, or the prompt to pick from it.
             // ⚠️ In Wide the queue is already in the rail, so re-drawing it here would be
@@ -517,4 +536,35 @@ fun rememberTicker(periodMs: Long = 1_000): Long {
         }
     }
     return now
+}
+
+/**
+ * ★★ **His place in a thread, kept while the thread is covered and released when he
+ * leaves it.**
+ *
+ * Two halves of one rule, and they pull in opposite directions, which is why they live
+ * together here rather than being maintained at the places navigation happens:
+ *
+ * - **Covered** — the reader, or a detour — is still being in the conversation. The
+ *   reader is drawn *instead of* the thread, so the thread is disposed and everything it
+ *   remembered goes with it; without this he walked into a message and got returned to
+ *   the bottom of the thread. A [SaveableStateHolder] hands that state back on the way in.
+ * - **Left** is not. Opening a channel lands on the newest message — his own complaint,
+ *   from the other direction: *"when i enter and receive messages, it doesn't autoscroll
+ *   to the latest message, bad experience."* So the place is dropped when the pane
+ *   closes, and the next open is an open.
+ *
+ * ⚠️ The release runs from a [LaunchedEffect] rather than an `onDispose`, so it happens
+ * after the thread has left the composition and written its state into the holder —
+ * removing it first would remove nothing and then be overwritten.
+ */
+@Composable
+fun rememberThreadPlaces(openPane: String?): SaveableStateHolder {
+    val places = rememberSaveableStateHolder()
+    var last by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(openPane) {
+        last?.takeIf { it != openPane }?.let(places::removeState)
+        last = openPane
+    }
+    return places
 }

@@ -45,6 +45,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -139,7 +140,7 @@ fun ThreadScreen(
     // than the window, which is most of them — see [ThreadFollow.isFollowing]. This is the
     // signal that actually means "he has taken over": a drag he started, not a scroll
     // position our own `animateScrollToItem` also produces.
-    var dragged by remember(channel.paneId) { mutableStateOf(false) }
+    var dragged by rememberSaveable(channel.paneId) { mutableStateOf(false) }
     LaunchedEffect(listState, channel.paneId) {
         listState.interactionSource.interactions.collect { interaction ->
             if (interaction is DragInteraction.Start) dragged = true
@@ -148,7 +149,7 @@ fun ThreadScreen(
     val following by remember { derivedStateOf { ThreadFollow.isFollowing(dragged, atTail) } }
 
     // Something landed while he was reading further up. Not silent — see the chip below.
-    var newBelow by remember(channel.paneId) { mutableStateOf(false) }
+    var newBelow by rememberSaveable(channel.paneId) { mutableStateOf(false) }
     LaunchedEffect(following) { if (following) newBelow = false }
 
     // ★★ The one place the thread moves itself, and the decision behind it is pure — see
@@ -159,8 +160,14 @@ fun ThreadScreen(
     // already on screen: the last id never changes, the list grows by thirty rows, and an
     // index that meant "the bottom" now means "near the top". Without the size in the key
     // that is invisible, and it is the state he opens a busy channel into.
-    var settled by remember(channel.paneId) { mutableStateOf(false) }
-    var seenLastId by remember(channel.paneId) { mutableStateOf<Long?>(null) }
+    // ⚠️⚠️ `rememberSaveable`, all four of these, and that is load-bearing rather than
+    // tidy. `ChannelsApp` keeps this screen's state alive while it is covered — the
+    // reader is drawn *instead of* the thread, so the thread is disposed — and a
+    // `SaveableStateHolder` can only restore what was saveable. Left as plain `remember`,
+    // `settled` came back false, the thread called itself freshly opened and jumped to
+    // the newest message, and he lost the place he had walked into the reader from.
+    var settled by rememberSaveable(channel.paneId) { mutableStateOf(false) }
+    var seenLastId by rememberSaveable(channel.paneId) { mutableStateOf<Long?>(null) }
     val lastId = entries.lastOrNull()?.id
 
     LaunchedEffect(channel.paneId, lastId, entries.size) {
