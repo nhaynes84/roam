@@ -91,6 +91,7 @@ class LandscapeLayoutTest {
                         onInterrupt = {},
                         onKill = {},
                         onPttPress = {},
+                        onPttRedo = {},
                         onPttRelease = {},
                         onPttSend = {},
                         onPttCancel = {},

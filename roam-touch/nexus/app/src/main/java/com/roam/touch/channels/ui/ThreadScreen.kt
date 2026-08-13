@@ -105,6 +105,8 @@ fun ThreadScreen(
     onInterrupt: () -> Unit,
     onKill: () -> Unit,
     onPttPress: (PttTarget) -> Unit,
+    /** ⚠️ HOLD TO REDO only — the one press that discards what he already said. */
+    onPttRedo: (PttTarget) -> Unit,
     onPttRelease: () -> Unit,
     onPttSend: () -> Unit,
     onPttCancel: () -> Unit,
@@ -264,6 +266,7 @@ fun ThreadScreen(
             targetLive = channel.live,
             nowMs = nowMs,
             onPress = onPttPress,
+            onRedoPress = onPttRedo,
             onRelease = onPttRelease,
             onSend = onPttSend,
             onCancel = onPttCancel,

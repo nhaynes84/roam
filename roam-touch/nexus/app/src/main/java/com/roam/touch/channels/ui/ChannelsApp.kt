@@ -357,7 +357,8 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
                 // ★ The permission check is here, in front of the press, not inside
                 // the recorder: a dialog that appears *after* he has already started
                 // talking loses the sentence and teaches him the mic is unreliable.
-                onPttPress = { target -> requestMic(target) },
+                onPttPress = { target -> requestMic(target, false) },
+                onPttRedo = { target -> requestMic(target, true) },
                 onPttRelease = vm::pttRelease,
                 onPttSend = vm::pttConfirm,
                 onPttCancel = vm::pttCancel,
@@ -431,7 +432,7 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
  * automatic speech deleted, applied to the input side where it matters more.
  */
 @Composable
-private fun rememberMicPermission(vm: ChannelsViewModel): (PttTarget) -> Unit {
+private fun rememberMicPermission(vm: ChannelsViewModel): (PttTarget, Boolean) -> Unit {
     val context = androidx.compose.ui.platform.LocalContext.current
     val launcher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -443,11 +444,13 @@ private fun rememberMicPermission(vm: ChannelsViewModel): (PttTarget) -> Unit {
         )
     }
     return remember(context, launcher) {
-        { target ->
+        { target, redo ->
             val granted = ContextCompat.checkSelfPermission(
                 context, Manifest.permission.RECORD_AUDIO
             ) == PackageManager.PERMISSION_GRANTED
-            if (granted) vm.pttPress(target)
+            // ⚠️ `redo` is the only press that discards what he already said — see
+            // [Ptt.press]. Everything else continues the transcript.
+            if (granted) { if (redo) vm.pttRedo(target) else vm.pttPress(target) }
             else launcher.launch(Manifest.permission.RECORD_AUDIO)
         }
     }

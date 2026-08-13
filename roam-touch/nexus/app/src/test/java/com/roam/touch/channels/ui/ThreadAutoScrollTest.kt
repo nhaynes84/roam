@@ -97,6 +97,7 @@ class ThreadAutoScrollTest {
                     onInterrupt = {},
                     onKill = {},
                     onPttPress = {},
+                        onPttRedo = {},
                     onPttRelease = {},
                     onPttSend = {},
                     onPttCancel = {},

@@ -198,6 +198,8 @@ fun PttPanel(
     targetLive: Boolean,
     nowMs: Long,
     onPress: (PttTarget) -> Unit,
+    /** ⚠️ Separate from [onPress] on purpose — this is the only control that replaces. */
+    onRedoPress: (PttTarget) -> Unit,
     onRelease: () -> Unit,
     onSend: () -> Unit,
     onCancel: () -> Unit,
@@ -339,7 +341,7 @@ fun PttPanel(
                         text = "HOLD TO REDO",
                         color = RoamColors.Quiet,
                         target = state.target,
-                        onPress = onPress,
+                        onPress = onRedoPress,
                         onRelease = onRelease,
                         modifier = Modifier.weight(1f),
                     )

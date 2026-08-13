@@ -172,10 +172,13 @@ class PttTest {
      * reached `Listening` yet. That is real behaviour, not a test artifact: the wearer
      * sees `Connecting` first.
      */
-    private fun Ptt.hold(target: PttTarget) {
-        press(target)
+    private fun Ptt.hold(target: PttTarget, append: Boolean = true) {
+        press(target, append)
         dispatcher.scheduler.runCurrent()
     }
+
+    /** HOLD TO REDO — the one press that discards the transcript. See [Ptt.press]. */
+    private fun Ptt.redo(target: PttTarget) = hold(target, append = false)
 
     // --- the happy path -----------------------------------------------------
 
@@ -471,11 +474,50 @@ class PttTest {
         ptt.hold(augment); ptt.release(); advanceUntilIdle()
 
         stt.reply = "run the tests and deploy"
+        ptt.redo(augment); ptt.release(); advanceUntilIdle()
+        assertEquals(
+            PttState.Confirming(augment, "run the tests and deploy"),
+            ptt.state.value,
+        )
+    }
+
+    /**
+     * ★★ **Talking again continues the sentence.** Owner: *"if I'm talking and then I tap
+     * to stop and then I tap to talk again, it should be appended, not overwritten."*
+     * Dictation on a worn device is not one clean take — he stops to think, or because
+     * someone spoke to him, and the second burst is the rest of the same thought.
+     */
+    @Test
+    fun `talking again appends to the pending transcript`() = runTest(dispatcher) {
+        val rec = mic()
+        val stt = FakeStt("run the tests")
+        val ptt = newPtt(rec, stt, scope)
+        ptt.hold(augment); ptt.release(); advanceUntilIdle()
+
+        stt.reply = "and deploy"
         ptt.hold(augment); ptt.release(); advanceUntilIdle()
         assertEquals(
             PttState.Confirming(augment, "run the tests and deploy"),
             ptt.state.value,
         )
+    }
+
+    /**
+     * ⚠️ But never across channels. A burst aimed at another pane is a new message, not
+     * the back half of the last one — joining them would put words into a conversation he
+     * never said them to.
+     */
+    @Test
+    fun `talking to a different channel does not append`() = runTest(dispatcher) {
+        val rec = mic()
+        val stt = FakeStt("run the tests")
+        val ptt = newPtt(rec, stt, scope)
+        ptt.hold(augment); ptt.release(); advanceUntilIdle()
+
+        val other = PttTarget("%9", "◑ something else")
+        stt.reply = "and deploy"
+        ptt.hold(other); ptt.release(); advanceUntilIdle()
+        assertEquals(PttState.Confirming(other, "and deploy"), ptt.state.value)
     }
 
     /**

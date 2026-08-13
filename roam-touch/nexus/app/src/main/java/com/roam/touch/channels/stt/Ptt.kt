@@ -145,6 +145,13 @@ class Ptt(
     private var replacing: PttState.Confirming? = null
 
     /**
+     * What a continuing press is carrying forward — see [press]'s `append`. Held only for
+     * the life of one attempt; a failure falls back through [replacing] instead, which
+     * already has the whole text on it.
+     */
+    private var carried: String? = null
+
+    /**
      * ⚠️⚠️ **Every state transition happens under this, and it is not optional.**
      *
      * A press is asynchronous now — it brings the headset link up on a coroutine before it
@@ -194,7 +201,23 @@ class Ptt(
      * Ignored while transcribing or sending, where there is already a thumb-up in
      * flight and a second recording would race it.
      */
-    fun press(target: PttTarget) {
+    /**
+     * ★★ [append] — **keep what he already said.**
+     *
+     * Owner: *"if I'm talking and then I tap to stop and then I tap to talk again, it
+     * should be appended, not overwritten."* Dictation on a worn device is not one clean
+     * take; he stops to think, or to listen to someone, and the second burst is the rest
+     * of the same sentence. Overwriting threw the first half away.
+     *
+     * ⚠️ False only for **HOLD TO REDO**, which is the one control whose whole purpose is
+     * to replace. Everything else — the composer mic, the headset tap — continues.
+     *
+     * ⚠️ Appending is refused across channels. A burst aimed at a different pane is a new
+     * message, not the back half of the last one, and joining them would put words in a
+     * channel he never said them to.
+     */
+    @JvmOverloads
+    fun press(target: PttTarget, append: Boolean = true) {
         val press = synchronized(lock) {
             when (val current = _state.value) {
                 is PttState.Connecting, is PttState.Listening,
@@ -208,6 +231,10 @@ class Ptt(
             work?.cancel()
             work = null
             replacing = _state.value as? PttState.Confirming
+            carried = replacing
+                ?.takeIf { append && it.target.paneId == target.paneId }
+                ?.transcript
+                ?.takeIf { it.isNotBlank() }
 
             // ⚠️⚠️ Asked *before* anything opens, so a headset-less press costs him
             // nothing and tells him the one thing he can act on. Opening the handset mic
@@ -298,7 +325,7 @@ class Ptt(
     fun toggle(target: PttTarget) = synchronized(lock) {
         when (_state.value) {
             is PttState.Connecting, is PttState.Listening -> release()
-            else -> press(target)
+            else -> press(target, append = true)
         }
     }
 
@@ -474,7 +501,10 @@ class Ptt(
                 fail(NOTHING_HEARD)
             } else {
                 replacing = null
-                _state.value = PttState.Confirming(target, text)
+                // ★ Joined with a space, in the order he said them.
+                val whole = carried?.let { "${it.trimEnd()} ${text.trim()}" } ?: text
+                carried = null
+                _state.value = PttState.Confirming(target, whole)
             }
         }
     }

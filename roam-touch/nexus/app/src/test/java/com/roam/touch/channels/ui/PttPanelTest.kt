@@ -51,6 +51,7 @@ class PttPanelTest {
                     targetLive = live,
                     nowMs = 12_000L,
                     onPress = {},
+                    onRedoPress = {},
                     onRelease = {},
                     onSend = { sends++ },
                     onCancel = { cancels++ },

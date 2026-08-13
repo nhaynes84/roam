@@ -111,6 +111,10 @@ class PttHoldTest {
                     targetLive = true,
                     nowMs = 1_000L + churn.intValue,
                     onPress = { presses++ },
+                    // ⚠️ HOLD TO REDO fires onRedoPress now — it is the one press that
+                    // discards the transcript rather than continuing it. This test is
+                    // about that chip, so it counts here.
+                    onRedoPress = { presses++ },
                     onRelease = { releases++ },
                     onSend = {},
                     onCancel = {},

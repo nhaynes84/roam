@@ -76,6 +76,7 @@ class ThreadScreenTest {
                     onInterrupt = {},
                     onKill = {},
                     onPttPress = {},
+                        onPttRedo = {},
                     onPttRelease = {},
                     onPttSend = {},
                     onPttCancel = {},

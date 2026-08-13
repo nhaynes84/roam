@@ -215,6 +215,12 @@ class ChannelsViewModel(
     /** Thumb down. [target] is captured here and never re-read; see [PttTarget]. */
     fun pttPress(target: PttTarget) = ptt.press(target)
 
+    /**
+     * ⚠️ The one press that does NOT keep what he already said — HOLD TO REDO exists to
+     * replace it. See [Ptt.press].
+     */
+    fun pttRedo(target: PttTarget) = ptt.press(target, append = false)
+
     fun pttRelease() = ptt.release()
 
     /**
