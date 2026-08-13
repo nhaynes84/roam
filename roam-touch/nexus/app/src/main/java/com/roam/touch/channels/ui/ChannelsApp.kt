@@ -223,6 +223,23 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
                 vm.pttToggle(PttTarget(pane, label))
             }
 
+            /**
+             * ★ Hold-to-talk from the volume rocker. Same destination rule as the tap —
+             * see [VoiceEntry] — so the two controls can never disagree about where a
+             * recording is going.
+             */
+            override fun pushToTalkStart() {
+                val pane = currentPane
+                if (pane == null) {
+                    currentVoice()
+                    return
+                }
+                val label = currentState.channel(pane)?.displayLabel.orEmpty()
+                vm.pttPress(PttTarget(pane, label))
+            }
+
+            override fun pushToTalkStop() = vm.pttRelease()
+
             override fun nextChannel() = step(+1)
             override fun previousChannel() = step(-1)
 

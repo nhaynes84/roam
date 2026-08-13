@@ -6,6 +6,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.os.Bundle;
+import android.view.KeyEvent;
 import android.util.Log;
 
 import androidx.activity.ComponentActivity;
@@ -86,7 +87,25 @@ public class MainActivity extends ComponentActivity {
         super.onWindowFocusChanged(hasFocus);
         if (hasFocus) {
             SystemBars.hideStatusBar(this);
+        } else {
+            // The release edge will never arrive if focus goes while he is holding.
+            Roam.INSTANCE.getControls().onFocusLost();
         }
+    }
+
+    /**
+     * ★★ Volume-down is push-to-talk: tap for volume, hold to talk.
+     *
+     * It is intercepted here rather than in Compose because a hardware key is the only
+     * input on this device that reports a real held state -- see VolumePtt for why the
+     * earbud and the wired inline button both cannot. Volume-up is never touched.
+     */
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        if (Roam.INSTANCE.getControls().onVolumeKey(event)) {
+            return true;
+        }
+        return super.dispatchKeyEvent(event);
     }
 
     @Override

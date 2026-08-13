@@ -10,6 +10,7 @@ import com.roam.touch.channels.net.HubSocket
 import com.roam.touch.channels.stt.BluetoothHeadsetLink
 import com.roam.touch.channels.stt.MicRecorder
 import com.roam.touch.channels.stt.Ptt
+import com.roam.touch.channels.stt.PttState
 import com.roam.touch.channels.stt.WyomingStt
 import com.roam.touch.channels.tts.Speaker
 import com.roam.touch.channels.tts.TtsSpeaker
@@ -106,7 +107,15 @@ object Roam {
 
         // ⚠️ Inert until a gesture he bound arrives: the router passes every unbound key
         // straight back to the system, so this claims nothing it was not given.
-        controls = HeadsetControls(app, ControlStore(app), scope).also { it.start() }
+        controls = HeadsetControls(app, ControlStore(app), scope).also {
+            // ★ So a key arriving mid-recording can be treated as a stop — see
+            // HeadsetControls.dispatch. Read off Ptt, never off a UI snapshot.
+            it.micOpen = {
+                val s = ptt.state.value
+                s is PttState.Listening || s is PttState.Connecting
+            }
+            it.start()
+        }
 
         val haConfig = HaConfig(
             baseUrl = BuildConfig.HA_URL,

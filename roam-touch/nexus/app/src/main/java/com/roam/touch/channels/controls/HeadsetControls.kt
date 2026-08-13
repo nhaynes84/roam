@@ -7,6 +7,7 @@ import android.bluetooth.BluetoothHeadset
 import android.bluetooth.BluetoothProfile
 import android.content.BroadcastReceiver
 import android.content.Context
+import android.media.AudioManager
 import android.content.Intent
 import android.content.IntentFilter
 import android.media.AudioAttributes
@@ -33,6 +34,15 @@ interface ControlSurface {
      * to stop and transcribe. See [ControlAction.PUSH_TO_TALK].
      */
     fun pushToTalkToggle()
+
+    /**
+     * ★ Press-and-hold, from the phone's own volume rocker — the one control on this
+     * device that can express "while I am holding this". See [VolumePtt].
+     */
+    fun pushToTalkStart()
+
+    /** Release. Ends the recording and goes to the confirm step. */
+    fun pushToTalkStop()
 
     fun nextChannel()
     fun previousChannel()
@@ -66,8 +76,18 @@ class HeadsetControls(
     private val app = context.applicationContext
     private val router = ControlRouter()
 
+    /** Tap for volume, hold to talk — see [VolumePtt]. */
+    private val volumeKey = VolumePtt()
+
     @Volatile
     var surface: ControlSurface? = null
+
+    /**
+     * ★★ **Is a microphone open right now?** Read straight off [Ptt]'s own state, not a
+     * snapshot of it — see [dispatch], which uses this to make every key a stop.
+     */
+    @Volatile
+    var micOpen: () -> Boolean = { false }
 
     private val _active = MutableStateFlow<HeadsetProfile?>(null)
 
@@ -158,6 +178,27 @@ class HeadsetControls(
         // therefore does nothing — still leaves the evidence needed to bind it.
         Log.i(TAG, line)
         _seen.value = (listOf(line) + _seen.value).take(SEEN_LIMIT)
+
+        // ★★ **While the microphone is open, ANY headset key stops it.**
+        //
+        // ⚠️⚠️ Opening the mic puts the headset in a call, and in a call the earbud keeps
+        // the single tap for call control — it never becomes a media key, so the app never
+        // sees it. The owner measured this himself: *"the first tap works fine, but then
+        // trying to stop is multiple taps... double tap seems to work reliably for stop."*
+        // A double tap leaks through as MEDIA_NEXT plus a stray PLAY, which is the only
+        // reason stopping worked at all.
+        //
+        // Binding double-tap would paper over it. The honest rule is that mid-sentence
+        // there is nothing else a key could mean: he is not changing channels while
+        // talking. So every key is a stop until the mic closes, whatever the headset
+        // decided to call it — and the gesture that opens a microphone can always close it.
+        if (micOpen() && event.action == KeyEvent.ACTION_UP &&
+            event.keyCode in STOP_ANY_KEYS
+        ) {
+            Log.i(TAG, "$name while recording — stopping")
+            perform(ControlAction.PUSH_TO_TALK)
+            return true
+        }
 
         val record = KeyRecord(
             keyCode = event.keyCode,
@@ -275,6 +316,48 @@ class HeadsetControls(
     }
 
     /**
+     * ★★ The phone's volume-down key, routed from `MainActivity.dispatchKeyEvent`.
+     *
+     * ⚠️ Returns true for **every** edge of volume-down, including the ones that do
+     * nothing. Letting a down edge through would have the system step the volume while
+     * he is still deciding, and then we could not take it back — the whole gesture is
+     * resolved on release. Volume-up is untouched and never consumed.
+     */
+    fun onVolumeKey(event: KeyEvent): Boolean {
+        if (event.keyCode != KeyEvent.KEYCODE_VOLUME_DOWN) return false
+        val open = micOpen()
+        when (event.action) {
+            KeyEvent.ACTION_DOWN ->
+                if (volumeKey.onDown(event.repeatCount, open) == VolumeGesture.StartTalking) {
+                    Log.i(TAG, "volume-down held — talking")
+                    surface?.pushToTalkStart()
+                }
+
+            KeyEvent.ACTION_UP -> when (volumeKey.onUp(open)) {
+                VolumeGesture.StopTalking -> {
+                    Log.i(TAG, "volume-down released — stopping")
+                    surface?.pushToTalkStop()
+                }
+
+                VolumeGesture.VolumeDown -> {
+                    val audio = app.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                    audio.adjustStreamVolume(
+                        AudioManager.STREAM_MUSIC,
+                        AudioManager.ADJUST_LOWER,
+                        AudioManager.FLAG_SHOW_UI,
+                    )
+                }
+
+                else -> Unit
+            }
+        }
+        return true
+    }
+
+    /** ⚠️ Focus lost mid-hold: the release edge will never arrive. */
+    fun onFocusLost() = volumeKey.reset()
+
+    /**
      * ⚠️⚠️ Volume is taken from the system **only** while he has a volume gesture bound.
      *
      * A `VolumeProvider` is the one way a media session sees volume keys, and it works by
@@ -371,6 +454,22 @@ class HeadsetControls(
 
     private companion object {
         const val TAG = "RoamKeys"
+
+        /**
+         * Every key a headset can send for a tap, in any of its profiles. ⚠️ Volume is
+         * deliberately absent: he may genuinely want to change volume while a recording
+         * runs, and taking that away would be the "swallowing keys we were not given"
+         * failure the router exists to prevent.
+         */
+        private val STOP_ANY_KEYS = setOf(
+            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+            KeyEvent.KEYCODE_MEDIA_PLAY,
+            KeyEvent.KEYCODE_MEDIA_PAUSE,
+            KeyEvent.KEYCODE_MEDIA_STOP,
+            KeyEvent.KEYCODE_MEDIA_NEXT,
+            KeyEvent.KEYCODE_MEDIA_PREVIOUS,
+            KeyEvent.KEYCODE_HEADSETHOOK,
+        )
         const val SEEN_LIMIT = 12
     }
 }
