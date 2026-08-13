@@ -252,4 +252,79 @@ class ControlRouterTest {
         assertEquals("next / double tap", next.label)
         assertEquals("volume up", volumeUp.label)
     }
+
+    // --- ⚠️⚠️ the keycode Android decided to send us this time ----------------
+
+    /**
+     * ★★ **The bug that made a bound tap do nothing on a real headset.**
+     *
+     * `MediaSessionService` rewrites `MEDIA_PLAY_PAUSE` into `MEDIA_PLAY` or `MEDIA_PAUSE`
+     * according to the playback state *our own session* reports. The owner bound a tap
+     * while the session was idle — `85~0=PUSH_TO_TALK` went into the store — and by the
+     * time he used it the session was playing, so every tap arrived as 127, matched
+     * nothing, and passed through. Both of his headsets were bound; neither worked.
+     */
+    @Test
+    fun `a tap bound as PLAY_PAUSE still fires when it arrives as PAUSE`() {
+        profile(tap to ControlAction.PUSH_TO_TALK)
+
+        assertEquals(ControlDecision.Consumed, down(KeyEvent.KEYCODE_MEDIA_PAUSE))
+        assertEquals(
+            ControlDecision.Perform(ControlAction.PUSH_TO_TALK),
+            up(KeyEvent.KEYCODE_MEDIA_PAUSE),
+        )
+    }
+
+    /** …and as PLAY, which is what the same tap becomes when the session is idle. */
+    @Test
+    fun `a tap bound as PLAY_PAUSE still fires when it arrives as PLAY`() {
+        profile(tap to ControlAction.PUSH_TO_TALK)
+
+        assertEquals(ControlDecision.Consumed, down(KeyEvent.KEYCODE_MEDIA_PLAY))
+        assertEquals(
+            ControlDecision.Perform(ControlAction.PUSH_TO_TALK),
+            up(KeyEvent.KEYCODE_MEDIA_PLAY),
+        )
+    }
+
+    /** Older wired headsets send HEADSETHOOK for the same press. Same gesture. */
+    @Test
+    fun `a tap bound as PLAY_PAUSE still fires when it arrives as HEADSETHOOK`() {
+        profile(tap to ControlAction.PUSH_TO_TALK)
+
+        assertEquals(ControlDecision.Consumed, down(KeyEvent.KEYCODE_HEADSETHOOK))
+        assertEquals(
+            ControlDecision.Perform(ControlAction.PUSH_TO_TALK),
+            up(KeyEvent.KEYCODE_HEADSETHOOK),
+        )
+    }
+
+    /**
+     * ⚠️ Learning has to canonicalise too, or a gesture captured while the session happens
+     * to be playing gets stored as 127 and stops matching the moment playback stops —
+     * the same failure, mirrored.
+     */
+    @Test
+    fun `learning a tap stores it canonically whatever code it arrived as`() {
+        router.profile = HeadsetProfile("80:99:E7:DE:66:E6", "WH-1000XM6")
+        router.startLearning()
+
+        down(KeyEvent.KEYCODE_MEDIA_PAUSE)
+        val decision = up(KeyEvent.KEYCODE_MEDIA_PAUSE)
+
+        assertEquals(ControlDecision.Learned(tap), decision)
+    }
+
+    /**
+     * ⚠️ Canonicalising must not swallow the neighbours. Double and triple tap arrive as
+     * NEXT and PREVIOUS and stay their own gestures — folding those in would bind three
+     * distinct controls to one action.
+     */
+    @Test
+    fun `next and previous are not folded into the tap`() {
+        profile(tap to ControlAction.PUSH_TO_TALK)
+
+        assertEquals(ControlDecision.PassThrough, down(KeyEvent.KEYCODE_MEDIA_NEXT))
+        assertEquals(ControlDecision.PassThrough, down(KeyEvent.KEYCODE_MEDIA_PREVIOUS))
+    }
 }

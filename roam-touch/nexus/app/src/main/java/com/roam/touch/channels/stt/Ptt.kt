@@ -266,6 +266,29 @@ class Ptt(
     }
 
     /** Thumb up. Ignored unless a press is actually live. */
+    /**
+     * ★★ Start or stop, decided **here** — against the state this object owns, inside the
+     * lock that protects it.
+     *
+     * ⚠️⚠️ This exists because the headset toggle used to make that decision in the UI,
+     * from a snapshot of [state] that could be one recomposition behind. When it guessed
+     * wrong it called [press] on an open microphone, which logged *"PRESS ignored, already
+     * Listening"* and left the mic running — so a tap that was supposed to stop a
+     * recording did nothing at all.
+     *
+     * That is not a UI defect, it is a safety one. This is a microphone in the owner's
+     * home, and it ran for 17 seconds over his crying son because a tap meant to close it
+     * opened a second one instead. **The gesture that opens a microphone must be able to
+     * close it, every time, with no dependence on what any other layer believes.** The
+     * sixty-second cap is the backstop, not the mechanism.
+     */
+    fun toggle(target: PttTarget) = synchronized(lock) {
+        when (_state.value) {
+            is PttState.Connecting, is PttState.Listening -> release()
+            else -> press(target)
+        }
+    }
+
     fun release() = synchronized(lock) {
         (_state.value as? PttState.Connecting)?.let { connecting ->
             // ★ Let go before the link came up. Nothing was recorded, and saying "too

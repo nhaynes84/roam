@@ -445,6 +445,61 @@ class HeadsetPttTest {
         assertEquals("one press, one link", 1, headset.opens)
         assertEquals("one press, one recorder", 1, mic.starts)
     }
+
+    // --- ⚠️⚠️ the tap that could not close what it opened ---------------------
+
+    /**
+     * ★★ **The safety regression.** The headset has one gesture, so the same tap must
+     * start and stop. The panel used to make that decision from its own snapshot of the
+     * state, which could be a recomposition behind — and when it guessed wrong it called
+     * `press()` on an open microphone. `Ptt` logged "PRESS ignored, already Listening"
+     * and **the mic stayed on**.
+     *
+     * That is what happened to the owner: a tap meant to stop a recording did nothing,
+     * and 17 seconds of him and his crying son went through the transcriber before it
+     * closed. [Ptt.toggle] decides against the state it owns, so this cannot recur.
+     */
+    @Test
+    fun `a second toggle closes the microphone the first one opened`() =
+        runTest(dispatcher) {
+            val ptt = ptt()
+
+            ptt.toggle(augment)
+            // ⚠️ Only as far as the link — advanceUntilIdle would run the sixty-second
+            // cap out and finish the recording before the second toggle could be tested,
+            // which would pass for the wrong reason.
+            advanceTimeBy(headset.setupMs + 1)
+            assertTrue(
+                "first toggle should be recording, was ${ptt.state.value}",
+                ptt.state.value is PttState.Listening,
+            )
+
+            ptt.toggle(augment)
+            assertFalse(
+                "second toggle must not leave the mic open, was ${ptt.state.value}",
+                ptt.state.value is PttState.Listening,
+            )
+        }
+
+    /** ⚠️ And it must close from the SCO wait too — the window before capture starts. */
+    @Test
+    fun `a toggle during the SCO wait closes instead of opening a second recording`() =
+        runTest(dispatcher) {
+            val ptt = ptt()
+
+            ptt.toggle(augment)
+            assertTrue(
+                "should be connecting, was ${ptt.state.value}",
+                ptt.state.value is PttState.Connecting,
+            )
+
+            ptt.toggle(augment)
+            advanceUntilIdle()
+            assertFalse(
+                "must not be left listening, was ${ptt.state.value}",
+                ptt.state.value is PttState.Listening,
+            )
+        }
 }
 
 /** A local stand-in for Whisper — [PttTest]'s is private to that file. */

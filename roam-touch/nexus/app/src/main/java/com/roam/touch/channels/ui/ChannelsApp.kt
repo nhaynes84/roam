@@ -215,13 +215,12 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
                     currentVoice()
                     return
                 }
-                when (currentPtt) {
-                    is PttState.Connecting, is PttState.Listening -> vm.pttRelease()
-                    else -> {
-                        val label = currentState.channel(pane)?.displayLabel.orEmpty()
-                        vm.pttPress(PttTarget(pane, label))
-                    }
-                }
+                // ⚠️ Do NOT branch on `currentPtt` here. That snapshot can be a
+                // recomposition behind, and when it was wrong this called press() on an
+                // open microphone — the mic stayed on and the tap that was meant to stop
+                // it did nothing. Ptt decides, against the state it owns. See Ptt.toggle.
+                val label = currentState.channel(pane)?.displayLabel.orEmpty()
+                vm.pttToggle(PttTarget(pane, label))
             }
 
             override fun nextChannel() = step(+1)

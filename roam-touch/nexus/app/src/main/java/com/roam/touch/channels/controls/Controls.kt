@@ -33,6 +33,33 @@ data class HeadsetGesture(val keyCode: Int, val longPress: Boolean = false) {
         get() = (KEY_NAMES[keyCode] ?: "key $keyCode") + if (longPress) ", held" else ""
 
     companion object {
+
+        /**
+         * ★★ One logical tap, whatever Android decided to call it this time.
+         *
+         * ⚠️⚠️ **The keycode a headset tap arrives as is not a property of the headset.**
+         * `MediaSessionService` rewrites `MEDIA_PLAY_PAUSE` into `MEDIA_PLAY` or
+         * `MEDIA_PAUSE` according to the playback state *our own session* reports, before
+         * it ever reaches us. So the same physical tap on the same earbud arrives as 85
+         * when the session is idle and 127 when it is playing.
+         *
+         * That broke it in the field, and silently. The owner bound a tap while the
+         * session was idle, so `85~0=PUSH_TO_TALK` went into the store; by the time he
+         * used it the session was reporting `state=3` and every tap arrived as 127,
+         * matched nothing, and passed through. Owner: *"earbud tap set to ptt but it
+         * doesn't work."* Both his headsets had the same binding and neither worked.
+         *
+         * Canonicalising at the boundary means a gesture learned in one playback state
+         * still matches in the other — and `HEADSETHOOK`, which older wired headsets send
+         * for the same press, folds in with it.
+         */
+        fun canonical(keyCode: Int): Int = when (keyCode) {
+            KeyEvent.KEYCODE_MEDIA_PLAY,
+            KeyEvent.KEYCODE_MEDIA_PAUSE,
+            KeyEvent.KEYCODE_HEADSETHOOK -> KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE
+            else -> keyCode
+        }
+
         private val KEY_NAMES = mapOf(
             KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE to "tap",
             KeyEvent.KEYCODE_HEADSETHOOK to "tap (hook)",
@@ -180,12 +207,16 @@ class ControlRouter {
     private var heldLong = false
 
     fun onKey(key: KeyRecord): ControlDecision {
+        // ⚠️ Canonical from here down — see [HeadsetGesture.canonical]. Learning and
+        // matching MUST agree on this or a gesture bound in one playback state cannot be
+        // recognised in the other, which is exactly the bug this fixes.
+        val code = HeadsetGesture.canonical(key.keyCode)
         if (learning) {
             if (key.down) {
                 if (key.longPress) heldLong = true
                 return ControlDecision.Consumed
             }
-            val gesture = HeadsetGesture(key.keyCode, heldLong)
+            val gesture = HeadsetGesture(code, heldLong)
             heldLong = false
             learning = false
             return ControlDecision.Learned(gesture)
@@ -196,7 +227,7 @@ class ControlRouter {
         // moment of the press we cannot yet know whether he is going to hold it, and
         // letting the down edge through would let the system act on a key we are about
         // to claim.
-        val claimed = bindings.keys.any { it.keyCode == key.keyCode }
+        val claimed = bindings.keys.any { it.keyCode == code }
         if (!claimed) {
             heldLong = false
             return ControlDecision.PassThrough
@@ -205,12 +236,12 @@ class ControlRouter {
             if (key.longPress) heldLong = true
             return ControlDecision.Consumed
         }
-        val gesture = HeadsetGesture(key.keyCode, heldLong)
+        val gesture = HeadsetGesture(code, heldLong)
         heldLong = false
         // ★ A held key with only a short binding still performs the short one. Some
         // headsets never report a repeat, and refusing to act would read as a dead
         // button rather than as a distinction he never asked for.
-        val action = bindings[gesture] ?: bindings[HeadsetGesture(key.keyCode, false)]
+        val action = bindings[gesture] ?: bindings[HeadsetGesture(code, false)]
         return action?.let { ControlDecision.Perform(it) } ?: ControlDecision.Consumed
     }
 }

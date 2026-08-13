@@ -218,6 +218,12 @@ class ChannelsViewModel(
     fun pttRelease() = ptt.release()
 
     /**
+     * ⚠️ The headset's one gesture. [Ptt.toggle] decides start-or-stop against its own
+     * state rather than the panel's snapshot of it — see the note there.
+     */
+    fun pttToggle(target: PttTarget) = ptt.toggle(target)
+
+    /**
      * ★★ The way out, from any state — including the one in flight to the hub.
      *
      * ⚠️ From [PttState.Sending] this means **stop waiting**, not "unsend": the request is
