@@ -27,6 +27,14 @@ class FakeHeadset(
     override var connected: Boolean = true,
 ) : HeadsetLink {
 
+    override var onDropped: (() -> Unit)? = null
+
+    /**
+     * ⚠️ The earbud tap, as it actually arrives once SCO is up: a hang-up, seen by the app
+     * only as the link going down. See [HeadsetLink.onDropped].
+     */
+    fun hangUp() = onDropped?.invoke()
+
     /** How long the SCO link takes to come up. The XM6 measures about 600 ms. */
     var setupMs: Long = 600L
 
@@ -477,6 +485,51 @@ class HeadsetPttTest {
             ptt.toggle(augment)
             assertFalse(
                 "second toggle must not leave the mic open, was ${ptt.state.value}",
+                ptt.state.value is PttState.Listening,
+            )
+        }
+
+    /**
+     * ★★ **The tap he actually makes, and the reason the fix above was not enough.**
+     *
+     * Opening the mic calls `startScoUsingVirtualVoiceCall()`, so the headset believes it
+     * is in a call. From that moment its tap is HFP *hang up*, not a media key, and AVRCP
+     * delivers the app nothing — the log showed the recording start on a key event and
+     * then not one further key line while the mic ran. Owner: *"Tap opens it, but tap
+     * will not stop it."*
+     *
+     * The hang-up arrives only as the link dropping. That has to end the recording.
+     */
+    @Test
+    fun `the headset hanging up stops the recording`() =
+        runTest(dispatcher) {
+            val ptt = ptt()
+
+            ptt.toggle(augment)
+            advanceTimeBy(headset.setupMs + 1)
+            assertTrue(
+                "should be recording, was ${ptt.state.value}",
+                ptt.state.value is PttState.Listening,
+            )
+
+            headset.hangUp()
+            assertFalse(
+                "a hang-up must close the microphone, was ${ptt.state.value}",
+                ptt.state.value is PttState.Listening,
+            )
+        }
+
+    /** ⚠️ And from the SCO wait, before capture has even begun. */
+    @Test
+    fun `a hang-up during the SCO wait does not leave a recording running`() =
+        runTest(dispatcher) {
+            val ptt = ptt()
+
+            ptt.toggle(augment)
+            headset.hangUp()
+            advanceUntilIdle()
+            assertFalse(
+                "must not be listening after a hang-up, was ${ptt.state.value}",
                 ptt.state.value is PttState.Listening,
             )
         }

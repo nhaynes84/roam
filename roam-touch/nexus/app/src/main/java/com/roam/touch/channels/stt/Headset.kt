@@ -50,6 +50,27 @@ interface HeadsetLink {
 
     /** Tear the link down and hand the audio mode back. Idempotent, safe any time. */
     fun close()
+
+    /**
+     * ★★ **Called when the headset drops the link itself — which is how the wearer stops
+     * a recording.**
+     *
+     * ⚠️⚠️ Opening the mic means calling `startScoUsingVirtualVoiceCall()`, which tells
+     * the headset it is **in a phone call**. From that instant a tap on the earbud is not
+     * a media key any more — it is *hang up* (HFP `AT+CHUP`) — and AVRCP sends the app
+     * nothing at all. So the gesture that started the recording physically cannot be seen
+     * by the key path that started it, and the owner was left tapping an earbud at a live
+     * microphone: *"Tap opens it, but tap will not stop it."*
+     *
+     * The hang-up is not lost, it just arrives as the SCO link going down. That is the
+     * stop signal, and it is the only one there is while the link is up.
+     *
+     * ⚠️ A drop from range or interference looks identical, and is treated identically —
+     * end the recording. That is the safe direction: the transcript still has to be
+     * confirmed before it goes anywhere, so a spurious drop costs a confirmation, while
+     * ignoring it costs a microphone that cannot be closed.
+     */
+    var onDropped: (() -> Unit)?
 }
 
 /**
@@ -70,6 +91,15 @@ class BluetoothHeadsetLink(context: Context) : HeadsetLink {
 
     @Volatile
     private var up = false
+
+    override var onDropped: (() -> Unit)? = null
+
+    /**
+     * ⚠️ Registered for as long as the link is up, not just while connecting. The
+     * connect-time receiver is unregistered the moment SCO reports CONNECTED, so it
+     * could never have heard the hang-up that arrives ten seconds later.
+     */
+    private var watcher: BroadcastReceiver? = null
 
     /**
      * ⚠️ Asked of the **output** device list, deliberately.
@@ -124,6 +154,7 @@ class BluetoothHeadsetLink(context: Context) : HeadsetLink {
             @Suppress("DEPRECATION")
             audio.startBluetoothSco()
             val ok = withTimeoutOrNull(CONNECT_TIMEOUT_MS) { connectedOrError.await() } ?: false
+            if (ok) watchForDrop()
             if (!ok) {
                 Log.e(
                     TAG,
@@ -158,6 +189,8 @@ class BluetoothHeadsetLink(context: Context) : HeadsetLink {
      * mode — mono, narrowband, and a live link nobody asked for.
      */
     override fun close() {
+        watcher?.let { runCatching { app.unregisterReceiver(it) } }
+        watcher = null
         @Suppress("DEPRECATION")
         runCatching { audio.setBluetoothScoOn(false) }
         @Suppress("DEPRECATION")
@@ -165,6 +198,27 @@ class BluetoothHeadsetLink(context: Context) : HeadsetLink {
         runCatching { audio.mode = AudioManager.MODE_NORMAL }
         if (up) Log.i(TAG, "SCO down")
         up = false
+    }
+
+    /**
+     * ★ The stop signal. See [HeadsetLink.onDropped] — while the link is up, the earbud's
+     * tap arrives here as a disconnect and nowhere else.
+     */
+    private fun watchForDrop() {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                val state = intent.getIntExtra(AudioManager.EXTRA_SCO_AUDIO_STATE, -1)
+                if (state == AudioManager.SCO_AUDIO_STATE_DISCONNECTED && up) {
+                    Log.i(TAG, "SCO dropped by the headset — treating as stop")
+                    onDropped?.invoke()
+                }
+            }
+        }
+        watcher = receiver
+        app.registerReceiver(
+            receiver,
+            IntentFilter(AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED),
+        )
     }
 
     companion object {

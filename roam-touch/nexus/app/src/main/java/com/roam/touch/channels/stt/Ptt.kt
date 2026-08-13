@@ -159,6 +159,19 @@ class Ptt(
      */
     private val lock = Any()
 
+    init {
+        // ★★ The wearer's stop. While SCO is up the earbud's tap is a hang-up, not a media
+        // key, so this callback is the ONLY way a tap can reach us — see
+        // [HeadsetLink.onDropped]. Without it the gesture that opens the microphone
+        // cannot close it.
+        headset.onDropped = {
+            if (_state.value is PttState.Listening || _state.value is PttState.Connecting) {
+                Log.i(TAG, "headset hung up — releasing")
+                release()
+            }
+        }
+    }
+
     /**
      * Which press is the current one — or [NO_PRESS] when none is.
      *
