@@ -94,7 +94,12 @@ TUBE_WALL = 2.5
 
 TUBE_BORE_R = PACK_D / 2 + PACK_CLR        # 14.70
 TUBE_R = TUBE_BORE_R + TUBE_WALL           # 17.20
-TUBE_LEN = PACK_L + 5.0                    # end clearance for the lead
+# ★ FULL LENGTH, his call: "it's not centered, i would just make it full length
+# if you're gonna do it this way." A 112 mm stub on a 147 mm housing reads as a
+# lump that landed somewhere; running the whole length reads as a spine.
+# It also pays for itself — the pack is 106.7, so the spare 40 mm at the cap end
+# becomes the cavity the lead and the port live in, rather than dead tube.
+TUBE_LEN = PH_L + 2 * CLR + WALL           # = OUT_L, defined below
 
 # ⚠️⚠️ NEGATIVE X, and that is not a style choice — it is the only side free.
 # The power and volume plungers live in the +X wall and stand BTN_PROUD past it;
@@ -257,6 +262,9 @@ def pack_tube() -> Part:
     """
     tube = Pos(TUBE_X, 0, TUBE_Z) * Rot(-90, 0, 0) * Cylinder(
         TUBE_R, TUBE_LEN, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    # ⚠️ Open at the cap end (y=0), closed at the jack end. The pack seats
+    # against that closed end, which locates it and leaves its port facing the
+    # cap with the spare length in front of it for the jumper.
     bore = Pos(TUBE_X, -EPS, TUBE_Z) * Rot(-90, 0, 0) * Cylinder(
         TUBE_BORE_R, TUBE_LEN - TUBE_WALL + EPS,
         align=(Align.CENTER, Align.CENTER, Align.MIN))
