@@ -49,6 +49,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -76,9 +77,15 @@ import kotlinx.coroutines.launch
  * ⚠️ **The list shows summaries and nothing else.** "On demand" is [ReaderScreen], a
  * screen of its own — never a card that grows into a wall of text where a glanceable
  * list used to be.
+ *
+ * ★ [shell] is not a style switch. In [Shell.Wide] the nav rail is on screen beside this,
+ * so the chrome that only exists to get him somewhere is redundant here and folds flat:
+ * the two-row header becomes one row, and the canned replies move into the rail. Every dp
+ * that buys back goes to the messages, which is the only reason any of it is on the glass.
  */
 @Composable
 fun ThreadScreen(
+    shell: Shell,
     state: ChannelsState,
     channel: Channel,
     nowMs: Long,
@@ -153,6 +160,7 @@ fun ThreadScreen(
             .background(RoamColors.Background)
     ) {
         ThreadTopBar(
+            shell = shell,
             state = state,
             channel = channel,
             nowMs = nowMs,
@@ -161,7 +169,10 @@ fun ThreadScreen(
         )
 
         if (entries.isEmpty()) {
-            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+            Box(
+                Modifier.testTag(MESSAGES).weight(1f).fillMaxWidth(),
+                contentAlignment = Alignment.Center,
+            ) {
                 Text(
                     "no history",
                     style = MaterialTheme.typography.bodyLarge,
@@ -169,7 +180,7 @@ fun ThreadScreen(
                 )
             }
         } else {
-            Box(Modifier.weight(1f)) {
+            Box(Modifier.testTag(MESSAGES).weight(1f)) {
                 LazyColumn(
                     state = listState,
                     modifier = Modifier.fillMaxSize(),
@@ -227,6 +238,7 @@ fun ThreadScreen(
         )
 
         Composer(
+            shell = shell,
             enabled = channel.live,
             pttState = pttState,
             target = PttTarget(channel.paneId, channel.displayLabel),
@@ -251,8 +263,17 @@ fun ThreadScreen(
     }
 }
 
+/**
+ * Who he is talking to, how alive it is, and the way to stop it.
+ *
+ * ★ Two rows in [Shell.Narrow], one in [Shell.Wide]. Nothing is dropped in the fold that
+ * he cannot read somewhere else on the same screen: the pane id and the back button are
+ * both in the rail, which in Wide is never off screen. The liveness chip and STOP stay in
+ * both, because the kill decision is the one thing this bar exists for.
+ */
 @Composable
 private fun ThreadTopBar(
+    shell: Shell,
     state: ChannelsState,
     channel: Channel,
     nowMs: Long,
@@ -260,68 +281,93 @@ private fun ThreadTopBar(
     onStop: () -> Unit,
 ) {
     val liveness = Liveliness.of(state, channel, nowMs)
+    val wide = shell == Shell.Wide
+
+    val title = @Composable { modifier: Modifier ->
+        Text(
+            text = channel.displayLabel,
+            style = MaterialTheme.typography.titleMedium,
+            color = RoamColors.TextPrimary,
+            maxLines = if (wide) 1 else 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = modifier,
+        )
+    }
+    val stop = @Composable {
+        // ★ Interrupt/kill: today this requires walking to a keyboard. Two taps,
+        // because "stop" on the wrong session while walking is expensive.
+        Box(
+            Modifier
+                .background(RoamColors.Alarm.copy(alpha = 0.16f), RoundedCornerShape(8.dp))
+                .border(1.dp, RoamColors.Alarm.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                .clickable(enabled = channel.live, onClick = onStop)
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+        ) {
+            Text(
+                "STOP",
+                style = MaterialTheme.typography.labelMedium,
+                color = if (channel.live) RoamColors.Alarm else RoamColors.Dead,
+            )
+        }
+    }
+    val status = @Composable {
+        if (liveness is Liveness.Working) TypingEllipsis(RoamColors.Working)
+        LivenessChip(liveness)
+        channel.lastInputSource?.let { source ->
+            // Where the next answer is expected to be read. The hub decides this;
+            // showing it stops "why didn't it speak?" being a mystery.
+            StateChip(
+                text = if (source == "app") "REPLYING HERE" else "IN TMUX",
+                color = if (source == "app") RoamColors.Attention else RoamColors.Idle,
+            )
+        }
+    }
+
     Column(
         Modifier
+            .testTag(THREAD_TOP_BAR)
             .fillMaxWidth()
             .background(RoamColors.Surface)
     ) {
-        Row(
-            Modifier.padding(start = 4.dp, end = 10.dp, top = 6.dp, bottom = 2.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = onBack) {
-                Icon(
-                    Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "back to channels",
-                    tint = RoamColors.TextPrimary,
-                )
-            }
-            Text(
-                text = channel.displayLabel,
-                style = MaterialTheme.typography.titleMedium,
-                color = RoamColors.TextPrimary,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
-            Spacer(Modifier.width(8.dp))
-            // ★ Interrupt/kill: today this requires walking to a keyboard. Two taps,
-            // because "stop" on the wrong session while walking is expensive.
-            Box(
-                Modifier
-                    .background(RoamColors.Alarm.copy(alpha = 0.16f), RoundedCornerShape(8.dp))
-                    .border(1.dp, RoamColors.Alarm.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
-                    .clickable(enabled = channel.live, onClick = onStop)
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+        if (wide) {
+            Row(
+                Modifier.padding(start = 4.dp, end = 10.dp, top = 4.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(7.dp),
             ) {
+                title(Modifier.weight(1f).padding(start = 8.dp))
+                status()
+                stop()
+            }
+        } else {
+            Row(
+                Modifier.padding(start = 4.dp, end = 10.dp, top = 6.dp, bottom = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(onClick = onBack) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "back to channels",
+                        tint = RoamColors.TextPrimary,
+                    )
+                }
+                title(Modifier.weight(1f))
+                Spacer(Modifier.width(8.dp))
+                stop()
+            }
+            Row(
+                Modifier.padding(start = 14.dp, end = 14.dp, bottom = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                status()
+                Spacer(Modifier.weight(1f))
                 Text(
-                    "STOP",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = if (channel.live) RoamColors.Alarm else RoamColors.Dead,
+                    channel.paneId,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = RoamColors.TextSecondary.copy(alpha = 0.7f),
                 )
             }
-        }
-        Row(
-            Modifier.padding(start = 14.dp, end = 14.dp, bottom = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(7.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (liveness is Liveness.Working) TypingEllipsis(RoamColors.Working)
-            LivenessChip(liveness)
-            channel.lastInputSource?.let { source ->
-                // Where the next answer is expected to be read. The hub decides this;
-                // showing it stops "why didn't it speak?" being a mystery.
-                StateChip(
-                    text = if (source == "app") "REPLYING HERE" else "IN TMUX",
-                    color = if (source == "app") RoamColors.Attention else RoamColors.Idle,
-                )
-            }
-            Spacer(Modifier.weight(1f))
-            Text(
-                channel.paneId,
-                style = MaterialTheme.typography.bodySmall,
-                color = RoamColors.TextSecondary.copy(alpha = 0.7f),
-            )
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(dividerColor()))
     }
@@ -500,9 +546,16 @@ internal fun accentFor(kind: EventKind): Color = when (kind) {
  * output and confirms input.* The canned row exists because the four things he actually
  * types from a corridor are one word long. The keyboard is last, and stays, because
  * ⚠️ **you cannot voice-type a password**.
+ *
+ * ⚠️ In [Shell.Wide] the canned row is **not deleted, it is relocated** — [NavRail] draws
+ * the same [CANNED] list down the rail, where width is cheap, so a landscape composer is
+ * one row instead of two. Deleting them would take away the replies he actually sends
+ * from a corridor; leaving them here would spend a whole row of reading height on five
+ * words.
  */
 @Composable
 private fun Composer(
+    shell: Shell,
     enabled: Boolean,
     pttState: PttState,
     target: PttTarget,
@@ -522,6 +575,7 @@ private fun Composer(
 
     Column(
         Modifier
+            .testTag(COMPOSER)
             .fillMaxWidth()
             .background(RoamColors.Surface)
     ) {
@@ -558,28 +612,39 @@ private fun Composer(
             }
         }
 
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 12.dp, vertical = 9.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            CANNED.forEach { reply ->
-                StateChip(
-                    text = reply.uppercase(),
-                    color = if (canSend) RoamColors.Attention else RoamColors.Dead,
-                    modifier = Modifier
-                        .heightIn(min = 38.dp)
-                        .clickable(enabled = canSend) { onSend(reply) },
-                )
+        if (shell == Shell.Narrow) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 12.dp, vertical = 9.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                CANNED.forEach { reply ->
+                    StateChip(
+                        text = reply.uppercase(),
+                        // ⚠️ `canSend`, not `enabled` — a chip that stays live during a send
+                        // is a second prompt one tap away. Same rule in [NavRail]'s copy.
+                        color = if (canSend) RoamColors.Attention else RoamColors.Dead,
+                        modifier = Modifier
+                            .heightIn(min = 38.dp)
+                            .clickable(enabled = canSend) { onSend(reply) },
+                    )
+                }
             }
         }
         Row(
-            Modifier.padding(start = 12.dp, end = 8.dp, bottom = 10.dp),
+            Modifier.padding(
+                start = 12.dp,
+                end = 8.dp,
+                top = if (shell == Shell.Wide) 6.dp else 0.dp,
+                bottom = if (shell == Shell.Wide) 6.dp else 10.dp,
+            ),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             // PTT sits where the thumb lands. Hold it and talk.
+            // ★★ This is the only microphone in the app, and it is inside the thread —
+            // the one place a recording has a channel to go to. See [NavRail].
             PttButton(
                 state = pttState,
                 target = target,
@@ -695,3 +760,11 @@ private fun StopDialog(
 
 /** What he actually says from a corridor. Kept short enough to read at a glance. */
 val CANNED = listOf("continue", "yes", "no", "stop", "explain")
+
+/**
+ * The three regions the landscape work is measured against: chrome above, chrome below,
+ * and the reading surface between them. `NavRailLayoutTest` asserts the ratio.
+ */
+const val THREAD_TOP_BAR = "thread-top-bar"
+const val MESSAGES = "thread-messages"
+const val COMPOSER = "thread-composer"

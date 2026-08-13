@@ -10,8 +10,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -22,6 +23,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -58,11 +60,19 @@ fun installChannelsUi(activity: ComponentActivity) {
  * Where the panel is.
  *
  * ★ [Channels] is home and everything else is a detour with one obvious way back — see
- * [BackToChannelsBar]. There is no nav stack and no navigation library, because there
- * are three destinations and a wearer who must never be lost in one of them.
+ * [BackToChannelsBar] and [NavRail]. There is no nav stack and no navigation library,
+ * because there are three destinations and a wearer who must never be lost in one of them.
  */
 enum class Screen { Channels, Apps, HomeAssistant, Controls }
 
+/**
+ * ★★ The panel: a nav rail, and beside it the thing he is reading.
+ *
+ * The layout law, from the owner: *"that stuff should be all left nav bar so height of
+ * channels isn't being eaten by that stuff."* So this is a [Row] — [NavRail] first, then
+ * everything else — and nothing but the hub-down banner is ever allowed to stack above
+ * the content again.
+ */
 @Composable
 fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
     val state by vm.state.collectAsStateWithLifecycle()
@@ -75,9 +85,15 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
     val outbox by vm.outbox.collectAsStateWithLifecycle()
     val nowMs = rememberTicker()
     val requestMic = rememberMicPermission(vm)
+    val shell = rememberShell()
 
-    var screen by remember { mutableStateOf(Screen.Channels) }
-    var openPane by remember { mutableStateOf<String?>(null) }
+    // ★★ Saveable, not merely remembered — and that is a landscape requirement, not a
+    // nicety. Rotating the device destroys and recreates the activity, so with plain
+    // `remember` the wrist he just turned over threw away the thread he was reading and
+    // dumped him back on the list. An orientation the app claims to support cannot cost
+    // him his place in the conversation.
+    var screen by rememberSaveable { mutableStateOf(Screen.Channels) }
+    var openPane by rememberSaveable { mutableStateOf<String?>(null) }
     var toast by remember { mutableStateOf<Toast?>(null) }
 
     // ★★ The message he is reading in full, by id.
@@ -86,7 +102,7 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
     // than an implementation detail: the old in-place expansion kept its state inside a
     // `LazyColumn` item, so scrolling the card off screen disposed it and silently
     // collapsed the answer. Nothing in the list can reach this.
-    var readingEventId by remember { mutableStateOf<Long?>(null) }
+    var readingEventId by rememberSaveable { mutableStateOf<Long?>(null) }
 
     // --- the headset as a control surface ---------------------------------
     val controls = Roam.controls
@@ -158,6 +174,28 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
     val currentPane by rememberUpdatedState(openPane)
     val currentState by rememberUpdatedState(state)
     val currentPtt by rememberUpdatedState(pttState)
+
+    // ★★ One rule, two triggers: a headset tap and the rail's TALK door both land here.
+    //
+    // The list reorders itself live, so "the top one" is not a destination — a voice press
+    // with nowhere to send takes him to the top live channel and **says so** rather than
+    // guessing. See [VoiceEntry]. ⚠️ It navigates only; the microphone stays in the
+    // thread, where the recording has a channel to go to.
+    //
+    // Closes over remembered state objects, never over this frame's values, so the copy
+    // captured by the DisposableEffect below is still correct on every later frame.
+    val openForVoice: () -> Unit = {
+        val top = VoiceEntry.target(currentState.channels)
+        if (top == null) {
+            vm.notify("no channels to talk to")
+        } else {
+            openPane = top.paneId
+            vm.openThread(top.paneId)
+            vm.notify("opened ${top.displayLabel} — press again to talk", bad = false)
+        }
+    }
+    val currentVoice by rememberUpdatedState(openForVoice)
+
     DisposableEffect(Unit) {
         controls.surface = object : ControlSurface {
 
@@ -170,15 +208,10 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
             override fun pushToTalkToggle() {
                 val pane = currentPane
                 if (pane == null) {
-                    val top = currentState.channels.firstOrNull { it.live }
-                        ?: currentState.channels.firstOrNull()
-                    if (top == null) {
-                        vm.notify("no channels to talk to")
-                        return
-                    }
-                    openPane = top.paneId
-                    vm.openThread(top.paneId)
-                    vm.notify("opened ${top.displayLabel} — press again to talk", bad = false)
+                    // ⚠️ Not a copy of the rule — *the* rule. When this branch and the
+                    // rail's TALK were two pieces of code they were two chances to start
+                    // guessing at a destination.
+                    currentVoice()
                     return
                 }
                 when (currentPtt) {
@@ -213,7 +246,43 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
         state.thread(openPane.orEmpty()).firstOrNull { it.id == id }
     }
 
-    Box(Modifier.fillMaxSize()) {
+    Row(Modifier.fillMaxSize()) {
+        // ★ The rail is on screen on every screen, in both shapes. It is how he gets
+        // anywhere, so it is never the thing that scrolled away.
+        NavRail(
+            shell = shell,
+            state = state,
+            battery = battery,
+            nowMs = nowMs,
+            screen = screen,
+            openPane = openPane,
+            sending = outbox != null,
+            onOpenChannel = {
+                readingEventId = null
+                openPane = it.paneId
+                vm.openThread(it.paneId)
+                screen = Screen.Channels
+            },
+            onHome = {
+                readingEventId = null
+                if (openPane != null) { openPane = null; vm.stopSpeaking(); vm.pttCancel() }
+                screen = Screen.Channels
+            },
+            onOpenApps = { screen = Screen.Apps },
+            onOpenHomeAssistant = { screen = Screen.HomeAssistant },
+            onOpenControls = { screen = Screen.Controls },
+            onVoice = openForVoice,
+            onQuickSend = { reply -> openPane?.let { vm.send(it, reply) } },
+        )
+
+        Box(Modifier.weight(1f).fillMaxSize()) {
+        Column(Modifier.fillMaxSize()) {
+        // ★★ Hub-unreachable must be SEEN, and it is hoisted to exactly one place so it
+        // follows him onto every screen — including the ones that are not Channels. It
+        // displaces rather than overlays: a red bar that sits on top of the answer is a
+        // bar he learns to look past.
+        LinkBanner(link, nowMs)
+        Box(Modifier.weight(1f).fillMaxSize()) {
         if (channel != null && reading != null) {
             ReaderScreen(
                 state = state,
@@ -226,6 +295,7 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
             )
         } else if (channel != null) {
             ThreadScreen(
+                shell = shell,
                 state = state,
                 channel = channel,
                 nowMs = nowMs,
@@ -255,21 +325,17 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
                 onPttCancel = vm::pttCancel,
                 onPttDismiss = vm::pttDismiss,
             )
-            // The link banner follows him into the thread. Nowhere in this app is a
-            // dead hub invisible.
-            Box(Modifier.fillMaxWidth().align(Alignment.TopCenter)) {
-                if (!link.isOnline) LinkBanner(link, nowMs)
-            }
         } else when (screen) {
-            Screen.Channels -> ChannelListScreen(
+            // ⚠️ In Wide the queue is already in the rail, so re-drawing it here would be
+            // the same list twice. The content pane says what to do instead of showing a
+            // copy — see [NoChannelOpen].
+            Screen.Channels -> if (shell == Shell.Wide) {
+                NoChannelOpen(hasChannels = state.channels.isNotEmpty())
+            } else ChannelListScreen(
                 state = state,
                 link = link,
-                battery = battery,
                 nowMs = nowMs,
                 onOpen = { openPane = it.paneId; vm.openThread(it.paneId) },
-                onOpenApps = { screen = Screen.Apps },
-                onOpenHomeAssistant = { screen = Screen.HomeAssistant },
-                onOpenControls = { screen = Screen.Controls },
             )
 
             Screen.Apps -> AppsScreen(
@@ -295,6 +361,8 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
                 onUnbind = controls::unbind,
             )
         }
+        } // end content pane
+        } // end column under the link banner
 
         // ★ An unfamiliar headset, once. It sits over the panel rather than replacing
         // it, and NOT NOW leaves everything working — the mic button is still the mic
@@ -313,7 +381,13 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
             Box(
                 Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 86.dp, start = 16.dp, end = 16.dp)
+                    // Clear of the composer when there is one, and no longer clearing the
+                    // root PTT bar that no longer exists.
+                    .padding(
+                        bottom = if (channel != null) 82.dp else 18.dp,
+                        start = 16.dp,
+                        end = 16.dp,
+                    )
                     .background(
                         if (t.bad) RoamColors.Alarm else RoamColors.SurfaceRaised,
                         androidx.compose.foundation.shape.RoundedCornerShape(9.dp),
@@ -327,6 +401,7 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
                 )
             }
         }
+        } // end content pane
     }
 }
 

@@ -17,16 +17,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.MicOff
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.roam.touch.channels.BatteryState
@@ -45,31 +42,37 @@ import com.roam.touch.channels.model.Channel
  * Rows are ordered by *what needs him*, top down: unread first, then a session that has
  * gone quiet mid-work (the kill decision), then work in progress, then idle, then dead.
  * Chronology is a tiebreak, never the sort.
+ *
+ * ⚠️ **This screen is now the queue and nothing else** — it is the [Shell.Narrow] content
+ * pane. Everything that used to be stacked around it moved into [NavRail]: the title bar
+ * with the destinations and the battery, and the root-level PTT bar, which between them
+ * were eating the top and bottom of the only screen he reads from. The link banner is
+ * hoisted one level up to [ChannelsApp] so it follows him onto every screen instead of
+ * being drawn twice.
+ *
+ * ⚠️ **The PTT bar is gone, and its deletion is a correctness fix rather than a layout
+ * preference.** It sat at the root, where it could not record — it only opened a channel
+ * — and a control that cannot act where it is shown is a bug in either orientation. The
+ * door it was is now [VoiceEntry], carried by the rail's TALK and by the headset toggle,
+ * which is one rule instead of two that could drift apart.
  */
 @Composable
 fun ChannelListScreen(
     state: ChannelsState,
     link: HubLink,
-    battery: BatteryState,
     nowMs: Long,
     onOpen: (Channel) -> Unit,
-    onOpenApps: () -> Unit,
-    onOpenHomeAssistant: () -> Unit,
-    onOpenControls: () -> Unit,
 ) {
     Column(
         Modifier
             .fillMaxSize()
             .background(RoamColors.Background)
     ) {
-        ListTopBar(state, battery, onOpenApps, onOpenHomeAssistant, onOpenControls)
-        LinkBanner(link, nowMs)
-
         val ordered = Queue.order(state, nowMs)
         if (ordered.isEmpty()) {
             EmptyState(link)
         } else {
-            LazyColumn(Modifier.weight(1f)) {
+            LazyColumn(Modifier.testTag(QUEUE).weight(1f)) {
                 items(ordered, key = { it.paneId }) { channel ->
                     ChannelRow(
                         state = state,
@@ -80,62 +83,11 @@ fun ChannelListScreen(
                 }
             }
         }
-        PttBar(
-            // ⚠️ Deliberately not "hold here and I will guess the channel". The list is
-            // ordered live-first, most-recent-next, so its top row moves under him —
-            // the same class of failure as keying channels on tmux indices instead of
-            // pane ids. Voice routes from a channel he is looking at, never from a
-            // position in a list. This takes him there; the mic is one screen in.
-            top = state.channels.firstOrNull { it.live } ?: state.channels.firstOrNull(),
-            onOpen = onOpen,
-        )
     }
 }
 
-/**
- * ★ Channels keeps the title; the two doors off it are chips, and they are small.
- *
- * HA gets its own chip rather than living one level down under APPS because it is the
- * thing he reaches for while walking past a light switch — two taps to turn a lamp off
- * is one tap too many. Everything else is behind APPS, where it belongs.
- */
-@Composable
-private fun ListTopBar(
-    state: ChannelsState,
-    battery: BatteryState,
-    onOpenApps: () -> Unit,
-    onOpenHomeAssistant: () -> Unit,
-    onOpenControls: () -> Unit,
-) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .background(RoamColors.Surface)
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(7.dp),
-    ) {
-        Text(
-            "CHANNELS",
-            style = MaterialTheme.typography.labelLarge,
-            color = RoamColors.TextSecondary,
-        )
-        val unread = state.totalUnread()
-        if (unread > 0) {
-            Spacer(Modifier.width(2.dp))
-            UnreadBadge(unread)
-        }
-        Spacer(Modifier.weight(1f))
-        ActionChip("HA", RoamColors.Attention, onClick = onOpenHomeAssistant)
-        ActionChip("APPS", RoamColors.TextSecondary, onClick = onOpenApps)
-        // ⚠️ Reachable without a headset connected, on purpose: he will want to change a
-        // binding sitting down, not while putting earbuds in.
-        ActionChip("BUDS", RoamColors.TextSecondary, onClick = onOpenControls)
-        // No voice-mode control here. The app never speaks unless he taps play on a
-        // specific message, so there is no mode to be in.
-        BatteryChip(battery)
-    }
-}
+/** The queue list, for the tests that measure how much height it actually gets. */
+const val QUEUE = "channel-queue"
 
 @Composable
 fun BatteryChip(battery: BatteryState) {
@@ -364,73 +316,3 @@ private fun EmptyState(link: HubLink) {
     }
 }
 
-/** A chip-sized channel name: cut on a word, and marked when it was cut. */
-private fun shortLabel(label: String, max: Int = 16): String {
-    val clean = label.trimStart { !it.isLetterOrDigit() }.trim()
-    if (clean.length <= max) return clean
-    val cut = clean.take(max).substringBeforeLast(' ', clean.take(max))
-    return "$cut…"
-}
-
-/**
- * ★ The door to voice, at the bottom of the screen where a thumb lands.
- *
- * The architecture's loop starts **"pick channel → PTT"**, in that order, and this bar
- * is the first half of it. It carries the mic to the channel rather than the channel to
- * the mic: one tap opens [top] and the live PTT control is waiting there, named, with
- * the confirm step behind it.
- *
- * ⚠️ It does **not** record here. A hold on a list would have to guess a destination,
- * and the destination it would guess moves — the list re-sorts on every hub frame.
- * Voice always routes from a channel he is looking at.
- */
-@Composable
-fun PttBar(
-    top: Channel?,
-    onOpen: (Channel) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Row(
-        modifier
-            .fillMaxWidth()
-            .background(RoamColors.Surface)
-            .heightIn(min = 62.dp)
-            .then(if (top != null) Modifier.clickable { onOpen(top) } else Modifier)
-            .padding(horizontal = 14.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        val enabled = top != null
-        Box(
-            Modifier
-                .size(42.dp)
-                .background(RoamColors.SurfaceRaised, RoundedCornerShape(21.dp)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                imageVector = if (enabled) Icons.Filled.Mic else Icons.Filled.MicOff,
-                contentDescription = if (enabled) "push to talk, open a channel to talk"
-                else "push to talk, no channels yet",
-                tint = if (enabled) RoamColors.Attention else RoamColors.Dead,
-                modifier = Modifier.size(22.dp),
-            )
-        }
-        Column(Modifier.weight(1f)) {
-            Text(
-                "PUSH TO TALK",
-                style = MaterialTheme.typography.labelMedium,
-                color = if (enabled) RoamColors.Attention else RoamColors.Dead,
-            )
-            Text(
-                if (top != null) "open a channel to talk"
-                else "no channels to talk to yet",
-                style = MaterialTheme.typography.bodySmall,
-                color = RoamColors.TextSecondary.copy(alpha = 0.75f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        // Where the tap goes, named — so the door says which room it opens.
-        if (top != null) StateChip(shortLabel(top.displayLabel), RoamColors.Idle)
-    }
-}
