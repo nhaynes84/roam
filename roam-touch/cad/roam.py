@@ -63,7 +63,18 @@ PWR_SVG = (37.11, 46.01)                    # power button, y range, +X side
 VOL_SVG = (55.16, 72.91)                    # volume rocker, y range, +X side
 
 # ---------------------------------------------------------- ports, edges
-JACK_W, JACK_X = 20.0, 22.0   # ⚠️ NOT centred — button-side quartile of the top
+# ★★ THE JACK IS PERMANENTLY OCCUPIED, so the external notch is gone.
+# Owner: "i'll route the mic, plug it into the phone and put it in the case, the
+# jack is fully occupied all the time." The mic capsule lives behind the grille
+# and its TRRS plug never comes out — so a notch in the top edge served nothing
+# but a hole, and the edge closes.
+#
+# ⚠️ But the plug has to go SOMEWHERE. The phone's top edge sits 0.4 mm from the
+# end wall, so the old notch was the plug's only escape route. Closing it means
+# the pocket has to continue past the phone to hold the plug and its cable bend.
+# ⚠️⚠️ **A RIGHT-ANGLE PLUG IS NOW REQUIRED.** A straight one protrudes 15–18 mm
+# and would cost 20 mm of length. His call: size it generously.
+JACK_CAV = 12.0
 USB_W, USB_H = 14.0, 8.0
 SPK_W, SPK_H, SPK_X = 16.0, 3.4, 17.0   # speakers either side of USB-C
 VENT_R, VENT_W = 6.0, 46.0
@@ -99,7 +110,7 @@ TUBE_R = TUBE_BORE_R + TUBE_WALL           # 17.20
 # lump that landed somewhere; running the whole length reads as a spine.
 # It also pays for itself — the pack is 106.7, so the spare 40 mm at the cap end
 # becomes the cavity the lead and the port live in, rather than dead tube.
-TUBE_LEN = PH_L + 2 * CLR + WALL           # = OUT_L, defined below
+TUBE_LEN = PH_L + 2 * CLR + JACK_CAV + WALL   # = OUT_L, defined below
 
 # ⚠️⚠️ NEGATIVE X, and that is not a style choice — it is the only side free.
 # The power and volume plungers live in the +X wall and stand BTN_PROUD past it;
@@ -120,7 +131,7 @@ POCK_W = PH_W + 2 * CLR
 POCK_D = PH_T + 0.3
 
 OUT_W = POCK_W + 2 * WALL          # 75.1 — tray outer width
-OUT_L = POCK_L + WALL              # 147.0 — closed at the jack end
+OUT_L = POCK_L + JACK_CAV + WALL   # pocket + plug cavity + closing wall
 OUT_H = FLOOR + POCK_D + LIP_H     # 13.4
 
 PHONE_TOP_Y = POCK_L - CLR
@@ -187,14 +198,15 @@ def face_openings() -> Part:
 
 
 def port_openings() -> Part:
-    """The jack notch, the USB mouth and the two speakers."""
+    """The plug cavity, and the two speakers. No jack notch — see JACK_CAV."""
     cut = Part()
 
-    # ⚠️ The jack is in the button-side quartile of the top edge, not centred.
-    # The BASIC print has it centred and that is why it does not line up.
-    cut += Pos(JACK_X, OUT_L - WALL / 2, FLOOR + POCK_D / 2) * Box(
-        JACK_W, WALL + 2 * EPS, POCK_D + LIP_H,
-        align=(Align.CENTER, Align.CENTER, Align.CENTER))
+    # ★ The pocket continues JACK_CAV past the phone, at pocket depth, so the
+    # right-angle plug and its cable turn have somewhere to be. Roofed by the
+    # lip material above and closed by WALL at the end, so the edge stays solid.
+    cut += Pos(0, POCK_L - EPS, FLOOR) * Box(
+        POCK_W, JACK_CAV + EPS, POCK_D,
+        align=(Align.CENTER, Align.MIN, Align.MIN))
 
     # The USB end is already open; the speakers sit either side of the port.
     for sx in (-SPK_X, SPK_X):
@@ -313,6 +325,8 @@ if __name__ == "__main__":
         flag = "  <-- TOO THIN" if g < MIN_WALL else ""
         print(f"    {label:22s} {g:6.2f} mm{flag}")
     sx0, sy0, sx1, sy1 = face_rect(SCREEN_SVG)
+    print(f"  plug cav.  {JACK_CAV:.1f} mm past the phone, "
+          f"pocket depth — right-angle plug required")
     print(f"  pack tube  bore d{2 * TUBE_BORE_R:.1f} x {TUBE_LEN:.1f} long, "
           f"OD {2 * TUBE_R:.1f}, centre X {TUBE_X:.1f}")
     print(f"             pocket wall to bore  "
