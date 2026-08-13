@@ -32,6 +32,12 @@ VIEWS = [
     ("roam1_usb",   "roam_step1.stl", 8, 0),
     ("roam1_jack",  "roam_step1.stl", 8, 180),
     ("roam1_btn",   "roam_step1.stl", 12, 270),
+    # STEP 2 — the pack tube. The end-on view is the one that matters: it shows
+    # whether the cylinder READS as a cylinder or has been swallowed by a boss.
+    ("roam2_iso",   "roam_step2.stl", 26, 34),
+    ("roam2_end",   "roam_step2.stl", 4, 0),
+    ("roam2_top",   "roam_step2.stl", 88, 0),
+    ("roam2_worn",  "roam_step2.stl", 14, 60),
     ("print_iso",   "bracer_print.stl", 26, 34),
     ("print_side",  "bracer_print.stl", 8, 96),
     ("print_back",  "bracer_print.stl", 22, 208),

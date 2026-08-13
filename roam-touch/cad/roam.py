@@ -78,6 +78,31 @@ BTN_PROUD = 0.6
 CHAMFER, CHAMFER_SM = 3.0, 1.5
 EPS = 0.1
 
+# ------------------------------------------------------------- STEP 2: pack
+# ★ His cylindrical pack — 4.2 x 1.0 in — and it is the shape that unlocked the
+# whole form. A slab pack's short edge is ~67 mm whatever the brand, which was
+# forcing a 70 mm wall; a cylinder is 25.4 mm in every direction and its long
+# axis runs happily along the forearm, the one direction that is already spent.
+#
+# ⚠️ It must READ. Owner: "you should see most of the tube shape under the slid
+# out visor or stacked on the phone when it's closed." It is silhouette, not a
+# hidden cavity — his own concept accidentally closed it over.
+PACK_D = 25.4              # 1.0 in
+PACK_L = 106.7             # 4.2 in
+PACK_CLR = 2.0             # "a couple mil at either side breathing room"
+TUBE_WALL = 2.5
+
+TUBE_BORE_R = PACK_D / 2 + PACK_CLR        # 14.70
+TUBE_R = TUBE_BORE_R + TUBE_WALL           # 17.20
+TUBE_LEN = PACK_L + 5.0                    # end clearance for the lead
+
+# ⚠️ X is set by the pocket, not by looks: the bore may not eat the tray wall.
+# Minimum is pocket edge + a real wall + bore radius. This leaves 2.65 mm
+# between the phone pocket and the pack bore, and overlaps the tray's outer
+# face by 2.25 mm so the two fuse on a face rather than kiss on a tangent line.
+TUBE_X = 52.5
+TUBE_Z = TUBE_R            # sits on the same flat base plane as the tray
+
 # --------------------------------------------------------------- derived
 POCK_L = PH_L + 2 * CLR
 POCK_W = PH_W + 2 * CLR
@@ -217,8 +242,40 @@ def gaps():
 MIN_WALL = 1.15
 
 
+def pack_tube() -> Part:
+    """The battery tube, running along the arm beside the tray.
+
+    ★ Loads from the SAME end as the phone — the USB end, y=0 — so the pack's
+    port and the phone's port land in one cap cavity and the lead between them
+    is a short jumper rather than a cable running the length of the housing.
+    """
+    tube = Pos(TUBE_X, 0, TUBE_Z) * Rot(-90, 0, 0) * Cylinder(
+        TUBE_R, TUBE_LEN, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    bore = Pos(TUBE_X, -EPS, TUBE_Z) * Rot(-90, 0, 0) * Cylinder(
+        TUBE_BORE_R, TUBE_LEN - TUBE_WALL + EPS,
+        align=(Align.CENTER, Align.CENTER, Align.MIN))
+    # ⚠️ The tube's surface is only outboard of the tray's wall between
+    # z 8.7 and 25.7 — a 4.7 mm band where the two solids actually overlap.
+    # Below that the cylinder curves away and leaves a valley, so the join was
+    # a 4.7 mm web carrying a battery. This fills the valley up to the tangent.
+    #
+    # ★ It fills UP TO the tangent and no further, deliberately. Filling to the
+    # tray's full height would bury the cylinder in a boss, and the tube has to
+    # read: "you should see most of the tube shape". Its upper two thirds stay
+    # a bare cylinder; only the dead space underneath becomes structure — which
+    # the flat base wanted anyway, for the sleeve to mount to.
+    web = Pos(0, 0, 0) * Box(
+        TUBE_X - POCK_W / 2 - WALL, TUBE_LEN, TUBE_Z - 8.5,
+        align=(Align.MIN, Align.MIN, Align.MIN))
+    web = Pos(POCK_W / 2 + WALL, 0, 0) * Box(
+        TUBE_X - POCK_W / 2 - WALL, TUBE_LEN, 8.7,
+        align=(Align.MIN, Align.MIN, Align.MIN))
+    return (tube + web) - bore
+
+
 def build() -> Part:
     p = tray()
+    p += pack_tube()
     p -= face_openings()
     p -= port_openings()
     p -= button_bores()
@@ -231,11 +288,11 @@ if __name__ == "__main__":
     here = os.path.dirname(os.path.abspath(__file__))
     out = os.path.join(here, "out")
     os.makedirs(out, exist_ok=True)
-    export_step(part, os.path.join(out, "roam_step1.step"))
-    export_stl(part, os.path.join(out, "roam_step1.stl"))
+    export_step(part, os.path.join(out, "roam_step2.step"))
+    export_stl(part, os.path.join(out, "roam_step2.stl"))
 
     bb = part.bounding_box()
-    print(f"STEP 1 — phone housing, flat base")
+    print(f"STEP 2 — phone housing + pack tube")
     print(f"  outer      {bb.size.X:.1f} x {bb.size.Y:.1f} x {bb.size.Z:.1f} mm")
     print(f"  pocket     {POCK_W:.1f} x {POCK_L:.1f} x {POCK_D:.1f}")
     print(f"  volume     {part.volume / 1000:.1f} cm3  ~= "
@@ -245,6 +302,10 @@ if __name__ == "__main__":
         flag = "  <-- TOO THIN" if g < MIN_WALL else ""
         print(f"    {label:22s} {g:6.2f} mm{flag}")
     sx0, sy0, sx1, sy1 = face_rect(SCREEN_SVG)
+    print(f"  pack tube  bore d{2 * TUBE_BORE_R:.1f} x {TUBE_LEN:.1f} long, "
+          f"OD {2 * TUBE_R:.1f}, centre X {TUBE_X:.1f}")
+    print(f"             pocket wall to bore  {TUBE_X - TUBE_BORE_R - POCK_W / 2:.2f} mm")
+    print(f"             stands {2 * TUBE_R - OUT_H:+.1f} mm proud of the tray face")
     print(f"  screen ap. {sx1 - sx0:.1f} x {sy1 - sy0:.1f} "
           f"(margins L/R {fx(SCREEN_SVG[0]) + PH_W / 2:.2f} / "
           f"{PH_W / 2 - fx(SCREEN_SVG[2]):.2f})")
