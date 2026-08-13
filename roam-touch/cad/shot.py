@@ -24,6 +24,14 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # the bed -- see feedback-nick-sees-geometry: geometry gets judged in the
 # orientation it prints in.
 VIEWS = [
+    # ★ STEP 1 of the functional build — the phone housing on a flat base.
+    # Steps, not one grand go: this is fit only, and it gets its own views so
+    # the thing being judged is the thing that changed.
+    ("roam1_iso",   "roam_step1.stl", 28, 32),
+    ("roam1_top",   "roam_step1.stl", 88, 0),
+    ("roam1_usb",   "roam_step1.stl", 8, 0),
+    ("roam1_jack",  "roam_step1.stl", 8, 180),
+    ("roam1_btn",   "roam_step1.stl", 12, 270),
     ("print_iso",   "bracer_print.stl", 26, 34),
     ("print_side",  "bracer_print.stl", 8, 96),
     ("print_back",  "bracer_print.stl", 22, 208),
