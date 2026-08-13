@@ -217,15 +217,21 @@ class HubApi(
         call(Request.Builder().url(url("presence")).auth().build())
 
     /**
-     * "I am looking at the panel — stop notifying me." The bridge reads this straight
-     * out of the hub, so nothing about suppression lives in the client. Re-post while
-     * foregrounded; a crash then lapses on its own inside [ttlS].
+     * "I am looking at **this** channel — stop notifying me about it." The bridge reads
+     * this straight out of the hub, so nothing about suppression lives in the client.
+     * Re-post while foregrounded; a crash then lapses on its own inside [ttlS].
+     *
+     * @param openPane the channel on screen, or null when he is on the list or elsewhere.
+     *   ⚠️ Null means **nothing is covered** — a message on any channel should buzz,
+     *   because he is not reading any of them. See [PresenceRequest.coversAll] for what
+     *   claiming more than this cost him.
      */
-    suspend fun registerPresence(ttlS: Int = PRESENCE_TTL_S) {
+    suspend fun registerPresence(openPane: String?, ttlS: Int = PRESENCE_TTL_S) {
         val req = PresenceRequest(
             source = PRESENCE_SOURCE,
             kind = "app",
-            coversAll = true,
+            coversAll = false,
+            panes = listOfNotNull(openPane),
             ttlS = ttlS,
             detail = JsonObject(mapOf("device" to JsonPrimitive("pixel"))),
         )

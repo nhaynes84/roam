@@ -93,6 +93,23 @@ class HubRepository(
     private var lastContactMs: Long? = null
     private var presenceJob: Job? = null
 
+    /**
+     * ★ The channel on screen. Presence covers this and nothing else — see
+     * [PresenceRequest.coversAll]. Set from the UI whenever the open thread changes so a
+     * message on any *other* channel still reaches his arm.
+     */
+    @Volatile
+    var openPane: String? = null
+        set(value) {
+            val changed = field != value
+            field = value
+            // ⚠️ Push it immediately rather than waiting up to 30 s for the heartbeat:
+            // he switches channel and expects the next message to behave accordingly.
+            if (changed) scope?.launch { runCatching { api.registerPresence(value) } }
+        }
+
+    private var scope: CoroutineScope? = null
+
     /** Restore what he had already read before the process was killed. */
     suspend fun restore() {
         val cursors = runCatching { settings.loadReadCursors() }.getOrDefault(emptyMap())
@@ -328,21 +345,22 @@ class HubRepository(
     // -----------------------------------------------------------------------
 
     /**
-     * Tell the hub he is looking at the panel, and keep telling it.
+     * Tell the hub which channel he is looking at, and keep telling it.
      *
-     * `API.md`: post `covers_all` on foreground, refresh every ~30 s, delete on
-     * background. The bridge then stops buzzing his arm about a screen he is reading —
-     * and none of that logic is duplicated here, which is the point.
+     * `API.md`: post presence on foreground, refresh every ~30 s, delete on background.
+     * The bridge then stops buzzing his arm about the screen he is reading — and *only*
+     * about that one. None of that logic is duplicated here, which is the point.
      */
     fun startPresence(scope: CoroutineScope) {
+        this.scope = scope
         if (presenceJob?.isActive == true) return
         presenceJob = scope.launch {
             while (isActive) {
                 // ⚠️ Logged, not swallowed. This silently failing is invisible from the
                 // outside: the only symptom is the bridge notifying him about a screen
                 // he is looking at, which reads as a notification bug, not a presence bug.
-                runCatching { api.registerPresence() }
-                    .onSuccess { Log.i(TAG, "presence registered (covers_all)") }
+                runCatching { api.registerPresence(openPane) }
+                    .onSuccess { Log.i(TAG, "presence: covering ${openPane ?: "nothing"}") }
                     .onFailure { Log.w(TAG, "presence POST failed: ${it.message}") }
                 delay(PRESENCE_REFRESH_MS)
             }

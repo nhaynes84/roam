@@ -34,6 +34,10 @@ import java.util.concurrent.LinkedBlockingQueue
  */
 class HubRepositoryTest {
 
+    private companion object {
+        const val PRESENCE_OK = """{"source":"roam-app","presence":{"present":true}}"""
+    }
+
     private lateinit var server: MockWebServer
     private lateinit var repo: HubRepository
     private lateinit var cursors: FakeCursorStore
@@ -418,6 +422,55 @@ class HubRepositoryTest {
             "the whole body must replace the fragment",
             repo.state.value.bodyOf(event).endsWith("characters that were cut."),
         )
+    }
+
+    // -- ★★ presence, i.e. what is allowed to buzz his arm --------------------
+
+    /**
+     * ★★ **The channel he is looking at is reported the moment he opens it.**
+     *
+     * The heartbeat is every 30 s, and a coverage change that waits for it is a coverage
+     * change that is wrong for half a minute — either buzzing him about the conversation
+     * on his screen, or silently swallowing the one that is not. He switches channel and
+     * expects the next message to behave accordingly, so the setter posts immediately.
+     *
+     * ⚠️ The heartbeat here is real (30 s), so the second POST cannot come from it.
+     */
+    @Test
+    fun `changing the open channel re-posts presence without waiting for the heartbeat`() =
+        runBlocking {
+            repeat(4) { server.enqueue(MockResponse().setBody(PRESENCE_OK)) }
+            repo.startPresence(scope)
+
+            val first = takeUntil { it.path == "/presence" }.body.readUtf8()
+            assertTrue(first, first.contains("\"covers_all\":false"))
+            assertTrue("nothing open covers nothing: $first", first.contains("\"panes\":[]"))
+
+            repo.openPane = "%3"
+            val second = takeUntil { it.path == "/presence" }.body.readUtf8()
+            assertTrue(second, second.contains("\"panes\":[\"%3\"]"))
+
+            // ⚠️ And leaving the thread must be just as prompt — an arm that stays silent
+            // after he walks away is exactly the failure this whole path exists to fix.
+            repo.openPane = null
+            val third = takeUntil { it.path == "/presence" }.body.readUtf8()
+            assertTrue(third, third.contains("\"panes\":[]"))
+        }
+
+    /** ⚠️ Re-selecting the same channel is not a change, and must not chatter at the hub. */
+    @Test
+    fun `re-opening the channel already open posts nothing extra`() = runBlocking {
+        repeat(3) { server.enqueue(MockResponse().setBody(PRESENCE_OK)) }
+        repo.startPresence(scope)
+        takeUntil { it.path == "/presence" }
+
+        repo.openPane = "%3"
+        takeUntil { it.path == "/presence" }
+
+        val before = server.requestCount
+        repo.openPane = "%3"
+        delay(200)
+        assertEquals("an unchanged pane is not news", before, server.requestCount)
     }
 
     /** ⚠️ A body that arrived whole must not cost a round trip every time he opens it. */

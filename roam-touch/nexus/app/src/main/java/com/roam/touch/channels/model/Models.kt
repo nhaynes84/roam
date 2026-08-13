@@ -293,7 +293,19 @@ data class SendRequest(
 data class PresenceRequest(
     val source: String,
     val kind: String = "app",
-    @SerialName("covers_all") val coversAll: Boolean = true,
+    /**
+     * ⚠️⚠️ **False, and that is the whole point.** The app used to claim `covers_all`,
+     * which told the hub the wearer had eyes on every channel at once, so the hub
+     * correctly concluded there was nothing worth interrupting him for and stopped
+     * buzzing his arm entirely. The buzz path was never broken; it was never asked to run.
+     *
+     * Owner's rule, verbatim: *"haptic and buzz when I'm actually on that device, and I'm
+     * not in the active channel at the time, that's it."* So presence covers exactly the
+     * pane he has open — [panes] — and nothing else.
+     */
+    @SerialName("covers_all") val coversAll: Boolean = false,
+    /** The pane he is looking at, if any. The hub's `covers()` checks membership here. */
+    val panes: List<String> = emptyList(),
     @SerialName("ttl_s") val ttlS: Int = 90,
     val detail: JsonObject = JsonObject(emptyMap()),
 )

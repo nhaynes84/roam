@@ -144,6 +144,15 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
         if (link.isOnline) openPane?.let { vm.refreshThread(it) }
     }
 
+    // ★★ **What the hub is told he can see — one line, derived, never set by hand.**
+    //
+    // ⚠️⚠️ This is the buzz. Presence is what stops a message he is already reading from
+    // interrupting him, and claiming too much of it is what silenced his arm entirely.
+    // Every place below that moves `openPane` or `screen` feeds this automatically, so a
+    // new navigation path cannot forget to keep presence honest. See [Nav.covered].
+    val covered = Nav.covered(readingEventId != null, screen, openPane, channel != null)
+    LaunchedEffect(covered) { vm.covering(covered) }
+
     // Ask HA the moment that screen is opened, not at process start: a token-less or
     // unreachable server must not cost anything on a device whose main job is Channels.
     LaunchedEffect(screen) {

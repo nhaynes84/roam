@@ -127,6 +127,18 @@ class ChannelsViewModel(
         viewModelScope.launch { toasts.send(Toast(text, bad)) }
     }
 
+    /**
+     * ★★ **The channel his eyes are on, or null for none** — reported to the hub as
+     * presence so it can keep from buzzing him about a screen he is already reading.
+     *
+     * ⚠️ Null is not "unknown", it is "nothing is covered", and it must reach the hub as
+     * eagerly as an open channel does: on the list, anything at all should be able to
+     * reach his arm. The UI decides what this is in exactly one place — [Nav.covered].
+     */
+    fun covering(paneId: String?) {
+        repo.openPane = paneId
+    }
+
     fun openThread(paneId: String) {
         viewModelScope.launch {
             if (paneId !in repo.state.value.hydrated) repo.loadHistory(paneId)

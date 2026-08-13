@@ -66,4 +66,34 @@ object Nav {
         hasOpenPane -> Back.CloseThread
         else -> null
     }
+
+    /**
+     * ★★ **Which channel his eyes are on** — the one that must not buzz his arm, and the
+     * only one. Reported to the hub as presence; see `PresenceRequest`.
+     *
+     * Owner's rule, verbatim: *"haptic and buzz when I'm actually on that device, and I'm
+     * not in the active channel at the time, that's it."*
+     *
+     * ⚠️⚠️ **It is [pane], deliberately, and that is the point of it existing.** The app
+     * used to claim `covers_all` — eyes on every channel at once — so the hub correctly
+     * decided nothing was worth interrupting him for and his arm went silent all evening.
+     * The buzz path was never broken; it was never asked to run. The replacement must
+     * never drift from what is *drawn*, so it is derived from the same function that
+     * decides what to draw rather than set by hand at each place navigation happens —
+     * there were four of those, and the fifth would have been the one that got missed.
+     *
+     * - [Pane.Thread] and [Pane.Reader] — he is in that conversation. Covered.
+     * - [Pane.Detour] — Home Assistant, Apps or Controls is drawn *over* the thread. The
+     *   pane stays open so Back returns to it, but he is not reading it, so it may buzz.
+     * - [Pane.List] — nothing is covered. Anything at all may reach him.
+     */
+    fun covered(
+        reading: Boolean,
+        screen: Screen,
+        openPane: String?,
+        hasChannel: Boolean,
+    ): String? = when (pane(reading, screen, hasChannel)) {
+        Pane.Thread, Pane.Reader -> openPane
+        Pane.Detour, Pane.List -> null
+    }
 }

@@ -194,16 +194,33 @@ class HubApiTest {
 
     // -- presence -----------------------------------------------------------
 
+    /**
+     * ★★ **Presence covers the open channel, not everything.** Claiming `covers_all` told
+     * the hub he had eyes on every channel at once, so it correctly decided nothing was
+     * worth interrupting him for and his arm went silent all evening. The buzz path was
+     * never broken — it was never asked to run.
+     */
     @Test
-    fun `presence registers as a covers-all app source with a TTL`() = runBlocking {
+    fun `presence covers only the channel on screen`() = runBlocking {
         json("""{"source":"roam-app","presence":{"present":true}}""")
-        api.registerPresence()
+        api.registerPresence("%3")
         val req = server.takeRequest()
         assertEquals("/presence", req.path)
         val body = req.body.readUtf8()
         assertTrue(body.contains("\"source\":\"roam-app\""))
-        assertTrue(body.contains("\"covers_all\":true"))
+        assertTrue(body, body.contains("\"covers_all\":false"))
+        assertTrue(body, body.contains("\"panes\":[\"%3\"]"))
         assertTrue(body.contains("\"ttl_s\":${HubApi.PRESENCE_TTL_S}"))
+    }
+
+    /** ⚠️ On the list, nothing is covered — a message on any channel should reach him. */
+    @Test
+    fun `presence with no thread open covers nothing`() = runBlocking {
+        json("""{"source":"roam-app","presence":{"present":true}}""")
+        api.registerPresence(null)
+        val body = server.takeRequest().body.readUtf8()
+        assertTrue(body, body.contains("\"covers_all\":false"))
+        assertTrue(body, body.contains("\"panes\":[]"))
     }
 
     @Test
