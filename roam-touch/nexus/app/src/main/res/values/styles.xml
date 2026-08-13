@@ -1,10 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!--
-      Black, no action bar. Compose paints everything below the status bar; the window
-      background matters only for the frame or two before the first composition, and a
-      white flash on a wrist at night is exactly the kind of detail that gets a device
-      taken off and left on a desk.
+      Black, no action bar. Compose paints the whole window; the background matters only
+      for the frame or two before the first composition, and a white flash on a wrist at
+      night is exactly the kind of detail that gets a device taken off and left on a desk.
+
+      ⚠️ statusBarColor still earns its place even though SystemBars hides the bar: the
+      bar comes back transiently on a swipe from the top edge (that is how the shade stays
+      reachable), and for those few seconds it must match the panel rather than flash a
+      lighter grey band across the top of what he is reading.
     -->
     <style name="Theme.Roam" parent="@android:style/Theme.DeviceDefault.NoActionBar">
         <item name="android:windowBackground">@android:color/black</item>

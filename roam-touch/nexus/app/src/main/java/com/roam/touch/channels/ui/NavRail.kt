@@ -21,8 +21,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.Headphones
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material3.Icon
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -87,17 +91,14 @@ fun NavRail(
             .width(if (shell == Shell.Wide) WIDE_DP else NARROW_DP)
             .fillMaxHeight()
             .background(RoamColors.Surface)
-            .padding(vertical = 6.dp),
+            .padding(vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+        // ⚠️ 5, not 6. Seven children means six gaps, so a dp of air here costs six dp of
+        // channel list — and the list is the only thing in the rail he reads rather than
+        // presses. `the rail spends width, never height` is the test that says so.
+        verticalArrangement = Arrangement.spacedBy(5.dp),
     ) {
-        // ⚠️ The battery rides the header in Wide rather than taking a row of its own.
-        // The rail has a height budget too, and every fixed row it spends is a channel
-        // the list cannot show — see `the rail spends width, never height`, which caught
-        // this footer squeezing the queue to literally zero.
-        RailHome(shell, state.totalUnread(), atHome = screen == Screen.Channels, onHome) {
-            if (shell == Shell.Wide) BatteryChip(battery)
-        }
+        RailHome(shell, state.totalUnread(), atHome = screen == Screen.Channels, onHome)
 
         // ★ The list itself, in the rail, only where there is width for it. In Narrow it
         // stays in the content pane — collapsing the rail rather than forking the tree is
@@ -144,11 +145,12 @@ fun NavRail(
             RailDivider()
             // ⚠️ Capped and scrollable, not "as tall as five chips". Five stacked chips
             // are 170 dp — 41 % of a landscape window — and they would take it out of the
-            // queue above, which is the one thing the rail exists to hold.
+            // queue above, which is the one thing the rail exists to hold. It scrolls
+            // either way, so the cap is purely how much of the list it is worth costing.
             Column(
                 Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 84.dp)
+                    .heightIn(max = 76.dp)
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -171,22 +173,22 @@ fun NavRail(
         RailDivider()
 
         // ⚠️ Only while there is no channel open. With one open the real microphone is on
-        // screen already, in the composer, and a second voice control that merely
-        // navigates would be the exact confusion the root PTT bar used to cause.
-        if (open == null) RailTalk(shell, enabled = state.channels.isNotEmpty(), onVoice)
+        // screen already, in the composer, and a second voice control next to it is the
+        // exact confusion the root PTT bar used to cause.
+        if (open == null) RailTalk(shell, VoiceEntry.target(state.channels), onVoice)
 
         val destinations = @Composable { m: Modifier ->
-            RailDestination(m, "HA", RoamColors.Attention,
+            RailDestination(m, Icons.Filled.Home, "home assistant", RoamColors.Attention,
                 selected = screen == Screen.HomeAssistant, onClick = onOpenHomeAssistant)
-            RailDestination(m, "APPS", RoamColors.TextSecondary,
+            RailDestination(m, Icons.Filled.GridView, "apps", RoamColors.TextPrimary,
                 selected = screen == Screen.Apps, onClick = onOpenApps)
             // ⚠️ Reachable without a headset connected, on purpose: he will want to change
             // a binding sitting down, not while putting earbuds in.
-            RailDestination(m, "BUDS", RoamColors.TextSecondary,
+            RailDestination(m, Icons.Filled.Headphones, "headset buttons", RoamColors.TextPrimary,
                 selected = screen == Screen.Controls, onClick = onOpenControls)
         }
         if (shell == Shell.Wide) {
-            // One row, three doors: 40 dp instead of 120. In a 411 dp window those 80 dp
+            // One row, three doors: 46 dp instead of 138. In a 411 dp window those 92 dp
             // are two more channels in the list.
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 4.dp),
@@ -194,10 +196,9 @@ fun NavRail(
             ) { destinations(Modifier.weight(1f)) }
         } else {
             destinations(Modifier.fillMaxWidth().padding(horizontal = 6.dp))
-            // Portrait has height to spare in the rail, so the battery keeps its own row
-            // where a 62 dp-wide header cannot fit it.
-            Box(Modifier.padding(top = 2.dp)) { BatteryChip(battery) }
         }
+
+        RailStatus(shell, battery, nowMs)
     }
 }
 
@@ -214,7 +215,6 @@ private fun RailHome(
     unread: Int,
     atHome: Boolean,
     onHome: () -> Unit,
-    trailing: @Composable () -> Unit,
 ) {
     val label = @Composable {
         Text(
@@ -263,7 +263,59 @@ private fun RailHome(
                 UnreadBadge(unread)
             }
         }
-        trailing()
+    }
+}
+
+/**
+ * ★★ The two facts the system status bar used to carry, now carried by the app.
+ *
+ * The stock bar is gone — see `SystemBars`, and the owner: *"i don't need to see the
+ * battery charge unless you're going to hide the notification bar that's always on,
+ * which i'm not opposed to."* He is right that a chip beside a bar showing the same
+ * number is amateur duplication. Hiding the bar makes the chip the only copy instead of
+ * the second one, and it buys back 24 dp of a 411 dp window.
+ *
+ * ⚠️ **The clock came with it, and it is not optional on a worn device.** The bar was
+ * where the time lived; a screen on a forearm that cannot tell you the time is worse than
+ * the 24 dp it saved. So this row is time *and* charge, and it is the same row in both
+ * shapes rather than two arrangements that can drift apart.
+ *
+ * It sits at the foot of the rail, below the doors: it is the thing you look at
+ * deliberately, never the thing you navigate with.
+ */
+@Composable
+private fun RailStatus(shell: Shell, battery: BatteryState, nowMs: Long) {
+    val clock = @Composable {
+        Text(
+            text = Format.clock(nowMs),
+            style = MaterialTheme.typography.labelMedium,
+            color = RoamColors.TextSecondary,
+            maxLines = 1,
+        )
+    }
+    if (shell == Shell.Wide) {
+        Row(
+            Modifier
+                .testTag(RAIL_STATUS)
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 1.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            clock()
+            BatteryChip(battery)
+        }
+    } else {
+        // 62 dp cannot hold both on one line, and the rail has height to spare in
+        // portrait — the same trade the header makes one composable up.
+        Column(
+            Modifier.testTag(RAIL_STATUS).fillMaxWidth().padding(top = 2.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            clock()
+            BatteryChip(battery)
+        }
     }
 }
 
@@ -353,13 +405,33 @@ private fun RailChannelRow(
 }
 
 /**
- * ★ The door to voice. It navigates; it does not record.
+ * ★★ TALK — the device's voice front door, and the one control that says where it goes.
+ *
+ * The owner asked what it did, which was the finding: *"what does 'TALK' do in that side
+ * nav, if nothing, it doesn't need to be there."* It did do something — it opened the top
+ * live channel — but a button whose destination is invisible is a button you have to press
+ * to learn. So the destination is printed on it. Nothing changed about what it does.
+ *
+ * ★ It stays because he then gave it a bigger job: *"i'm not opposed to the top level talk
+ * doing 'other things', taking HA commands and piping them in, answering general questions
+ * or other stuff, i dunno, a OS level talk feature."* That is not built and is not assumed
+ * here — but it is why this is shaped as **the root voice control** rather than as a
+ * shortcut into the list beside it. When the interpreter lands, the second line stops
+ * saying which channel it will open and starts saying what it understood; the control
+ * itself does not move.
+ *
+ * ⚠️ **It is not a microphone and must never become one.** The glyph is deliberately not
+ * [Icons.Filled.Mic] — the mic capsule belongs to the in-thread PTT button, which is the
+ * only control on this device that captures into a channel (`MicPolicyTest`). This one is
+ * a head speaking: you address the device with it, you do not record through it.
  *
  * See [VoiceEntry] for the rule it carries out, and note what it is *not*: a hold. A hold
  * here would have to guess a destination, and the destination it would guess moves.
  */
 @Composable
-private fun RailTalk(shell: Shell, enabled: Boolean, onVoice: () -> Unit) {
+private fun RailTalk(shell: Shell, target: Channel?, onVoice: () -> Unit) {
+    val enabled = target != null
+    val color = if (enabled) RoamColors.Attention else RoamColors.Dead
     Row(
         Modifier
             .testTag(RAIL_TALK)
@@ -368,62 +440,79 @@ private fun RailTalk(shell: Shell, enabled: Boolean, onVoice: () -> Unit) {
             .clip(RoundedCornerShape(8.dp))
             .background(RoamColors.SurfaceRaised)
             .clickable(enabled = enabled, onClick = onVoice)
-            .heightIn(min = 44.dp)
+            .heightIn(min = 46.dp)
             .padding(horizontal = 7.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
     ) {
         Icon(
-            imageVector = Icons.Filled.Mic,
-            contentDescription = if (enabled) "talk, opens the top live channel"
+            imageVector = Icons.Filled.RecordVoiceOver,
+            contentDescription = if (enabled) "talk, opens ${target?.displayLabel}"
             else "talk, no channels to talk to yet",
-            tint = if (enabled) RoamColors.Attention else RoamColors.Dead,
-            modifier = Modifier.size(19.dp),
+            tint = color,
+            modifier = Modifier.size(24.dp),
         )
         if (shell == Shell.Wide) {
-            Text(
-                "TALK",
-                style = MaterialTheme.typography.labelMedium,
-                color = if (enabled) RoamColors.Attention else RoamColors.Dead,
-                modifier = Modifier.weight(1f),
-            )
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "TALK",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = color,
+                    maxLines = 1,
+                )
+                // ★ The answer to "what does this do", in the place he was looking when
+                // he asked. It is resolved through [VoiceEntry], not re-derived here, so
+                // the label and the press can never name different channels.
+                Text(
+                    text = if (enabled) "→ ${target?.displayLabel}" else "no channels yet",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = RoamColors.TextSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }
 
 /**
- * One destination — three words he already knows, in the same place in both shapes.
+ * One destination, as a glyph.
  *
- * ⚠️ Never an icon alone. He reads this at arm's length on a forearm; HA / APPS / BUDS
- * are already the compressed form, and compressing them further into glyphs he has to
- * remember the meaning of is how a nav rail becomes a puzzle. They are also the exact
- * words the old top bar used, so nothing he has learned is invalidated by the move.
+ * ⚠️ **This used to be the words HA / APPS / BUDS, and that was the wrong call.** Owner,
+ * 2026-08-12: *"HA / BUDS / APPS, let's do icons instead, looks amateurish."* The comment
+ * that was here argued a glyph is a puzzle he has to remember the meaning of; the reply is
+ * that three shouted abbreviations are a puzzle too, and an uglier one. A house, a grid and
+ * a pair of headphones are not conventions he has to learn.
+ *
+ * ⚠️ The target is read on a forearm, in motion, outdoors, so this is tuned for that and
+ * not for a phone in the hand: 26 dp glyphs (Material's own default is 24), full-strength
+ * [RoamColors.TextPrimary] rather than the secondary grey the words used, and a 46 dp row —
+ * *taller* than the 40 dp the labels had, never smaller. The name survives as the
+ * content description, which is what the tests assert against.
  */
 @Composable
 private fun RailDestination(
     modifier: Modifier,
-    label: String,
+    icon: ImageVector,
+    name: String,
     color: Color,
     selected: Boolean,
     onClick: () -> Unit,
 ) {
-    Row(
+    Box(
         modifier
             .clip(RoundedCornerShape(8.dp))
-            .background(if (selected) color.copy(alpha = 0.20f) else Color.Transparent)
+            .background(if (selected) color.copy(alpha = 0.22f) else Color.Transparent)
             .clickable(onClick = onClick)
-            .heightIn(min = 40.dp)
+            .heightIn(min = 46.dp)
             .padding(horizontal = 5.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        contentAlignment = Alignment.Center,
     ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelMedium,
-            color = if (selected) RoamColors.TextPrimary else color,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.weight(1f),
+        Icon(
+            imageVector = icon,
+            contentDescription = name,
+            tint = if (selected) RoamColors.TextPrimary else color,
+            modifier = Modifier.size(26.dp),
         )
     }
 }
@@ -471,8 +560,8 @@ fun NoChannelOpen(hasChannels: Boolean) {
  *
  * ⚠️ 224, not 196: at 196 the header rendered as "CHANNE… (3) 100%" on the device. The
  * title is the one word in the rail that must never be abbreviated — it is the way home.
- * The 28 dp buys the battery a seat in the header instead of a row of its own, so it
- * costs the channel list nothing.
+ * The battery has since moved out of the header into [RailStatus], so the header has slack
+ * again; the width stays because it is also what lets [RailTalk] print a channel name.
  */
 private val WIDE_DP = 224.dp
 private val NARROW_DP = 62.dp
@@ -480,4 +569,5 @@ private val NARROW_DP = 62.dp
 const val RAIL = "nav-rail"
 const val RAIL_QUEUE = "rail-queue"
 const val RAIL_TALK = "rail-talk"
+const val RAIL_STATUS = "rail-status"
 const val NO_CHANNEL_OPEN = "no-channel-open"

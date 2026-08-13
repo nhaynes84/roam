@@ -13,6 +13,7 @@ import androidx.activity.ComponentActivity;
 import com.roam.touch.channels.HubService;
 import com.roam.touch.channels.Roam;
 import com.roam.touch.channels.ui.ChannelsAppKt;
+import com.roam.touch.channels.ui.SystemBars;
 
 /**
  * Nexus — the ROAM home screen. It owns two separable jobs and keeps them separable:
@@ -60,12 +61,32 @@ public class MainActivity extends ComponentActivity {
         super.onCreate(savedInstanceState);
         handleIntent(getIntent());
 
+        // ★ The stock status bar comes off — 24 dp of a 411 dp landscape window, spent
+        // permanently on a second battery readout and other apps' notification icons.
+        // See SystemBars for what it costs and what it deliberately leaves alone.
+        SystemBars.hideStatusBar(this);
+
         // The connection, the socket and the voice outlive this Activity: the launcher
         // is torn down and rebuilt constantly, and an outcome landing while the screen
         // is off still has to be heard. HubService owns all of it.
         Roam.INSTANCE.init(this);
         HubService.Companion.start(this);
         ChannelsAppKt.installChannelsUi(this);
+    }
+
+    /**
+     * ⚠️ Load-bearing, not cosmetic. Hiding the status bar is a flag on this window, and
+     * every other window that takes focus — the notification shade, a permission dialog,
+     * Settings — hands focus back with that flag cleared. Without this the bar comes back
+     * the first time he pulls the shade down and never leaves again, which is precisely
+     * the state being fixed.
+     */
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) {
+            SystemBars.hideStatusBar(this);
+        }
     }
 
     @Override

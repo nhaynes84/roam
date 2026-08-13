@@ -3,6 +3,7 @@ package com.roam.touch.channels.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -131,28 +132,53 @@ fun ThreadScreen(
         }
     }
 
-    // Something landed while he was reading further up. Not silent — see the chip below.
-    var newBelow by remember(channel.paneId) { mutableStateOf(false) }
-
-    // ⚠️ Opening a thread is not "an event arrived": a `LazyColumn` starts at index 0, so
-    // without this the very first frame looks like he had scrolled away from the tail and
-    // the panel greeted him with "NEW BELOW" over the newest answer. Jump, don't animate —
-    // he asked for this channel, not for a tour of it.
-    var settled by remember(channel.paneId) { mutableStateOf(false) }
-    LaunchedEffect(channel.paneId, entries.isNotEmpty()) {
-        if (entries.isNotEmpty() && !settled) {
-            listState.scrollToItem(entries.lastIndex)
-            settled = true
+    // ⚠️⚠️ **A finger on the list is the only thing that stops the panel following.**
+    // Geometry alone said "he has scrolled away" the moment the newest answer was taller
+    // than the window, which is most of them — see [ThreadFollow.isFollowing]. This is the
+    // signal that actually means "he has taken over": a drag he started, not a scroll
+    // position our own `animateScrollToItem` also produces.
+    var dragged by remember(channel.paneId) { mutableStateOf(false) }
+    LaunchedEffect(listState, channel.paneId) {
+        listState.interactionSource.interactions.collect { interaction ->
+            if (interaction is DragInteraction.Start) dragged = true
         }
     }
+    val following by remember { derivedStateOf { ThreadFollow.isFollowing(dragged, atTail) } }
 
-    LaunchedEffect(entries.lastOrNull()?.id) {
-        if (entries.isEmpty() || !settled) return@LaunchedEffect
-        // `atTail` is read before the scroll happens, so it describes where he was when
-        // the event arrived rather than where this effect is about to put him.
-        if (atTail) listState.animateScrollToItem(entries.lastIndex) else newBelow = true
+    // Something landed while he was reading further up. Not silent — see the chip below.
+    var newBelow by remember(channel.paneId) { mutableStateOf(false) }
+    LaunchedEffect(following) { if (following) newBelow = false }
+
+    // ★★ The one place the thread moves itself, and the decision behind it is pure — see
+    // [ThreadFollow.move].
+    //
+    // ⚠️ Keyed on the size as well as the last id. The hub delivers the tail over the
+    // socket and the backlog over `GET /thread`, so history arrives *underneath* what is
+    // already on screen: the last id never changes, the list grows by thirty rows, and an
+    // index that meant "the bottom" now means "near the top". Without the size in the key
+    // that is invisible, and it is the state he opens a busy channel into.
+    var settled by remember(channel.paneId) { mutableStateOf(false) }
+    var seenLastId by remember(channel.paneId) { mutableStateOf<Long?>(null) }
+    val lastId = entries.lastOrNull()?.id
+
+    LaunchedEffect(channel.paneId, lastId, entries.size) {
+        // ⚠️ `following` is read here, before anything moves, so it describes where he was
+        // when the event arrived — never where this effect is about to put him.
+        val move = ThreadFollow.move(
+            empty = entries.isEmpty(),
+            opening = !settled,
+            following = following,
+            arrived = seenLastId != null && lastId != seenLastId,
+        )
+        seenLastId = lastId
+        if (entries.isNotEmpty()) settled = true
+        when (move) {
+            ThreadFollow.Move.None -> Unit
+            ThreadFollow.Move.Jump -> listState.scrollToItem(entries.lastIndex)
+            ThreadFollow.Move.Animate -> listState.animateScrollToItem(entries.lastIndex)
+            ThreadFollow.Move.Announce -> newBelow = true
+        }
     }
-    LaunchedEffect(atTail) { if (atTail) newBelow = false }
 
     Column(
         Modifier
@@ -212,6 +238,13 @@ fun ThreadScreen(
                             .padding(bottom = 10.dp)
                             .clip(RoundedCornerShape(7.dp))
                             .clickable {
+                                // ⚠️ Pressing it hands control back. Without clearing
+                                // `dragged` the chip took him to the newest answer and
+                                // then stayed on screen — because a long answer is not
+                                // "at its own end" the moment you arrive at its top, so
+                                // the panel still believed he had scrolled away.
+                                dragged = false
+                                newBelow = false
                                 scope.launch { listState.animateScrollToItem(entries.lastIndex) }
                             }
                             .heightIn(min = 40.dp),
