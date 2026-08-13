@@ -13,6 +13,7 @@ Five passes:
   5. print-orientation study: measured unsupported-face area per orientation,
      rather than guessing which way up it should go
 """
+import re
 import numpy as np
 import trimesh
 import math
@@ -59,8 +60,12 @@ ARM_CZ = -(GAP + FOAM) - ARM_R * math.cos(math.radians(TILT))
 CAP_FLANK_MIN = 6.0
 HULL_Z_DEEP = min(PAYLOAD_Z - 2.0, HULL_BELT - CAP_FLANK_MIN)   # -11.0
 GZ1 = OUT_H + GUARD_H
-WIN_X, BEZEL_CHAM, LIP_H = 32.03, 1.5, 2.4
-SIGHT = BEZEL_CHAM / LIP_H
+# ⚠️ WIN_X is DERIVED below from bracer.py's SCREEN_SVG, not mirrored. It was
+# mirrored as 32.03 and the owner then brought the bezel in 2 mm a side, so the
+# viewing-cone check went on casting its ray from 1.8 mm OUTSIDE the window --
+# under solid bezel -- and reported the cone had collapsed to 0 deg on a model
+# whose cone was fine. Same class of failure as the camera and prox probes.
+BEZEL_CHAM, LIP_H = 1.5, 2.4
 CARD_L, CARD_W, CARD_T = 85.60, 53.98, 0.76   # ISO/IEC 7810 ID-1
 STRAP_Y0, STRAP_Y1 = 34.0, 112.0
 # ★ Calibrated, not picked. The thinnest wall the FROZEN housing deliberately
@@ -78,6 +83,46 @@ MIN_WALL_PLUNGER = 0.8
 CAP_D, CAP_T = 10.0, 12.0
 
 Z_FACE = FLOOR + POCK_D          # phone front face
+
+# ★★ The face features are READ OUT OF bracer.py, not mirrored by hand like the
+# scalars above.
+#
+# ⚠️ This is the one place mirroring actually bit. The camera and proximity
+# probes were literal coordinates — (-23.53, 138.4) and (-1.0, 132.5) — so when
+# the owner measured a printed part and moved both features, the probes went on
+# testing the empty bezel where the holes used to be and reported FAIL on a
+# model that was correct. A harness that has to be hand-edited to agree with the
+# thing it checks will disagree with it eventually, and silently.
+#
+# Parsed from the source rather than imported: importing bracer.py runs the
+# whole 13 s build, and the point of this file is that it takes one second.
+def _svg_tuple(name):
+    src = open(os.path.join(HERE, "bracer.py")).read()
+    hit = re.search(rf'^{name} = \(([^)]*)\)', src, re.M)
+    if not hit:
+        raise SystemExit(f"verify: cannot find {name} in bracer.py")
+    return [float(v) for v in hit.group(1).split('#')[0].split(',')]
+
+def _svg_scalar(name):
+    src = open(os.path.join(HERE, "bracer.py")).read()
+    hit = re.search(rf'^{name} = ([0-9.]+)', src, re.M)
+    if not hit:
+        raise SystemExit(f"verify: cannot find {name} in bracer.py")
+    return float(hit.group(1))
+
+_CAM_SVG = _svg_tuple("CAM_SVG")            # cx, cy, r
+_PROX_SVG = _svg_tuple("PROX_SVG")          # x0, y0, x1, y1
+_SCREEN_SVG = _svg_tuple("SCREEN_SVG")      # x0, y0, x1, y1
+_FEAT_TOL = _svg_scalar("FEAT_TOL")
+_PH_W = 69.5
+_PHONE_TOP_Y = 144.18                        # POCK_L - CLR, mirrored
+_fx = lambda x: x - _PH_W / 2
+_fy = lambda y: _PHONE_TOP_Y - y
+WIN_X = max(abs(_fx(_SCREEN_SVG[0])), abs(_fx(_SCREEN_SVG[2]))) + _FEAT_TOL
+SIGHT = BEZEL_CHAM / LIP_H
+_CAM_XY = (_fx(_CAM_SVG[0]), _fy(_CAM_SVG[1]))
+_PROX_XY = (_fx((_PROX_SVG[0] + _PROX_SVG[2]) / 2),
+            _fy((_PROX_SVG[1] + _PROX_SVG[3]) / 2))
 probes = [
     # ---------------------------------------------------- frozen phone housing
     # (label, point, expect_solid)
@@ -100,8 +145,8 @@ probes = [
     ("bezel above the screen",       (0, 135.0, Z_FACE + 1.0), True),
     ("bezel below the screen",       (0, 10.0, Z_FACE + 1.0), True),
     ("earpiece slot",                (0, 138.2, Z_FACE + 1.0), False),
-    ("front camera hole",            (-23.53, 138.4, Z_FACE + 1.0), False),
-    ("proximity/ambient window",     (-1.0, 132.5, Z_FACE + 1.0), False),
+    ("front camera hole",            (_CAM_XY[0], _CAM_XY[1], Z_FACE + 1.0), False),
+    ("proximity/ambient window",     (_PROX_XY[0], _PROX_XY[1], Z_FACE + 1.0), False),
     ("bezel between camera and ear", (-15.0, 138.2, Z_FACE + 1.0), True),
     # ⚠️ The jack is in the button-side quartile, NOT centred -- so the wall
     # probe moved to the far side and the notch probe moved onto the jack.

@@ -617,10 +617,30 @@ BTN_PRESS = 0.0
 # them as +/-1 mm and check against the real phone once a print exists.
 # SVG origin is the top-left of the FACE, y increasing toward the USB-C end.
 FEAT_TOL = 0.6       # opening margin, absorbs the tracing error
-SCREEN_SVG = (3.32, 14.30, 66.12, 127.77)   # x0,y0,x1,y1 -- black display area
+# ★★ CORRECTED 2026-08-12 AGAINST A PRINTED PART, which is what the note above
+# asked for. The owner fitted the real phone and measured the error:
+#   "bring the screen bezel in about 2mm left and right, 4mm top and bottom.
+#    Your camera hole on the top left needs to move right about 4mm and down
+#    about 3 ... buttons are perfect though man, they feel great, first try"
+# ⚠️ These are measurements, not preferences — do not re-derive them from the
+# SVG, and do not let a future regeneration quietly restore the traced values.
+# He rates his own eye at ±0.5 mm ("i'm guestimating but I'm within half an mm
+# on everything guaranteed"), which is inside FEAT_TOL and better than the ±1 mm
+# the drawing claimed — the screen was out by 4.
+# The button positions were traced from the same drawing and came out perfect
+# first try, so the drawing is not uniformly wrong: only the face features are.
+SCREEN_SVG = (5.32, 18.30, 64.12, 123.77)   # x0,y0,x1,y1 -- black display area
+# ⚠️ The earpiece slot is UNCHANGED and stays that way. I first read "the open
+# cut out" as this slot and moved it; wrong. Owner: *"i was describing the prox
+# open cutout, that is the bottom one in the middle of the top part of the bezel
+# ... everything didn't need to come down, you needed to shift the edges that
+# meet the screen, and then make the other very specific shifts i gave you."*
+# ★ Each correction is local. The screen aperture's own edges move; the camera
+# and the prox window move by their own stated amounts; nothing else does.
 EARPIECE_SVG = (27.10, 5.44, 40.78, 6.51)
-PROX_SVG = (31.49, 10.70, 36.38, 12.65)     # proximity + ambient light
-CAM_SVG = (11.22, 5.78, 1.50)               # cx, cy, r -- front camera
+# right 1.5, down 3.0 -- measured off the printed part
+PROX_SVG = (32.99, 13.70, 37.88, 15.65)     # proximity + ambient light
+CAM_SVG = (15.22, 8.78, 1.50)               # cx, cy, r -- front camera
 PWR_SVG = (37.11, 46.01)                    # power button, y range, right edge
 VOL_SVG = (55.16, 72.91)                    # volume rocker, y range, right edge
 VENT_R = 6.0
