@@ -156,14 +156,15 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
     // against a channel he has walked away from is exactly the mis-routing the confirm
     // step exists to prevent.
     BackHandler(enabled = readingEventId != null || openPane != null || screen != Screen.Channels) {
-        when {
-            // ⚠️ The reader unwinds to the thread it came from, not to Channels: he
-            // opened it from a conversation he is still in the middle of. Speech is
-            // deliberately left running — walking away from the text while still
-            // listening to it is the point of having both.
-            readingEventId != null -> readingEventId = null
-            openPane != null -> { openPane = null; vm.stopSpeaking(); vm.pttCancel() }
-            else -> screen = Screen.Channels
+        // ⚠️ The reader unwinds to the thread it came from, not to Channels: he opened it
+        // from a conversation he is still in the middle of. Speech is deliberately left
+        // running — walking away from the text while still listening to it is the point
+        // of having both. The precedence itself lives in [Nav.back].
+        when (Nav.back(readingEventId != null, screen, openPane != null)) {
+            Back.CloseReader -> readingEventId = null
+            Back.CloseDetour -> screen = Screen.Channels
+            Back.CloseThread -> { openPane = null; vm.stopSpeaking(); vm.pttCancel() }
+            null -> Unit
         }
     }
 
@@ -293,6 +294,44 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
                 onPlay = { vm.play(reading) },
                 onStopPlaying = vm::stopSpeaking,
             )
+            // ⚠️⚠️ A detour outranks an open thread, and this order is the whole of it.
+            //
+            // While the destinations lived on the channel *list*, they were unreachable
+            // from inside a thread, so "thread wins" was never wrong. The rail put them on
+            // screen everywhere — and then tapping one highlighted it and changed nothing,
+            // because `channel != null` was still answered first. Owner: *"the icons don't
+            // seem to work."* They worked; the pane never moved.
+            //
+            // ★ `openPane` is deliberately left set. The detour is drawn *over* the thread,
+            // not instead of it, so Back and CHANNELS both land him back in the
+            // conversation he left rather than at the list.
+        } else if (screen != Screen.Channels) {
+            when (screen) {
+                Screen.Apps -> AppsScreen(
+                    onBack = { screen = Screen.Channels },
+                    onOpenHomeAssistant = { screen = Screen.HomeAssistant },
+                    onMessage = { vm.notify(it) },
+                )
+
+                Screen.HomeAssistant -> HomeAssistantScreen(
+                    home = haHome,
+                    onBack = { screen = Screen.Channels },
+                    onRefresh = vm::refreshHa,
+                    onTap = vm::tapHa,
+                )
+
+                Screen.Controls -> ControlsScreen(
+                    profile = headset,
+                    seen = seenKeys,
+                    learningFor = learningFor,
+                    onBack = { screen = Screen.Channels },
+                    onLearn = { action -> learningFor = action; controls.learnNext() },
+                    onCancelLearn = { learningFor = null; controls.cancelLearning() },
+                    onUnbind = controls::unbind,
+                )
+
+                Screen.Channels -> Unit // unreachable: guarded by the branch condition
+            }
         } else if (channel != null) {
             ThreadScreen(
                 shell = shell,
@@ -325,40 +364,18 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
                 onPttCancel = vm::pttCancel,
                 onPttDismiss = vm::pttDismiss,
             )
-        } else when (screen) {
+        } else {
+            // Nothing open and no detour: the list itself, or the prompt to pick from it.
             // ⚠️ In Wide the queue is already in the rail, so re-drawing it here would be
             // the same list twice. The content pane says what to do instead of showing a
             // copy — see [NoChannelOpen].
-            Screen.Channels -> if (shell == Shell.Wide) {
+            if (shell == Shell.Wide) {
                 NoChannelOpen(hasChannels = state.channels.isNotEmpty())
             } else ChannelListScreen(
                 state = state,
                 link = link,
                 nowMs = nowMs,
                 onOpen = { openPane = it.paneId; vm.openThread(it.paneId) },
-            )
-
-            Screen.Apps -> AppsScreen(
-                onBack = { screen = Screen.Channels },
-                onOpenHomeAssistant = { screen = Screen.HomeAssistant },
-                onMessage = { vm.notify(it) },
-            )
-
-            Screen.HomeAssistant -> HomeAssistantScreen(
-                home = haHome,
-                onBack = { screen = Screen.Channels },
-                onRefresh = vm::refreshHa,
-                onTap = vm::tapHa,
-            )
-
-            Screen.Controls -> ControlsScreen(
-                profile = headset,
-                seen = seenKeys,
-                learningFor = learningFor,
-                onBack = { screen = Screen.Channels },
-                onLearn = { action -> learningFor = action; controls.learnNext() },
-                onCancelLearn = { learningFor = null; controls.cancelLearning() },
-                onUnbind = controls::unbind,
             )
         }
         } // end content pane
