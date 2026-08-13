@@ -46,11 +46,26 @@
           force-stopped, so this activity stays resident and `am start` would otherwise
           just re-front the task and drop the clear_device_owner extra. See MainActivity.
         -->
+        <!--
+          ★ Locked to landscape, and locked here rather than in Settings.
+
+          This is worn on a forearm, so the accelerometer is being swung around all day
+          and every arm movement was a candidate re-layout. Owner: *"autorotate keeps
+          going, it's annoying."* `sensorLandscape` would still let it flip end-for-end
+          when he lowers his arm, which is the same complaint; `landscape` pins it to the
+          one orientation the housing physically holds the phone in.
+
+          ⚠️ A device-wide `accelerometer_rotation 0` would be the wrong fix — it is a
+          setting he could change, it applies to every other app on the device, and it
+          says nothing about why. The constraint belongs to this app, because it comes
+          from the bracer.
+        -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:label="@string/app_name"
             android:launchMode="singleTop"
+            android:screenOrientation="landscape"
             android:theme="@style/Theme.Roam"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
