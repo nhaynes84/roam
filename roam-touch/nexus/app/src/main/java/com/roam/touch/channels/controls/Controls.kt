@@ -125,8 +125,31 @@ data class HeadsetProfile(
      */
     val introduced: Boolean = false,
 ) {
+    /**
+     * ★★ Bind [gesture] to [action] — and it is a **move**, in both directions.
+     *
+     * ⚠️⚠️ One gesture does one thing, and one action lives on one gesture. The map can
+     * express neither of those wrong states usefully, and both of them bit:
+     *
+     * - Binding onto an occupied gesture **silently displaced** what was there. The owner
+     *   taught SEND to his double tap; the stray play/pause behind it (see [ControlRouter])
+     *   meant the tap was what actually got captured, and the tap was push-to-talk.
+     *   Owner: *"it unset my push to talk, so the mappings are a little buggy."* The echo
+     *   fix stops that happening by accident, but he can still do it deliberately, so the
+     *   displacement is now **returned** and said out loud rather than being a silence.
+     * - Moving an action to a new gesture used to leave the old gesture bound to it as
+     *   well, so two gestures fired one action while the screen — [boundTo] takes the
+     *   first match — could only ever show one of them.
+     */
     fun bind(gesture: HeadsetGesture, action: ControlAction) =
-        copy(bindings = bindings + (gesture to action))
+        copy(bindings = bindings.filterValues { it != action } + (gesture to action))
+
+    /**
+     * ⚠️ What binding [gesture] to [action] would take away from him, if anything. Null
+     * when the gesture is free, or already does this. See [bind].
+     */
+    fun displacedBy(gesture: HeadsetGesture, action: ControlAction): ControlAction? =
+        bindings[gesture]?.takeIf { it != action }
 
     /** Release a gesture back to the headset and the system. */
     fun unbind(gesture: HeadsetGesture) = copy(bindings = bindings - gesture)

@@ -115,7 +115,16 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
     // has already stopped learning by the time this lands.
     LaunchedEffect(Unit) {
         controls.learned.collect { gesture ->
-            learningFor?.let { controls.bind(gesture, it) }
+            learningFor?.let { action ->
+                // ⚠️⚠️ **A gesture does one thing, so teaching it a new one ends the old
+                // one — and that must be said, not discovered.** This is how his
+                // push-to-talk disappeared: SEND landed on the tap that held it, and
+                // nothing on screen or off it mentioned the swap. Owner: *"it unset my
+                // push to talk, so the mappings are a little buggy."*
+                controls.bind(gesture, action)?.let { lost ->
+                    vm.notify("${gesture.label} was ${lost.label} — now ${action.label}")
+                }
+            }
             learningFor = null
         }
     }
@@ -360,6 +369,7 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
                     onLearn = { action -> learningFor = action; controls.learnNext() },
                     onCancelLearn = { learningFor = null; controls.cancelLearning() },
                     onUnbind = controls::unbind,
+                    shell = shell,
                 )
 
                 Screen.Channels -> Unit // unreachable: guarded by the branch condition

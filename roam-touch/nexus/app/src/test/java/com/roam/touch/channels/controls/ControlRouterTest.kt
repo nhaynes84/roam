@@ -223,6 +223,71 @@ class ControlRouterTest {
             ControlDecision.PassThrough, down(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE))
     }
 
+    /**
+     * ★★ ⚠️⚠️ **Binding onto a taken gesture steals it, and the theft must be reported.**
+     *
+     * Bindings are a map keyed by gesture, so one gesture does one thing — teaching it a
+     * second thing ends the first, silently. That is how his push-to-talk disappeared:
+     * SEND, taught to a double tap, actually landed on the stray play/pause behind it,
+     * which was the tap that held push-to-talk. Owner: *"it unset my push to talk, so the
+     * mappings are a little buggy."*
+     *
+     * The echo fix stops it happening by accident; this stops it happening invisibly.
+     */
+    @Test
+    fun `binding onto a taken gesture reports what it took away`() {
+        val profile = HeadsetProfile("11:22", "Buds").bind(tap, ControlAction.PUSH_TO_TALK)
+
+        assertEquals(
+            ControlAction.PUSH_TO_TALK,
+            profile.displacedBy(tap, ControlAction.SEND),
+        )
+        assertNull("a free gesture takes nothing", profile.displacedBy(next, ControlAction.SEND))
+        assertNull(
+            "re-teaching a gesture what it already does takes nothing",
+            profile.displacedBy(tap, ControlAction.PUSH_TO_TALK),
+        )
+    }
+
+    /**
+     * ⚠️⚠️ **And moving an action must not leave it behind as well.** A bind that only
+     * added left the old gesture still firing the action, so two gestures did one thing
+     * while the screen — [HeadsetProfile.boundTo] takes the first match — could show only
+     * one of them. He would have re-mapped push-to-talk and still had the old earbud tap
+     * opening a microphone.
+     */
+    @Test
+    fun `moving an action to another gesture releases the gesture it came from`() {
+        val profile = HeadsetProfile("11:22", "Buds")
+            .bind(tap, ControlAction.PUSH_TO_TALK)
+            .bind(next, ControlAction.PUSH_TO_TALK)
+
+        assertEquals(next, profile.boundTo(ControlAction.PUSH_TO_TALK))
+        assertEquals("one gesture, not two", 1, profile.bindings.size)
+
+        router.profile = profile
+        assertEquals(
+            "the old gesture is the headset's again",
+            ControlDecision.PassThrough,
+            down(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE),
+        )
+    }
+
+    /** ⚠️ Displacing one action must not disturb the others. */
+    @Test
+    fun `a steal takes exactly one binding and leaves the rest alone`() {
+        val profile = HeadsetProfile("11:22", "Buds")
+            .bind(tap, ControlAction.PUSH_TO_TALK)
+            .bind(next, ControlAction.SEND)
+            .bind(volumeUp, ControlAction.CANCEL)
+            .bind(tap, ControlAction.SEND)
+
+        assertEquals(tap, profile.boundTo(ControlAction.SEND))
+        assertNull("push to talk was taken and says so", profile.boundTo(ControlAction.PUSH_TO_TALK))
+        assertEquals("cancel is untouched", volumeUp, profile.boundTo(ControlAction.CANCEL))
+        assertNull("and the gesture SEND came from is free", profile.bindings[next])
+    }
+
     @Test
     fun `unbinding leaves nothing bound to that action`() {
         val profile = HeadsetProfile("11:22", "Buds")

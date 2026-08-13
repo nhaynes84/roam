@@ -2,14 +2,19 @@ package com.roam.touch.channels.ui
 
 import android.view.KeyEvent
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.unit.height
 import com.roam.touch.channels.controls.ControlAction
 import com.roam.touch.channels.controls.HeadsetGesture
 import com.roam.touch.channels.controls.HeadsetProfile
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -31,6 +36,9 @@ class ControlsScreenTest {
     @get:Rule
     val compose = createComposeRule()
 
+    /** Breathing room the last binding row must keep below it. */
+    private val MARGIN_DP = 24f
+
     private val tap = HeadsetGesture(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
     private val volumeUp = HeadsetGesture(KeyEvent.KEYCODE_VOLUME_UP)
 
@@ -42,6 +50,7 @@ class ControlsScreenTest {
         profile: HeadsetProfile?,
         seen: List<String> = emptyList(),
         learningFor: ControlAction? = null,
+        shell: Shell = Shell.Narrow,
     ) {
         compose.setContent {
             RoamTheme {
@@ -53,6 +62,7 @@ class ControlsScreenTest {
                     onLearn = { learned = it },
                     onCancelLearn = {},
                     onUnbind = { unbound = it },
+                    shell = shell,
                 )
             }
         }
@@ -74,14 +84,61 @@ class ControlsScreenTest {
         compose.onNodeWithText("send").assertExists()
         compose.onNodeWithText("next channel").assertExists()
         compose.onNodeWithText("previous channel").assertExists()
-        // ⚠️ `assertExists`, not `assertIsDisplayed`, from here down: SEND made a fifth
-        // action and the list now runs past the bottom of a 411 dp landscape window. It
-        // is scrollable, so this still asserts every action is offered — but the screen
-        // has quietly become one he has to scroll, which is worth knowing on a device
-        // he reads at arm's length.
         compose.onNodeWithText("cancel").assertExists()
         // Four of the five actions are unbound, and each says so.
         assertEquals(4, compose.onAllNodes(hasText("not bound")).fetchSemanticsNodes().size)
+    }
+
+    // --- ★★ it must not need scrolling on a forearm --------------------------
+
+    /**
+     * ★★ **All five actions on screen at once, in the orientation the housing is going
+     * to.** SEND made a fifth action and the list ran past the bottom of sailfish's
+     * 411 dp-tall landscape window. It scrolled, and he never complained — but a
+     * settings screen you have to scroll is a minor annoyance at a desk and a real one
+     * on a wrist you are reading at arm's length with one hand full.
+     *
+     * ⚠️ Measured against the window, not eyeballed, and against the *unclipped* bounds
+     * so a block that overflows is caught rather than silently cropped.
+     */
+    @Test
+    @Config(qualifiers = "w731dp-h411dp-land")
+    fun `every binding fits a landscape window without scrolling`() {
+        render(buds(tap to ControlAction.PUSH_TO_TALK), shell = Shell.Wide)
+
+        val root = compose.onRoot().getUnclippedBoundsInRoot()
+        val bindings = compose.onNodeWithTag(BINDINGS).getUnclippedBoundsInRoot()
+        println(
+            "BINDINGS top=${bindings.top.value}dp bottom=${bindings.bottom.value}dp " +
+                "of window ${root.height.value}dp"
+        )
+        // ⚠️ A margin, not merely "does not overflow". Landing exactly on the bottom
+        // edge is a layout one padding tweak away from scrolling again, and the last row
+        // would read as cut off even while it technically fitted.
+        val room = root.height.value - MARGIN_DP
+        assertTrue(
+            "the bindings reach ${bindings.bottom.value}dp of a ${root.height.value}dp " +
+                    "window, leaving no room below the last row",
+            bindings.bottom.value <= room,
+        )
+        for (action in ControlAction.entries) {
+            compose.onNodeWithText(action.label).assertIsDisplayed()
+        }
+    }
+
+    /**
+     * ⚠️ Portrait keeps the single column. There is height to spare there and width to
+     * spare in landscape; the fold is per shape, not a new layout everywhere.
+     */
+    @Test
+    @Config(qualifiers = "w411dp-h731dp-port")
+    fun `portrait keeps one binding per row`() {
+        render(buds(tap to ControlAction.PUSH_TO_TALK), shell = Shell.Narrow)
+
+        val rows = ControlAction.entries.map {
+            compose.onNodeWithText(it.label).getUnclippedBoundsInRoot().top.value
+        }
+        assertEquals("every row must be at a different height", rows.size, rows.toSet().size)
     }
 
     /** ★★ One binding, changed in place — no wizard to walk. */

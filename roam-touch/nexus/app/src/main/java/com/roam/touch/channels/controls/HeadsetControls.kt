@@ -267,8 +267,17 @@ class HeadsetControls(
 
     fun cancelLearning() = router.stopLearning()
 
-    fun bind(gesture: HeadsetGesture, action: ControlAction) =
+    /**
+     * ⚠️ Returns what this binding **took away**, if anything — see
+     * [HeadsetProfile.displacedBy]. A gesture does one thing, so teaching it a new one
+     * ends the old one, and that has to reach him rather than being discovered later as
+     * a control that stopped working.
+     */
+    fun bind(gesture: HeadsetGesture, action: ControlAction): ControlAction? {
+        val displaced = _active.value?.displacedBy(gesture, action)
         update { it.bind(gesture, action).copy(introduced = true) }
+        return displaced
+    }
 
     /** ⚠️ Give the gesture back to the headset and the system. */
     fun unbind(gesture: HeadsetGesture) = update { it.unbind(gesture) }

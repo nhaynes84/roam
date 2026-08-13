@@ -22,6 +22,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.roam.touch.channels.controls.ControlAction
 import com.roam.touch.channels.controls.HeadsetGesture
@@ -49,13 +50,30 @@ fun ControlsScreen(
     onLearn: (ControlAction) -> Unit,
     onCancelLearn: () -> Unit,
     onUnbind: (HeadsetGesture) -> Unit,
+    shell: Shell = Shell.Narrow,
 ) {
     Column(
         Modifier
             .fillMaxSize()
             .background(RoamColors.Background)
     ) {
-        BackToChannelsBar("HEADSET CONTROLS", onBack)
+        // ★ In the wide shell the headset's name rides in the bar rather than costing a
+        // row of its own. Which headset these bindings belong to is load-bearing — his
+        // two disagree about everything — but the five actions need the height more than
+        // a second header does.
+        BackToChannelsBar(
+            "HEADSET CONTROLS",
+            onBack,
+            trailing = if (shell == Shell.Wide && profile != null) {
+                {
+                    Text(
+                        profile.name,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = RoamColors.TextPrimary,
+                    )
+                }
+            } else null,
+        )
 
         if (profile == null) {
             // ⚠️ Honest and specific, like every other empty state in this app: there is
@@ -78,11 +96,13 @@ fun ControlsScreen(
                 .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(9.dp),
         ) {
-            Text(
-                profile.name,
-                style = MaterialTheme.typography.titleMedium,
-                color = RoamColors.TextPrimary,
-            )
+            if (shell != Shell.Wide) {
+                Text(
+                    profile.name,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = RoamColors.TextPrimary,
+                )
+            }
 
             if (learningFor != null) {
                 LearnCard(learningFor, onCancelLearn)
@@ -91,14 +111,49 @@ fun ControlsScreen(
             // ★ One row per action, always all of them, so an *unbound* action is as
             // visible as a bound one. A missing binding he cannot see is a control he
             // will think is broken.
-            ControlAction.entries.forEach { action ->
-                BindingRow(
-                    action = action,
-                    gesture = profile.boundTo(action),
-                    learning = learningFor == action,
-                    onLearn = { onLearn(action) },
-                    onUnbind = onUnbind,
-                )
+            //
+            // ★★ ⚠️ **And all of them at once, without scrolling.** The fifth action
+            // (SEND) pushed the list past the bottom of a 411 dp-tall landscape window.
+            // A settings screen that scrolls is a minor annoyance at a desk and a real
+            // one on a forearm — so in the wide shell the rows go two-up, spending the
+            // width this orientation has plenty of to buy back the height it does not.
+            // Pinned by `ControlsScreenTest`.
+            val rows = ControlAction.entries.toList()
+            Column(
+                Modifier.testTag(BINDINGS),
+                verticalArrangement = Arrangement.spacedBy(9.dp),
+            ) {
+                if (shell == Shell.Wide) {
+                    rows.chunked(2).forEach { pair ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                            pair.forEach { action ->
+                                Box(Modifier.weight(1f)) {
+                                    BindingRow(
+                                        action = action,
+                                        gesture = profile.boundTo(action),
+                                        learning = learningFor == action,
+                                        onLearn = { onLearn(action) },
+                                        onUnbind = onUnbind,
+                                    )
+                                }
+                            }
+                            // ⚠️ An odd count leaves a hole, not a double-width row: a
+                            // row that changes shape because of how many siblings it has
+                            // is a row he has to re-find every time the list grows.
+                            if (pair.size == 1) Spacer(Modifier.weight(1f))
+                        }
+                    }
+                } else {
+                    rows.forEach { action ->
+                        BindingRow(
+                            action = action,
+                            gesture = profile.boundTo(action),
+                            learning = learningFor == action,
+                            onLearn = { onLearn(action) },
+                            onUnbind = onUnbind,
+                        )
+                    }
+                }
             }
 
             if (profile.capturesVolume) {
@@ -115,6 +170,17 @@ fun ControlsScreen(
                 "a tap on the headset starts and stops recording — it is a toggle, not a " +
                         "hold. The panel says LISTENING and the phone buzzes when the mic " +
                         "actually opens."
+            )
+
+            // ⚠️⚠️ Said on the screen where it happens, because it happened silently and
+            // he had to work it out from the symptom: *"it unset my push to talk, so the
+            // mappings are a little buggy."* Binding onto a taken gesture is legal and
+            // sometimes what he wants — it just may never be a surprise. The swap is
+            // also announced as it happens, from ChannelsApp.
+            Note(
+                "one gesture does one thing. Setting a gesture that is already listed " +
+                        "above moves it — whatever it used to do becomes unbound, and the " +
+                        "screen will say so."
             )
 
             if (seen.isNotEmpty()) {
@@ -255,3 +321,6 @@ private fun Note(text: String) {
             .padding(10.dp),
     )
 }
+
+/** The block of one-per-action binding rows, measured by `ControlsScreenTest`. */
+const val BINDINGS = "controls-bindings"
