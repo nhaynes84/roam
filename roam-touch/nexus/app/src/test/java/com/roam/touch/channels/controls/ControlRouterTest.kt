@@ -24,7 +24,8 @@ class ControlRouterTest {
     private val next = HeadsetGesture(KeyEvent.KEYCODE_MEDIA_NEXT)
     private val volumeUp = HeadsetGesture(KeyEvent.KEYCODE_VOLUME_UP)
 
-    private val router = ControlRouter()
+    private var now = 10_000L
+    private val router = ControlRouter { now }
 
     private fun down(code: Int, repeat: Int = 0) =
         router.onKey(KeyRecord(code, down = true, repeat = repeat))
@@ -279,6 +280,60 @@ class ControlRouterTest {
         assertEquals(
             ControlDecision.Perform(ControlAction.PUSH_TO_TALK),
             up(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE),
+        )
+    }
+
+    // --- ⚠️⚠️ a multi-tap does not arrive alone ------------------------------
+
+    /**
+     * ★★ **The echo.** One double tap on the owner's Pixel Buds produces MEDIA_PREVIOUS
+     * *and* a stray MEDIA_PLAY about 100 ms behind it. Because a tap is canonicalised,
+     * that tail is indistinguishable from a single tap — so his double tap kept starting
+     * a recording instead of sending, and teaching "send" to a double tap captured the
+     * tail, which silently overwrote push-to-talk on the same gesture. Owner: *"it unset
+     * my push to talk, so the mappings are a little buggy."*
+     */
+    @Test
+    fun `the stray play after a multi-tap does not fire the tap binding`() {
+        profile(tap to ControlAction.PUSH_TO_TALK, next to ControlAction.SEND)
+
+        down(KeyEvent.KEYCODE_MEDIA_NEXT)
+        assertEquals(
+            ControlDecision.Perform(ControlAction.SEND),
+            up(KeyEvent.KEYCODE_MEDIA_NEXT),
+        )
+
+        now += 102   // the measured tail
+        assertEquals(ControlDecision.Consumed, up(KeyEvent.KEYCODE_MEDIA_PLAY))
+    }
+
+    /** ⚠️ And learning a double tap must capture the double tap, not its echo. */
+    @Test
+    fun `learning a multi-tap captures the multi-tap and not its tail`() {
+        router.profile = HeadsetProfile("80:99:E7:DE:66:E6", "WH-1000XM6")
+        router.startLearning()
+
+        down(KeyEvent.KEYCODE_MEDIA_NEXT)
+        assertEquals(ControlDecision.Learned(next), up(KeyEvent.KEYCODE_MEDIA_NEXT))
+    }
+
+    /**
+     * ⚠️ The window must not eat a real tap. A deliberate second press comes far later
+     * than an echo, and swallowing it would make push-to-talk feel dead after any
+     * double tap.
+     */
+    @Test
+    fun `a genuine tap after the window still fires`() {
+        profile(tap to ControlAction.PUSH_TO_TALK, next to ControlAction.SEND)
+
+        down(KeyEvent.KEYCODE_MEDIA_NEXT)
+        up(KeyEvent.KEYCODE_MEDIA_NEXT)
+
+        now += ControlRouter.TAIL_MS + 1
+        down(KeyEvent.KEYCODE_MEDIA_PLAY)
+        assertEquals(
+            ControlDecision.Perform(ControlAction.PUSH_TO_TALK),
+            up(KeyEvent.KEYCODE_MEDIA_PLAY),
         )
     }
 

@@ -74,10 +74,11 @@ class HeadsetControls(
     context: Context,
     private val store: ControlBindingStore,
     private val scope: CoroutineScope,
+    clock: () -> Long = System::currentTimeMillis,
 ) {
 
     private val app = context.applicationContext
-    private val router = ControlRouter()
+    private val router = ControlRouter(clock)
 
     /** Tap for volume, hold to talk — see [VolumePtt]. */
     private val volumeKey = VolumePtt()
@@ -182,6 +183,27 @@ class HeadsetControls(
         Log.i(TAG, line)
         _seen.value = (listOf(line) + _seen.value).take(SEEN_LIMIT)
 
+        val record = KeyRecord(
+            keyCode = event.keyCode,
+            down = event.action == KeyEvent.ACTION_DOWN,
+            repeat = event.repeatCount,
+        )
+
+        // ★★ ⚠️⚠️ **The echo filter runs before everything, including the stop rule.**
+        //
+        // A multi-tap does not arrive alone: his Pixel Buds send MEDIA_PREVIOUS and then
+        // a stray MEDIA_PLAY about 100 ms behind it. Below, a double tap stops a running
+        // recording and returns without the router ever seeing it — so if that tail were
+        // let through it would find the microphone already closed, read as a deliberate
+        // tap, and **start a new recording in his house**. That is the 17-second failure,
+        // with the same shape and a different cause.
+        //
+        // See [ControlRouter.isEchoOfMultiTap]: pure, so asking here costs nothing.
+        if (router.isEchoOfMultiTap(record)) {
+            Log.i(TAG, "$name $edge is the tail of a multi-tap — dropped")
+            return true
+        }
+
         // ★★ **While the microphone is open, ANY headset key stops it.**
         //
         // ⚠️⚠️ Opening the mic puts the headset in a call, and in a call the earbud keeps
@@ -198,16 +220,14 @@ class HeadsetControls(
         if (micOpen() && event.action == KeyEvent.ACTION_UP &&
             event.keyCode in STOP_ANY_KEYS
         ) {
+            // ⚠️ The router never sees this edge, so tell it the multi-tap happened —
+            // the tail behind it is about to arrive and must have something to belong to.
+            router.noteMultiTap(record)
             Log.i(TAG, "$name while recording — stopping")
             perform(ControlAction.PUSH_TO_TALK)
             return true
         }
 
-        val record = KeyRecord(
-            keyCode = event.keyCode,
-            down = event.action == KeyEvent.ACTION_DOWN,
-            repeat = event.repeatCount,
-        )
         return when (val decision = router.onKey(record)) {
             is ControlDecision.PassThrough -> false
             is ControlDecision.Consumed -> true

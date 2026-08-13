@@ -191,7 +191,29 @@ sealed interface ControlDecision {
  * sets of earbuds that behave differently from each other and from the phone's idea of a
  * headset.
  */
-class ControlRouter {
+class ControlRouter(private val clock: () -> Long = System::currentTimeMillis) {
+
+    /**
+     * ⚠️⚠️ When a multi-tap last arrived — because **a multi-tap does not arrive alone.**
+     *
+     * Measured on the owner's Pixel Buds, one double tap produces:
+     * ```
+     * MEDIA_PREVIOUS DOWN   .469
+     * MEDIA_PREVIOUS UP     .475
+     * MEDIA_PLAY     UP     .577   <- 102 ms later, tail of the same physical gesture
+     * MEDIA_PLAY     DOWN   .585   <- and an orphaned down edge after it
+     * ```
+     * The firmware sends its multi-tap event *and* a stray play/pause behind it. Since a
+     * tap is canonicalised (see [HeadsetGesture.canonical]) that tail is indistinguishable
+     * from a single tap — so binding "send" to a double tap captured the tail instead, and
+     * every double tap started a recording. Owner: *"the double tap does not work right.
+     * It kept trying to record."*
+     *
+     * So a play/pause inside [TAIL_MS] of a multi-tap is discarded as the echo it is.
+     * ⚠️ The window is deliberately short: two deliberate presses that close together are
+     * not something a thumb does, and a longer window would start eating real taps.
+     */
+    private var lastMultiTapAt = 0L
 
     /** The headset that is connected right now, with its bindings. Null when none is. */
     @Volatile
@@ -220,11 +242,53 @@ class ControlRouter {
     /** Held between the down and up edges so a long press is known when it is released. */
     private var heldLong = false
 
+    companion object {
+        /** Firmware collapses two and three taps into these before Android sees them. */
+        private val MULTI_TAP_KEYS = setOf(
+            KeyEvent.KEYCODE_MEDIA_NEXT,
+            KeyEvent.KEYCODE_MEDIA_PREVIOUS,
+        )
+
+        /** Measured tails were 16 ms and 102 ms; this is generous without being greedy. */
+        const val TAIL_MS = 300L
+    }
+
+    /**
+     * ★★ **Is this edge the stray play/pause behind a multi-tap?**
+     *
+     * ⚠️⚠️ Public and **pure** — no state is changed, so it is safe to ask twice — because
+     * [HeadsetControls] has a rule that runs *before* [onKey]: while the microphone is
+     * open, any headset key stops it. That rule would otherwise act on the echo, and
+     * acting on it means toggling push-to-talk a second time, which **re-opens the
+     * microphone he just closed**. Every path that can act on a key asks this first.
+     */
+    fun isEchoOfMultiTap(key: KeyRecord): Boolean =
+        key.keyCode !in MULTI_TAP_KEYS &&
+                HeadsetGesture.canonical(key.keyCode) == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE &&
+                clock() - lastMultiTapAt < TAIL_MS
+
+    /**
+     * ⚠️ Tell the router a multi-tap happened even when something else claimed the edge
+     * before [onKey] could see it — otherwise the tail that follows has no multi-tap to
+     * belong to and arrives looking like a deliberate single tap.
+     */
+    fun noteMultiTap(key: KeyRecord) {
+        if (key.keyCode in MULTI_TAP_KEYS) lastMultiTapAt = clock()
+    }
+
     fun onKey(key: KeyRecord): ControlDecision {
         // ⚠️ Canonical from here down — see [HeadsetGesture.canonical]. Learning and
         // matching MUST agree on this or a gesture bound in one playback state cannot be
         // recognised in the other, which is exactly the bug this fixes.
         val code = HeadsetGesture.canonical(key.keyCode)
+
+        if (isEchoOfMultiTap(key)) {
+            // The echo of a multi-tap, not a tap. Consumed rather than passed through:
+            // an echo is not a gesture, it is one physical press arriving twice, and
+            // handing the second copy to the system would toggle his music.
+            return ControlDecision.Consumed
+        }
+        noteMultiTap(key)
         if (learning) {
             if (key.down) {
                 if (key.longPress) heldLong = true
