@@ -124,17 +124,21 @@ TUBE_LEN = PH_L + 2 * CLR + JACK_CAV + WALL   # = OUT_L, defined below
 # so the two fuse across a face rather than kissing on a tangent line.
 TUBE_X = -52.5
 
-# ★★ The tube's CROWN sits flush with the tray's top face — it hangs below the
-# base plane, it does not stand on it. Owner: "you centered the tube off the top
-# face, it makes it stick up pretty high, why not drop it down, it will make
-# your visor work easier as well."
+# ★★ The tube hangs BELOW the base plane, but a third of it still stands proud
+# of the face. Two corrections, in order:
 #
-# ★ It can drop because of where it is: at |X| 52.5 it is **outboard of the arm**
-# (radius 45), so the space under it is beside the forearm, not inside it. Sat on
-# the base plane the tube stood 21 mm proud and made the whole thing 34 mm tall
-# before the visor even started. Flush, the top face is continuous — tray and
-# crown at one height — and the cylinder bulges below and outboard, which is what
-# makes this read as a bracer wrapping an arm rather than a box stacked on one.
+# 1. It was sitting ON the base plane, 21 mm proud, making the whole thing 34 mm
+#    tall before the visor started. It can drop because of where it is: at
+#    |X| 52.5 it is **outboard of the arm** (radius 45), so the space beneath is
+#    beside the forearm, not inside it.
+# 2. Then I dropped it flush and killed the look. Owner: "you dropped the tube
+#    all the way down, it kills the aesthetic, you need at least 1/3 of it
+#    bulging above the face plate."
+#
+# ★ So it is a fraction, not a flush face — the cylinder has to READ, and a
+# cylinder tangent to a plane reads as a plane. A third of the diameter above
+# the face is what makes it legible as a tube from every angle except dead-on.
+TUBE_BULGE_FRAC = 1.0 / 3.0    # of the DIAMETER, standing above the tray face
 # TUBE_Z is derived from OUT_H below — crown flush with the tray face.
 
 # ------------------------------------------------------------ STEP 3: visor
@@ -164,7 +168,8 @@ POCK_D = PH_T + 0.3
 OUT_W = POCK_W + 2 * WALL          # 75.1 — tray outer width
 OUT_L = POCK_L + JACK_CAV + WALL   # pocket + plug cavity + closing wall
 OUT_H = FLOOR + POCK_D + LIP_H     # 13.4
-TUBE_Z = OUT_H - TUBE_R            # crown flush with the tray's top face
+TUBE_BULGE = 2 * TUBE_R * TUBE_BULGE_FRAC   # how much crown stands above the face
+TUBE_Z = OUT_H + TUBE_BULGE - TUBE_R
 
 PHONE_TOP_Y = POCK_L - CLR
 
@@ -316,9 +321,9 @@ def pack_tube() -> Part:
     # read: "you should see most of the tube shape". Its upper two thirds stay
     # a bare cylinder; only the dead space underneath becomes structure — which
     # the flat base wanted anyway, for the sleeve to mount to.
-    # With the crown flush, the flank between tray wall and tube fills the full
-    # tray height — one continuous top face, and the cylinder reads on the
-    # outboard side and underneath where it is not fighting anything.
+    # The flank between tray wall and tube fills to the tray face and stops —
+    # so the bulge above the face stays bare cylinder rather than being absorbed
+    # into a boss, which is the whole point of the third standing proud.
     web = Pos(TUBE_X, 0, 0) * Box(
         abs(TUBE_X) - POCK_W / 2 - WALL, TUBE_LEN, OUT_H,
         align=(Align.MIN, Align.MIN, Align.MIN))
@@ -387,8 +392,9 @@ if __name__ == "__main__":
     print(f"             pocket wall to bore  "
           f"{abs(TUBE_X) - TUBE_BORE_R - POCK_W / 2:.2f} mm  (tube on -X, "
           f"opposite the buttons)")
-    print(f"             crown at z {TUBE_Z + TUBE_R:.1f} (tray face {OUT_H:.1f}), "
-          f"hangs {abs(TUBE_Z - TUBE_R):.1f} mm below the base plane")
+    print(f"             crown z {TUBE_Z + TUBE_R:.1f} — bulges {TUBE_BULGE:.1f} mm "
+          f"above the face ({100 * TUBE_BULGE_FRAC:.0f}% of dia), "
+          f"hangs {abs(TUBE_Z - TUBE_R):.1f} mm below the base")
     import math as _m
     _top_z = TUBE_Z + TUBE_R + VISOR_H * _m.cos(_m.radians(VISOR_RAKE))
     _top_x = TUBE_X + VISOR_H * _m.sin(_m.radians(VISOR_RAKE))
