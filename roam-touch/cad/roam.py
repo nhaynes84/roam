@@ -167,6 +167,12 @@ PLATE_T = 5.0         # thickness
 PLATE_RAKE = 44.0     # degrees, leaning OUTBOARD
 PLATE_SINK = 2.0      # ⚠️ under TUBE_WALL — see pack_bore()
 
+# ★ The flange his section shows at the top: Z 26–28 widens from ~22 to 32–36.
+# That is the face the ROAM lettering sits on — a flat panel capping the raked
+# wall, not a moulding. It reads as a deliberate surface because it is one.
+FLANGE_W = 15.0       # across the plate's thickness
+FLANGE_T = 4.5        # along the plate's rise
+
 # --------------------------------------------------------------- derived
 POCK_L = PH_L + 2 * CLR
 POCK_W = PH_W + 2 * CLR
@@ -354,7 +360,11 @@ def plate() -> Part:
     """The fixed ROAM plate — his form, raking outboard off the tube."""
     slab = Box(PLATE_T, TUBE_LEN, PLATE_H + PLATE_SINK,
                align=(Align.CENTER, Align.MIN, Align.MIN))
-    return Pos(TUBE_X, 0, OUT_H - PLATE_SINK) * Rot(0, -PLATE_RAKE, 0) * slab
+    # The flange caps it, sunk slightly so the two fuse across a face.
+    flange = Pos(0, 0, PLATE_H + PLATE_SINK - FLANGE_T / 2) * Box(
+        FLANGE_W, TUBE_LEN, FLANGE_T,
+        align=(Align.CENTER, Align.MIN, Align.MIN))
+    return Pos(TUBE_X, 0, OUT_H - PLATE_SINK) * Rot(0, -PLATE_RAKE, 0) * (slab + flange)
 
 
 def build() -> Part:
@@ -409,6 +419,8 @@ if __name__ == "__main__":
           f"({_px:.1f}, {_pz:.1f})")
     print(f"             {_pz - OUT_H:.1f} mm above the face, overhangs the tray "
           f"edge by {abs(_px) - OUT_W / 2:.1f} mm")
+    print(f"  flange     {FLANGE_W:.0f} x {FLANGE_T:.1f} mm capping it — the ROAM face, "
+          f"lying at {PLATE_RAKE:.0f} deg")
     print(f"  screen ap. {sx1 - sx0:.1f} x {sy1 - sy0:.1f} "
           f"(margins L/R {fx(SCREEN_SVG[0]) + PH_W / 2:.2f} / "
           f"{PH_W / 2 - fx(SCREEN_SVG[2]):.2f})")
