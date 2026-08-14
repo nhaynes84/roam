@@ -229,7 +229,11 @@ RAIL_FLAT_Y1 = 134.63 # where the jack-end ramp leaves it
 # ~30 mm away, so there is nothing down there to foul — the same argument that
 # let the tube drop. A flat base at the +X edge would be flatness for its own
 # sake, and it would cost the channel 6 mm it has nowhere else to find.
-RAIL_Z0 = -10.0
+# ★ −12.0, and it costs nothing: the tube already hangs to −12.4, so the
+# bounding box does not move. Owner: *"we need more room for the mic, it can't
+# just be a flat rail."* This is the free half of that room — 2 mm of chamber
+# height for no size at all, and it lands the two spines at the same depth.
+RAIL_Z0 = -12.0
 
 # ⚠️ 4.0, and it moved inboard. At 4.5 centred, the outboard LAND was 3.0 mm —
 # an M2 pilot down the middle of that leaves 0.65 mm of wall each side, which
@@ -250,7 +254,16 @@ PLATE_T = 2.0         # the removable service plate
 PLATE_CLR = 0.25
 
 # The mic blister: centred on the side, sitting entirely below the button line.
-MIC_R = 3.2           # d6.4 pocket — a 6 mm electret with 0.4 of clearance
+# ★★ THE MIC CHAMBER. A d6.4 x 4.1 pocket was all a flat 9.5 mm rail could hold
+# — fine for a bare 6 mm electret, useless for an actual lav head. The rail now
+# SWELLS at the mic: outboard to 52.0 with 42.6° tapers, the same angle as the
+# end ramps, and ⚠️ **the top stays dead flat at RAIL_TOP.** All the growth is
+# outboard and downward, because up is where the volume rocker's approach is —
+# that is what killed the old blister and it has not stopped being true.
+MIC_SWELL_X1 = 52.0
+MIC_SWELL_HALF = 10.0     # flat span either side of the mic
+MIC_SWELL_BITE = 1.0      # ⚠️ starts inside the rail's face, never on it
+MIC_CH_W, MIC_CH_L = 11.0, 16.0
 
 # ★★ GRILLE LINES, not a hole pattern. Owner: *"i do want grille lines though
 # regardless."* Slots, tapering to a circle — which is his concept's round
@@ -272,12 +285,14 @@ GRILLE_FACE = 1.5     # face the bars are cut through
 # ⚠️ Narrow and long, because it has to live inside 9.5 mm of rail now instead
 # of a 14.5 mm pad. Three bars, not five — at this width five would mean 0.5 mm
 # webs. The taper still carries the look.
-GRILLE_A, GRILLE_B = 8.0, 2.6   # grille ellipse — semi-axis along Y, along X
+# ★ Back to 5 bars — the swell gives the grille its width back, and 3 bars was
+# only ever what a 9.5 mm rail could carry.
+GRILLE_A, GRILLE_B = 8.0, 4.4   # grille ellipse — semi-axis along Y, along X
 BEZEL_W, BEZEL_PROUD = 1.3, 0.6
 GRILLE_PL_D = 1.6     # plenum behind the face, so no bar goes blind
 GRILLE_W = 1.1
 GRILLE_PITCH = 1.9
-GRILLE_LINES = 3
+GRILLE_LINES = 5
 
 # --------------------------------------------------------------- derived
 POCK_L = PH_L + 2 * CLR
@@ -303,9 +318,12 @@ CH_X0 = RAIL_X0 + 1.3               # ⚠️ NOT centred — biased inboard so t
 CH_X1 = CH_X0 + CH_W
 
 MIC_Y = OUT_L / 2                   # "centered on the right side"
-MIC_X = RAIL_X0 + RAIL_W / 2        # ★ centred on the rail — "in line"
+MIC_X = (RAIL_X0 + MIC_SWELL_X1) / 2   # ★ centred on the SWELL, which is what
+                                       # the eye reads as the mic housing
+MIC_SWELL_TAPER = (MIC_SWELL_X1 - RAIL_X1 + MIC_SWELL_BITE) / RAMP_SLOPE
 GR_Z = RAIL_TOP                     # the grille is flush in the rail's top
 CH_Z1 = RAIL_TOP - GRILLE_FACE      # ★ the roof that closes the channel
+MIC_CH_TOP = CH_Z1                  # the chamber's ceiling is that same skin
 PLENUM_Z = GR_Z - GRILLE_FACE - GRILLE_PL_D
 
 # ⚠️ Ends at 152.5 so the riser clears the plate's top screw at Y 154 — at 154
@@ -326,6 +344,8 @@ PL_Y0, PL_Y1 = MIC_Y - 15.0, 156.0
 # groove's centreline — there is no material there. They move to the outboard
 # land, and the plate has to reach them.
 PL_X0, PL_X1 = RAIL_X0 + 1.0, RAIL_X1 - 0.55
+PL_HEAD_X1 = MIC_SWELL_X1 - 1.0     # it widens under the swell to free the mic
+PL_HEAD_L = 2 * MIC_SWELL_HALF - 2.0
 PLATE_TOP = RAIL_Z0 + PLATE_T
 CH_Z0 = PLATE_TOP - 0.5             # ⚠️ overlaps the rebate, never kisses it
 _SX = (CH_X1 + RAIL_X1) / 2         # ★ centred on the outboard LAND, not the
@@ -456,6 +476,15 @@ def _roll(x_outer: float) -> Part:
 
 def side_rail() -> Part:
     """The thickened +X side: a low rail under the buttons, rising past them."""
+    swell_pts = [
+        (RAIL_X1 - MIC_SWELL_BITE, MIC_Y - MIC_SWELL_HALF - MIC_SWELL_TAPER),
+        (MIC_SWELL_X1, MIC_Y - MIC_SWELL_HALF),
+        (MIC_SWELL_X1, MIC_Y + MIC_SWELL_HALF),
+        (RAIL_X1 - MIC_SWELL_BITE, MIC_Y + MIC_SWELL_HALF + MIC_SWELL_TAPER),
+    ]
+    swell = Pos(0, 0, RAIL_Z0) * extrude(
+        Plane.XY * make_face(Polyline(*swell_pts, close=True)), RAIL_TOP - RAIL_Z0)
+
     prof = [(0, RAIL_Z0), (0, RAIL_TOP_Y0),
             (RAIL_FLAT_Y0, RAIL_TOP), (RAIL_FLAT_Y1, RAIL_TOP),
             (RAIL_APEX_Y, OUT_H), (OUT_L, OUT_H), (OUT_L, RAIL_Z0)]
@@ -468,7 +497,7 @@ def side_rail() -> Part:
     bez = Pos(MIC_X, MIC_Y, GR_Z - BEZEL_SINK) * extrude(
         Plane.XY * (Ellipse(GRILLE_B + BEZEL_W, GRILLE_A + BEZEL_W)
                     - Ellipse(GRILLE_B, GRILLE_A)), BEZEL_PROUD + BEZEL_SINK)
-    return rail + bez
+    return rail + swell + bez
 
 
 def cable_route() -> Part:
@@ -492,16 +521,12 @@ def cable_route() -> Part:
         CH_W, CH_Y1 - MIC_Y, CH_Z1 - CH_Z0,
         align=(Align.MIN, Align.MIN, Align.MIN))
 
-    # ⚠️ The pocket runs all the way down to PLATE_TOP, deliberately: that is how
-    # the capsule gets in from below and what the plate then holds it against.
-    cut += Pos(MIC_X, MIC_Y, PLATE_TOP) * Cylinder(
-        MIC_R, PLENUM_Z - PLATE_TOP,
-        align=(Align.CENTER, Align.CENTER, Align.MIN))
-
-    # ★ The plenum is the SAME ellipse as the grille, so every bar is through-air
-    # for its whole length. Over a round pocket the outer bars would go blind.
-    cut += Pos(MIC_X, MIC_Y, PLENUM_Z) * extrude(
-        Plane.XY * Ellipse(GRILLE_B, GRILLE_A), GRILLE_PL_D)
+    # ★ One CHAMBER, floor to ceiling: it is the capsule's room and the grille's
+    # plenum at once. ⚠️ Its floor is PLATE_TOP, so the capsule drops in from
+    # below and the plate is what holds it up against the grille.
+    cut += Pos(MIC_X, MIC_Y, PLATE_TOP) * extrude(
+        Plane.XY * RectangleRounded(MIC_CH_W, MIC_CH_L, 3.0),
+        MIC_CH_TOP - PLATE_TOP)
 
     # ★★ The bars, tapering to the ellipse — the 55SH move. Equal-length lines
     # read as a vent; lines that shorten toward the rim read as a grille.
@@ -522,9 +547,12 @@ def cable_route() -> Part:
 
 
 def _plate_profile(clr: float):
-    """The service plate in plan — a plain strip now the blister is gone."""
-    return Pos((PL_X0 + PL_X1) / 2, (PL_Y0 + PL_Y1) / 2) * Rectangle(
+    """A strip down the groove, widening to a head under the mic swell."""
+    run = Pos((PL_X0 + PL_X1) / 2, (PL_Y0 + PL_Y1) / 2) * Rectangle(
         PL_X1 - PL_X0 - 2 * clr, PL_Y1 - PL_Y0 - 2 * clr)
+    head = Pos((PL_X0 + PL_HEAD_X1) / 2, MIC_Y) * RectangleRounded(
+        PL_HEAD_X1 - PL_X0 - 2 * clr, PL_HEAD_L - 2 * clr, 3.0)
+    return run + head
 
 
 def plate_rebate() -> Part:
@@ -689,10 +717,14 @@ if __name__ == "__main__":
           f"{CH_Z1 - CH_Z0:.1f} channel down to the mic")
     print(f"             CLOSED — {RAIL_TOP - CH_Z1:.1f} mm roof over the cable, "
           f"same skin the grille bars cut through")
-    print(f"  mic        in the rail at X {MIC_X:.2f} (rail centre), Y {MIC_Y:.1f} "
-          f"— no blister; capsule d{2 * MIC_R:.1f} x "
-          f"{PLENUM_Z - PLATE_TOP:.1f} deep")
-    print(f"             wall to the capsule  {RAIL_W / 2 - MIC_R:.2f} mm each side")
+    print(f"  mic        rail SWELLS to X {MIC_SWELL_X1:.1f} over Y "
+          f"{MIC_Y - MIC_SWELL_HALF:.1f}-{MIC_Y + MIC_SWELL_HALF:.1f}, "
+          f"tapers {MIC_SWELL_TAPER:.2f} mm at {math.degrees(math.atan(RAMP_SLOPE)):.1f} deg "
+          f"— top stays flat")
+    print(f"             chamber {MIC_CH_W:.1f} x {MIC_CH_L:.1f} x "
+          f"{MIC_CH_TOP - PLATE_TOP:.1f} = "
+          f"{MIC_CH_W * MIC_CH_L * (MIC_CH_TOP - PLATE_TOP) / 1000:.2f} cm3, "
+          f"walls {(MIC_SWELL_X1 - RAIL_X0 - MIC_CH_W) / 2:.2f} mm each side")
     print(f"             grille faces UP — {2 * GRILLE_B:.1f} x {2 * GRILLE_A:.0f} "
           f"ellipse, {GRILLE_LINES} tapering bars, bezel {BEZEL_PROUD:.1f} proud")
     print(f"  plate      {PL_Y1 - PL_Y0:.0f} mm long, {PLATE_T:.1f} thick, "
