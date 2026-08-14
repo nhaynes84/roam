@@ -325,6 +325,15 @@ GRILLE_GAP = 1.5      # web between — his number
 # not a circle (0.5–0.65 mm off) and not an ellipse either. He drew it by eye.
 SLOT_X_IN = (45.00, 42.60, 41.00, 39.80, 39.80, 41.00, 42.60, 45.00)
 SLOT_X_OUT = 54.0     # past the face — the slots vent out the side
+
+# ⚠️⚠️ THE SLOTS ARE FULL HEIGHT, not a cut through the 1.5 mm face. Owner:
+# *"you're having trouble cutting through the side wall."* Mine stopped at the
+# face's underside, which left the outboard wall intact — from the side you saw
+# a solid band with the slots barely nicking its top edge. His run from the top
+# face all the way down to Z −10.6, so the outboard wall survives only as seven
+# ribs (the webs) tied by a 1.4 mm rail along the bottom. That is why his reads
+# as a grille from the side and mine read as a slotted lid.
+SLOT_Z0 = -10.6       # measured off his; 1.4 mm of wall left under the cut
 CHAM_45 = 1.0         # ★ the house chamfer — 45°, used everywhere from now on
 GRILLE_LINES = len(SLOT_X_IN)
 GRILLE_PITCH = GRILLE_W + GRILLE_GAP
@@ -570,8 +579,8 @@ def cable_route() -> Part:
         bar = Pos((x_in + SLOT_X_OUT) / 2 - MIC_X, dy) * Rectangle(
             SLOT_X_OUT - x_in, GRILLE_W)
         bars = bar if bars is None else bars + bar
-    cut += Pos(MIC_X, MIC_Y, CH_Z1 - EPS) * extrude(
-        Plane.XY * bars, GRILLE_FACE + 2 * EPS)
+    cut += Pos(MIC_X, MIC_Y, SLOT_Z0) * extrude(
+        Plane.XY * bars, GR_Z - SLOT_Z0 + EPS)
 
     # ★ The mesh pocket, up into the ceiling — see MESH_*.
     cut += Pos(MIC_X, MIC_Y, MIC_CH_TOP) * extrude(
@@ -776,6 +785,9 @@ if __name__ == "__main__":
     print(f"             they BREAK OUT the side over a "
           f"{CHAM_45:.1f}x{CHAM_45:.1f} 45 deg chamfer, "
           f"lengths {' '.join(f'{MIC_SWELL_X1 - x:.1f}' for x in SLOT_X_IN[:4])} ...")
+    print(f"             FULL HEIGHT — cut {GR_Z - SLOT_Z0:.1f} mm down to "
+          f"Z {SLOT_Z0:.1f}, so the outboard wall is {GRILLE_LINES - 1} ribs on a "
+          f"{SLOT_Z0 - RAIL_Z0:.1f} mm bottom rail")
     print(f"             spans {_span:.1f} mm in a {MIC_CH_L:.1f} chamber "
           f"({(MIC_CH_L - _span) / 2:.2f} mm clear at each end), no bezel")
     print(f"             mesh pocket {MESH_W:.1f} x {MESH_L:.1f} x {MESH_T:.1f} in the "
