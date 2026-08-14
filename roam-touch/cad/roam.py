@@ -75,6 +75,19 @@ VOL_SVG = (55.16, 72.91)                    # volume rocker, y range, +X side
 # ⚠️⚠️ **A RIGHT-ANGLE PLUG IS NOW REQUIRED.** A straight one protrudes 15–18 mm
 # and would cost 20 mm of length. His call: size it generously.
 JACK_CAV = 12.0
+
+# ★★ The ORIGINAL pocket wall stays. Owner: "it should still have the original
+# housing wall, but with an opening for the jack port with jack in to clear, so
+# the left half of the original wall is safe to leave for good fitment."
+#
+# ⚠️ I had removed the whole wall to make the cavity, which left the phone
+# stopping against nothing — it could slide 12 mm up the housing. The wall is
+# what locates it. Only the jack's quartile is cut through; the rest is solid.
+# ⚠️ NOT a fitted slot. Owner: *"you can reasonably just leave the left half of
+# that top wall, so i have wiggle room with the jack installed."* The wall is a
+# locating stop, not a gasket — half of it stops the phone just as well, and the
+# open half means the plug body can sit wherever it lands without a clash.
+# The jack is in the +X quartile, so +X opens and −X stays solid.
 USB_W, USB_H = 14.0, 8.0
 SPK_W, SPK_H, SPK_X = 16.0, 3.4, 17.0   # speakers either side of USB-C
 VENT_R, VENT_W = 6.0, 46.0
@@ -149,42 +162,13 @@ TUBE_X = -52.5
 TUBE_AXIS_BELOW_FACE = 2 * TUBE_R / 4.0    # a quarter of the diameter
 # TUBE_Z is derived from OUT_H below — crown flush with the tray face.
 
-# ----------------------------------------------------------- STEP 3: plate
-# ★★ HIS plate, measured off RoamTouchConcept.step rather than invented. Owner:
-# "look at my model; it IS the aesthetic, just without the moving cover plate,
-# mine is locked in place, no mechanism."
-#
-# Section at mid-length, X normalised to his low-X edge:
-#     Z 2–4    tray floor, 85 wide
-#     Z 14–24  a wall on the low-X edge ONLY, inner edge walking x 14.1 → 4.2
-#     Z 26–28  widens to 32–36 — the flange at the top
-#
-# ⚠️ It rakes OUTWARD, ~44° AWAY from the screen, and overhangs past the tray's
-# own edge. I built the last one canting inboard over the screen, which is why
-# it read as a lip. Outward is what makes the silhouette his.
-# ⚠️⚠️ It is a WEDGE, not a plate. Side by side, mine read as a sail and his as
-# a mass — and his section said so all along, I just read "wall" and built a fin:
-#     Z 14  material 12.4 mm thick
-#     Z 24  material 22.3 mm thick
-# The INNER face is vertical; the OUTER face rakes outboard, so the thing gets
-# THICKER as it rises. That is what gives it weight in the silhouette.
-PLATE_IN_X = -46.0    # inner face, vertical, outboard of the tray wall
-PLATE_T0 = 12.4       # thickness at the tray face
-PLATE_T1 = 24.0       # thickness at the top
-PLATE_H = 14.5        # rise above the tray face
-
-# ★ The flange: his Z 26–28 widens to 36 and overhangs the wedge BOTH ways.
-# That is the face the ROAM lettering sits on.
-FLANGE_W = 32.0
-FLANGE_T = 4.5
-
 # --------------------------------------------------------------- derived
 POCK_L = PH_L + 2 * CLR
 POCK_W = PH_W + 2 * CLR
 POCK_D = PH_T + 0.3
 
 OUT_W = POCK_W + 2 * WALL          # 75.1 — tray outer width
-OUT_L = POCK_L + JACK_CAV + WALL   # pocket + plug cavity + closing wall
+OUT_L = POCK_L + WALL + JACK_CAV + WALL   # pocket, its wall, plug cavity, end
 OUT_H = FLOOR + POCK_D + LIP_H     # 13.4
 TUBE_Z = OUT_H - TUBE_AXIS_BELOW_FACE
 TUBE_BULGE = TUBE_Z + TUBE_R - OUT_H        # crown standing above the face
@@ -240,7 +224,16 @@ def face_openings() -> Part:
     h = LIP_H + 2 * EPS
     cut = Part()
 
-    for svg in (SCREEN_SVG, EARPIECE_SVG, PROX_SVG):
+    # ★ The screen aperture is CHAMFERED, like his — it opens out toward the top
+    # face by BEZEL_CHAM a side. A square-cut window reads as a hole punched in a
+    # slab; the flare reads as an edge that was made.
+    sx0, sy0, sx1, sy1 = face_rect(SCREEN_SVG)
+    inner = Plane.XY.offset(z0) * Rectangle(sx1 - sx0, sy1 - sy0)
+    outer = Plane.XY.offset(z0 + h) * Rectangle(
+        sx1 - sx0 + 2 * BEZEL_CHAM, sy1 - sy0 + 2 * BEZEL_CHAM)
+    cut += Pos((sx0 + sx1) / 2, (sy0 + sy1) / 2, 0) * loft([inner, outer])
+
+    for svg in (EARPIECE_SVG, PROX_SVG):
         x0, y0, x1, y1 = face_rect(svg)
         cut += Pos((x0 + x1) / 2, (y0 + y1) / 2, z0) * Box(
             x1 - x0, y1 - y0, h, align=(Align.CENTER, Align.CENTER, Align.MIN))
@@ -256,12 +249,14 @@ def port_openings() -> Part:
     """The plug cavity, and the two speakers. No jack notch — see JACK_CAV."""
     cut = Part()
 
-    # ★ The pocket continues JACK_CAV past the phone, at pocket depth, so the
-    # right-angle plug and its cable turn have somewhere to be. Roofed by the
-    # lip material above and closed by WALL at the end, so the edge stays solid.
-    cut += Pos(0, POCK_L - EPS, FLOOR) * Box(
-        POCK_W, JACK_CAV + EPS, POCK_D,
+    # ★ The plug cavity sits BEYOND the retained pocket wall, and the plug
+    # reaches it through a slot in that wall. The wall keeps locating the phone.
+    cut += Pos(0, POCK_L + WALL, FLOOR) * Box(
+        POCK_W, JACK_CAV, POCK_D,
         align=(Align.CENTER, Align.MIN, Align.MIN))
+    cut += Pos(0, POCK_L - EPS, FLOOR) * Box(
+        POCK_W / 2, WALL + 2 * EPS, POCK_D,
+        align=(Align.MIN, Align.MIN, Align.MIN))
 
     # The USB end is already open; the speakers sit either side of the port.
     for sx in (-SPK_X, SPK_X):
@@ -361,27 +356,8 @@ def pack_bore() -> Part:
         align=(Align.CENTER, Align.CENTER, Align.MIN))
 
 
-def plate() -> Part:
-    """His wedge: vertical inside, raking outboard outside, thickening upward."""
-    z0, z1 = OUT_H - 2.0, OUT_H + PLATE_H
-    pts = [
-        (PLATE_IN_X, z0),                 # inner bottom
-        (PLATE_IN_X, z1),                 # inner top
-        (PLATE_IN_X - PLATE_T1, z1),      # outer top  — the rake ends here
-        (PLATE_IN_X - PLATE_T0, z0),      # outer bottom
-    ]
-    face = make_face(Polyline(*pts, close=True))
-    wedge = extrude(Plane.XZ * face, -TUBE_LEN)
-
-    flange = Pos(PLATE_IN_X - PLATE_T1 / 2, 0, z1 - FLANGE_T / 2) * Box(
-        FLANGE_W, TUBE_LEN, FLANGE_T,
-        align=(Align.CENTER, Align.MIN, Align.MIN))
-    return wedge + flange
-
-
 def build() -> Part:
     p = tray()
-    p += plate()
     p += pack_tube()
     p -= pack_bore()      # ★ last, so nothing can intrude — see pack_bore()
     p -= face_openings()
@@ -410,8 +386,10 @@ if __name__ == "__main__":
         flag = "  <-- TOO THIN" if g < MIN_WALL else ""
         print(f"    {label:22s} {g:6.2f} mm{flag}")
     sx0, sy0, sx1, sy1 = face_rect(SCREEN_SVG)
-    print(f"  plug cav.  {JACK_CAV:.1f} mm past the phone, "
-          f"pocket depth — right-angle plug required")
+    print(f"  end wall   -X half RETAINED as the phone's stop "
+          f"({POCK_W / 2:.1f} mm of it); +X half open for the plug")
+    print(f"  plug cav.  {JACK_CAV:.1f} mm beyond that wall — right-angle plug")
+    print(f"  screen     chamfered {BEZEL_CHAM:.1f} mm a side, opening outward")
     print(f"  pack tube  bore d{2 * TUBE_BORE_R:.1f} x {TUBE_LEN:.1f} long, "
           f"OD {2 * TUBE_R:.1f}, centre X {TUBE_X:.1f}")
     print(f"             pocket wall to bore  "
@@ -424,13 +402,6 @@ if __name__ == "__main__":
     print(f"             crown {TUBE_BULGE:.1f} mm proud, over a {_chord:.1f} mm chord "
           f"— a curve, not a half cylinder")
     print(f"             hangs {abs(TUBE_Z - TUBE_R):.1f} mm below the base plane")
-    import math as _p
-    _rake = _p.degrees(_p.atan2(PLATE_T1 - PLATE_T0, PLATE_H + 2.0))
-    print(f"  wedge      {PLATE_T0:.1f} mm thick at the face -> {PLATE_T1:.1f} at the top, "
-          f"rising {PLATE_H:.1f}")
-    print(f"             inner face vertical at X {PLATE_IN_X:.1f}, "
-          f"outer rakes {_rake:.0f} deg outboard")
-    print(f"  flange     {FLANGE_W:.0f} x {FLANGE_T:.1f} — the ROAM face")
     print(f"  screen ap. {sx1 - sx0:.1f} x {sy1 - sy0:.1f} "
           f"(margins L/R {fx(SCREEN_SVG[0]) + PH_W / 2:.2f} / "
           f"{PH_W / 2 - fx(SCREEN_SVG[2]):.2f})")
