@@ -141,25 +141,6 @@ TUBE_X = -52.5
 TUBE_BULGE_FRAC = 1.0 / 3.0    # of the DIAMETER, standing above the tray face
 # TUBE_Z is derived from OUT_H below — crown flush with the tray face.
 
-# ------------------------------------------------------------ STEP 3: visor
-# ★ The ROAM plate, on the SAME edge as the tube — his concept has it there and
-# the tube tucks under it. It does three jobs: shades the screen, carries the
-# branding, and later becomes the sliding cover's track (a separate model).
-#
-# ★★ The tube is already most of the visor. Standing 21 mm proud of the glass,
-# it does the shading work on its own; the plate only adds the last stretch and
-# the face to put a name on. That is why this is 12 mm and not 34 — building a
-# full-height visor on top of a 34 mm tube would make the thing 60 mm tall.
-# ⚠️ Proportioned to HIS concept, not to a shading angle. Owner: "it doesn't
-# have to be a literal sun block, i'm not going to hike through the arizona
-# desert with it on my wrist." I grew this to 20 mm chasing 16 deg of shade and
-# lost his form doing it. His plate stands ~10 mm above the rim; this is 12.
-# ★ Real shading was always going to come from the cover, closed.
-VISOR_H = 12.0        # plate height above the tube's crown
-VISOR_T = 4.0         # plate thickness
-VISOR_RAKE = 20.0     # degrees, canting inboard over the screen
-VISOR_SINK = 2.0      # ⚠️ must stay under TUBE_WALL (2.5) — see pack_bore()
-
 # --------------------------------------------------------------- derived
 POCK_L = PH_L + 2 * CLR
 POCK_W = PH_W + 2 * CLR
@@ -343,21 +324,9 @@ def pack_bore() -> Part:
         align=(Align.CENTER, Align.CENTER, Align.MIN))
 
 
-def visor() -> Part:
-    """The raked plate springing off the tube's crown.
-
-    ⚠️ Rakes INBOARD, toward the screen. Raking outboard would make it a fin
-    that catches on doorways and shades nothing.
-    """
-    plate = Box(VISOR_T, TUBE_LEN, VISOR_H + VISOR_SINK,
-                align=(Align.CENTER, Align.MIN, Align.MIN))
-    return Pos(TUBE_X, 0, TUBE_Z + TUBE_R - VISOR_SINK) * Rot(0, VISOR_RAKE, 0) * plate
-
-
 def build() -> Part:
     p = tray()
     p += pack_tube()
-    p += visor()
     p -= pack_bore()      # ★ last, so nothing can intrude — see pack_bore()
     p -= face_openings()
     p -= port_openings()
@@ -375,7 +344,7 @@ if __name__ == "__main__":
     export_stl(part, os.path.join(out, "roam_step3.stl"))
 
     bb = part.bounding_box()
-    print(f"STEP 3 — housing + pack tube + visor")
+    print(f"STEP 3 — housing + pack tube")
     print(f"  outer      {bb.size.X:.1f} x {bb.size.Y:.1f} x {bb.size.Z:.1f} mm")
     print(f"  pocket     {POCK_W:.1f} x {POCK_L:.1f} x {POCK_D:.1f}")
     print(f"  volume     {part.volume / 1000:.1f} cm3  ~= "
@@ -395,17 +364,6 @@ if __name__ == "__main__":
     print(f"             crown z {TUBE_Z + TUBE_R:.1f} — bulges {TUBE_BULGE:.1f} mm "
           f"above the face ({100 * TUBE_BULGE_FRAC:.0f}% of dia), "
           f"hangs {abs(TUBE_Z - TUBE_R):.1f} mm below the base")
-    import math as _m
-    _top_z = TUBE_Z + TUBE_R + VISOR_H * _m.cos(_m.radians(VISOR_RAKE))
-    _top_x = TUBE_X + VISOR_H * _m.sin(_m.radians(VISOR_RAKE))
-    _glass = FLOOR + POCK_D
-    _far = fx(SCREEN_SVG[2])
-    print(f"  ABOVE ARM  {_top_z:.1f} mm  (bbox height is misleading — "
-          f"{abs(TUBE_Z - TUBE_R):.1f} mm of tube hangs BESIDE the arm)")
-    print(f"  visor      top edge ({_top_x:.1f}, {_top_z:.1f}), "
-          f"{_top_z - _glass:.1f} mm above the glass")
-    print(f"             (shade {_m.degrees(_m.atan2(_top_z - _glass, _far - _top_x)):.0f} deg — "
-          f"reported, not chased; the cover does the shading)")
     print(f"  screen ap. {sx1 - sx0:.1f} x {sy1 - sy0:.1f} "
           f"(margins L/R {fx(SCREEN_SVG[0]) + PH_W / 2:.2f} / "
           f"{PH_W / 2 - fx(SCREEN_SVG[2]):.2f})")
