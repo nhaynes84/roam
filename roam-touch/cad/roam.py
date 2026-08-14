@@ -162,16 +162,21 @@ TUBE_AXIS_BELOW_FACE = 2 * TUBE_R / 4.0    # a quarter of the diameter
 # ⚠️ It rakes OUTWARD, ~44° AWAY from the screen, and overhangs past the tray's
 # own edge. I built the last one canting inboard over the screen, which is why
 # it read as a lip. Outward is what makes the silhouette his.
-PLATE_H = 22.0        # rise above the tray face
-PLATE_T = 5.0         # thickness
-PLATE_RAKE = 44.0     # degrees, leaning OUTBOARD
-PLATE_SINK = 2.0      # ⚠️ under TUBE_WALL — see pack_bore()
+# ⚠️⚠️ It is a WEDGE, not a plate. Side by side, mine read as a sail and his as
+# a mass — and his section said so all along, I just read "wall" and built a fin:
+#     Z 14  material 12.4 mm thick
+#     Z 24  material 22.3 mm thick
+# The INNER face is vertical; the OUTER face rakes outboard, so the thing gets
+# THICKER as it rises. That is what gives it weight in the silhouette.
+PLATE_IN_X = -46.0    # inner face, vertical, outboard of the tray wall
+PLATE_T0 = 12.4       # thickness at the tray face
+PLATE_T1 = 24.0       # thickness at the top
+PLATE_H = 14.5        # rise above the tray face
 
-# ★ The flange his section shows at the top: Z 26–28 widens from ~22 to 32–36.
-# That is the face the ROAM lettering sits on — a flat panel capping the raked
-# wall, not a moulding. It reads as a deliberate surface because it is one.
-FLANGE_W = 15.0       # across the plate's thickness
-FLANGE_T = 4.5        # along the plate's rise
+# ★ The flange: his Z 26–28 widens to 36 and overhangs the wedge BOTH ways.
+# That is the face the ROAM lettering sits on.
+FLANGE_W = 32.0
+FLANGE_T = 4.5
 
 # --------------------------------------------------------------- derived
 POCK_L = PH_L + 2 * CLR
@@ -357,14 +362,21 @@ def pack_bore() -> Part:
 
 
 def plate() -> Part:
-    """The fixed ROAM plate — his form, raking outboard off the tube."""
-    slab = Box(PLATE_T, TUBE_LEN, PLATE_H + PLATE_SINK,
-               align=(Align.CENTER, Align.MIN, Align.MIN))
-    # The flange caps it, sunk slightly so the two fuse across a face.
-    flange = Pos(0, 0, PLATE_H + PLATE_SINK - FLANGE_T / 2) * Box(
+    """His wedge: vertical inside, raking outboard outside, thickening upward."""
+    z0, z1 = OUT_H - 2.0, OUT_H + PLATE_H
+    pts = [
+        (PLATE_IN_X, z0),                 # inner bottom
+        (PLATE_IN_X, z1),                 # inner top
+        (PLATE_IN_X - PLATE_T1, z1),      # outer top  — the rake ends here
+        (PLATE_IN_X - PLATE_T0, z0),      # outer bottom
+    ]
+    face = make_face(Polyline(*pts, close=True))
+    wedge = extrude(Plane.XZ * face, -TUBE_LEN)
+
+    flange = Pos(PLATE_IN_X - PLATE_T1 / 2, 0, z1 - FLANGE_T / 2) * Box(
         FLANGE_W, TUBE_LEN, FLANGE_T,
         align=(Align.CENTER, Align.MIN, Align.MIN))
-    return Pos(TUBE_X, 0, OUT_H - PLATE_SINK) * Rot(0, -PLATE_RAKE, 0) * (slab + flange)
+    return wedge + flange
 
 
 def build() -> Part:
@@ -413,14 +425,12 @@ if __name__ == "__main__":
           f"— a curve, not a half cylinder")
     print(f"             hangs {abs(TUBE_Z - TUBE_R):.1f} mm below the base plane")
     import math as _p
-    _px = TUBE_X - PLATE_H * _p.sin(_p.radians(PLATE_RAKE))
-    _pz = OUT_H + PLATE_H * _p.cos(_p.radians(PLATE_RAKE))
-    print(f"  plate      rakes {PLATE_RAKE:.0f} deg OUTBOARD, top edge "
-          f"({_px:.1f}, {_pz:.1f})")
-    print(f"             {_pz - OUT_H:.1f} mm above the face, overhangs the tray "
-          f"edge by {abs(_px) - OUT_W / 2:.1f} mm")
-    print(f"  flange     {FLANGE_W:.0f} x {FLANGE_T:.1f} mm capping it — the ROAM face, "
-          f"lying at {PLATE_RAKE:.0f} deg")
+    _rake = _p.degrees(_p.atan2(PLATE_T1 - PLATE_T0, PLATE_H + 2.0))
+    print(f"  wedge      {PLATE_T0:.1f} mm thick at the face -> {PLATE_T1:.1f} at the top, "
+          f"rising {PLATE_H:.1f}")
+    print(f"             inner face vertical at X {PLATE_IN_X:.1f}, "
+          f"outer rakes {_rake:.0f} deg outboard")
+    print(f"  flange     {FLANGE_W:.0f} x {FLANGE_T:.1f} — the ROAM face")
     print(f"  screen ap. {sx1 - sx0:.1f} x {sy1 - sy0:.1f} "
           f"(margins L/R {fx(SCREEN_SVG[0]) + PH_W / 2:.2f} / "
           f"{PH_W / 2 - fx(SCREEN_SVG[2]):.2f})")
