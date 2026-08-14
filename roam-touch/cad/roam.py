@@ -162,6 +162,64 @@ TUBE_X = -52.5
 TUBE_AXIS_BELOW_FACE = 2 * TUBE_R / 4.0    # a quarter of the diameter
 # TUBE_Z is derived from OUT_H below — crown flush with the tray face.
 
+# ------------------------------------------------- STEP 4: mic + routing
+# ★ The mic's TRRS plug lives in the jack cavity permanently, so its cable has to
+# get from the top-right corner down the +X side to a capsule. Owner:
+#   "a hole in the top right where the aux cable routes, it's got to come down
+#    under the buttons ... a little mic housing centered on the right side, under
+#    the buttons there ... leave a channel on the bottom or inner corner to run
+#    the cable, and this means the right side has to be a bit thicker there ...
+#    but it should go under the buttons so they are accessible"
+#
+# ⚠️⚠️ **RAIL_TOP is the whole constraint.** The button bores start at
+# FLOOR + PH_T/2 - BTN_BORE_H/2 = 4.45, and the plungers stand proud of the +X
+# wall. Anything added to that wall ABOVE 4.45 buries them. So the rail is a LOW
+# rail — it runs under both buttons and stops short of them — and it only swells
+# to full height past Y 112, where the power button has already ended and the
+# cable needs the headroom to come out of the plug cavity.
+RAIL_W = 8.0          # how much thicker the +X side gets
+RAIL_TOP = 4.2        # ⚠️ under the button bores at 4.45 — do not raise
+RAIL_STEP_Y = 112.0   # power button ends at 108.6; the rail rises after it
+RAIL_RAMP = 10.0      # the step is a ramp, not a shoulder
+
+# ★ It hangs BELOW the base plane, like the tube does on −X, and that is what
+# buys the channel its height. At |X| 38–51 the arm (r ~49) has already fallen
+# ~30 mm away, so there is nothing down there to foul — the same argument that
+# let the tube drop. A flat base at the +X edge would be flatness for its own
+# sake, and it would cost the channel 6 mm it has nowhere else to find.
+RAIL_Z0 = -6.0
+
+CH_W = 4.5            # cable channel, generous for a 2–3 mm lav lead
+CH_Z0, CH_Z1 = -4.0, 2.0
+
+# ⚠️ The channel is open at the BOTTOM for its whole length, not a blind bore.
+# Threading a lead down 70 mm of buried tunnel is a job nobody does twice; laying
+# it into an open groove and screwing a plate over it is a job you do once.
+PLATE_T = 2.0         # the removable service plate
+PLATE_CLR = 0.25
+
+# The mic blister: centred on the side, sitting entirely below the button line.
+# ⚠️ The blister's top is RAIL_TOP and cannot go higher — at Y 80.7 it sits
+# directly in front of the volume rocker, so anything above the button line is
+# a thumb standing between him and the button he is reaching for.
+MIC_BLIS_W, MIC_BLIS_L = 13.0, 16.0
+MIC_R = 3.5           # capsule pocket radius — a 6 mm electret with room
+MIC_DEPTH = 6.5
+
+# ★★ GRILLE LINES, not a hole pattern. Owner: *"i do want grille lines though
+# regardless."* Slots, tapering to a circle — which is his concept's round
+# grille, and the one element on this thing that says it is not a phone in a box.
+#
+# ⚠️ Lines over a d7 pocket would go blind at their ends, so there is a PLENUM
+# behind the face: the bore opens out to GRILLE_PL_R for GRILLE_PL_D before it
+# necks down to the capsule. Every line is through-air for its whole length.
+GRILLE_FACE = 1.5     # face wall the lines are cut through
+GRILLE_PL_R = 4.6
+GRILLE_PL_D = 1.6
+GRILLE_W = 1.0        # line width — 1.0 web between, ~3 perimeters at 0.4 mm
+GRILLE_PITCH = 2.0
+GRILLE_LINES = 5
+
 # --------------------------------------------------------------- derived
 POCK_L = PH_L + 2 * CLR
 POCK_W = PH_W + 2 * CLR
@@ -174,6 +232,27 @@ TUBE_Z = OUT_H - TUBE_AXIS_BELOW_FACE
 TUBE_BULGE = TUBE_Z + TUBE_R - OUT_H        # crown standing above the face
 
 PHONE_TOP_Y = POCK_L - CLR
+
+RAIL_X0 = OUT_W / 2
+RAIL_X1 = RAIL_X0 + RAIL_W
+CH_X0 = RAIL_X0 + 1.75              # 1.75 mm of land either side of the groove
+CH_X1 = CH_X0 + CH_W
+
+MIC_Y = OUT_L / 2                   # "centered on the right side"
+MIC_Z = (RAIL_Z0 + RAIL_TOP) / 2    # centred in the blister
+MIC_X1 = RAIL_X0 + MIC_BLIS_W       # the blister's outer face, where the grille is
+
+EXIT_Y0, EXIT_Y1 = 148.0, 154.0     # the hole in the top right
+EXIT_Z0, EXIT_Z1 = 3.5, 8.5         # inside the plug cavity's 2.2 – 10.7
+CH_Y1 = EXIT_Y1
+
+PL_Y0, PL_Y1 = MIC_Y - 15.0, 158.0  # the service plate's run
+PL_X0, PL_X1 = RAIL_X0 + 0.75, CH_X1 + 1.0
+PL_HEAD_X1 = MIC_X1 - 1.0           # it widens under the blister
+PL_HEAD_L = 15.0
+PLATE_TOP = RAIL_Z0 + PLATE_T
+SCREWS = [(41.5, PL_Y0 + 4.0), (41.5, PL_Y1 - 4.0),
+          (RAIL_X0 + 9.5, MIC_Y - 5.5), (RAIL_X0 + 9.5, MIC_Y + 5.5)]
 
 
 def fx(x):
@@ -283,6 +362,102 @@ def button_bores() -> Part:
     return cut
 
 
+def side_rail() -> Part:
+    """The thickened +X side: a low rail under the buttons, rising past them."""
+    prof = [(0, RAIL_Z0), (0, RAIL_TOP),
+            (RAIL_STEP_Y, RAIL_TOP), (RAIL_STEP_Y + RAIL_RAMP, OUT_H),
+            (OUT_L, OUT_H), (OUT_L, RAIL_Z0)]
+    rail = Pos(RAIL_X0, 0, 0) * extrude(
+        Plane.YZ * make_face(Polyline(*prof, close=True)), RAIL_W)
+
+    # ★ The blister. Rounded in plan so it reads as a pod rather than a lump,
+    # and it doubles as the seat the service plate screws into — a capsule
+    # pocket needs more width than the rail has, so the rail grows to meet it.
+    blis = Pos(RAIL_X0 + MIC_BLIS_W / 2, MIC_Y, RAIL_Z0) * extrude(
+        Plane.XY * RectangleRounded(MIC_BLIS_W, MIC_BLIS_L, 4.0), RAIL_TOP - RAIL_Z0)
+    return rail + blis
+
+
+def cable_route() -> Part:
+    """Exit hole, riser, channel, capsule pocket, grille — one cutting tool."""
+    cut = Part()
+
+    # ⚠️ The hole is high, in the tall part of the rail, because that is the only
+    # place it can be: it has to meet the plug cavity, whose floor is at 2.2 and
+    # which sits well above RAIL_TOP. The riser then drops it to channel height.
+    cut += Pos(POCK_W / 2 - EPS, EXIT_Y0, EXIT_Z0) * Box(
+        CH_X1 - POCK_W / 2 + EPS, EXIT_Y1 - EXIT_Y0, EXIT_Z1 - EXIT_Z0,
+        align=(Align.MIN, Align.MIN, Align.MIN))
+    cut += Pos(CH_X0, EXIT_Y0, CH_Z0) * Box(
+        CH_W, EXIT_Y1 - EXIT_Y0, EXIT_Z1 - CH_Z0,
+        align=(Align.MIN, Align.MIN, Align.MIN))
+
+    # The run down the side, open at the bottom — see PLATE_T.
+    cut += Pos(CH_X0, MIC_Y, RAIL_Z0 - EPS) * Box(
+        CH_W, CH_Y1 - MIC_Y, CH_Z1 - RAIL_Z0 + EPS,
+        align=(Align.MIN, Align.MIN, Align.MIN))
+
+    # The capsule pocket, and the well beneath it the capsule drops through.
+    cut += Pos(MIC_X1 - 1.6, MIC_Y, MIC_Z) * Rot(0, -90, 0) * Cylinder(
+        MIC_R, MIC_DEPTH, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    cut += Pos(CH_X0, MIC_Y, RAIL_Z0 - EPS) * Box(
+        MIC_X1 - 1.6 - CH_X0, 2 * MIC_R, MIC_Z - RAIL_Z0 + EPS,
+        align=(Align.MIN, Align.CENTER, Align.MIN))
+
+    # ★ The plenum, then the lines through the face into it — see GRILLE_*.
+    cut += Pos(MIC_X1 - GRILLE_FACE, MIC_Y, MIC_Z) * Rot(0, -90, 0) * Cylinder(
+        GRILLE_PL_R, GRILLE_PL_D, align=(Align.CENTER, Align.CENTER, Align.MIN))
+
+    for i in range(GRILLE_LINES):
+        dz = (i - (GRILLE_LINES - 1) / 2) * GRILLE_PITCH
+        half = math.sqrt(max(0.0, GRILLE_PL_R ** 2 - dz ** 2))
+        length = 2 * half - 0.6          # ★ tapering, so the set reads as a circle
+        if length <= GRILLE_W:
+            continue
+        z = MIC_Z + dz
+        x = MIC_X1 - GRILLE_FACE - EPS
+        cut += Pos(x, MIC_Y, z) * Rot(0, 90, 0) * Box(
+            GRILLE_W, length - GRILLE_W, GRILLE_FACE + 2 * EPS,
+            align=(Align.CENTER, Align.CENTER, Align.MIN))
+        for dy in (-(length - GRILLE_W) / 2, (length - GRILLE_W) / 2):
+            cut += Pos(x, MIC_Y + dy, z) * Rot(0, 90, 0) * Cylinder(
+                GRILLE_W / 2, GRILLE_FACE + 2 * EPS,
+                align=(Align.CENTER, Align.CENTER, Align.MIN))
+    return cut
+
+
+def _plate_profile(clr: float):
+    """The service plate in plan — a narrow run with a head under the blister."""
+    run = Pos((PL_X0 + PL_X1) / 2, (PL_Y0 + PL_Y1) / 2) * Rectangle(
+        PL_X1 - PL_X0 - 2 * clr, PL_Y1 - PL_Y0 - 2 * clr)
+    head = Pos((PL_X0 + PL_HEAD_X1) / 2, MIC_Y) * RectangleRounded(
+        PL_HEAD_X1 - PL_X0 - 2 * clr, PL_HEAD_L - 2 * clr, 3.0)
+    return run + head
+
+
+def plate_rebate() -> Part:
+    """The recess it sits in, plus the pilot holes."""
+    cut = Pos(0, 0, RAIL_Z0 - EPS) * extrude(
+        Plane.XY * _plate_profile(0.0), PLATE_T + EPS)
+    for sx, sy in SCREWS:
+        cut += Pos(sx, sy, PLATE_TOP) * Cylinder(
+            0.85, 5.0, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    return cut
+
+
+def service_plate() -> Part:
+    """★ Owner: "give the housing a bottom plate under the mic i can take off to
+    easily get it in / out; it can take screws or snap in out, don't care."
+    Screws — a snap in a 2 mm wall on this side would be a one-time snap.
+    """
+    plate = Pos(0, 0, RAIL_Z0) * extrude(
+        Plane.XY * _plate_profile(PLATE_CLR), PLATE_T)
+    for sx, sy in SCREWS:
+        plate -= Pos(sx, sy, RAIL_Z0 - EPS) * Cylinder(
+            1.2, PLATE_T + 2 * EPS, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    return plate
+
+
 def gaps():
     """★ The webs between apertures — the thing that actually bounds FEAT_TOL.
 
@@ -359,6 +534,9 @@ def pack_bore() -> Part:
 def build() -> Part:
     p = tray()
     p += pack_tube()
+    p += side_rail()
+    p -= cable_route()
+    p -= plate_rebate()
     p -= pack_bore()      # ★ last, so nothing can intrude — see pack_bore()
     p -= face_openings()
     p -= port_openings()
@@ -372,8 +550,13 @@ if __name__ == "__main__":
     here = os.path.dirname(os.path.abspath(__file__))
     out = os.path.join(here, "out")
     os.makedirs(out, exist_ok=True)
+    plate = service_plate()
     export_step(part, os.path.join(out, "roam_step3.step"))
     export_stl(part, os.path.join(out, "roam_step3.stl"))
+    export_step(plate, os.path.join(out, "roam_plate.step"))
+    export_stl(plate, os.path.join(out, "roam_plate.stl"))
+    export_step(Compound(children=[part, plate]),
+                os.path.join(out, "roam_assembly.step"))
 
     bb = part.bounding_box()
     print(f"STEP 3 — housing + pack tube")
@@ -402,6 +585,20 @@ if __name__ == "__main__":
     print(f"             crown {TUBE_BULGE:.1f} mm proud, over a {_chord:.1f} mm chord "
           f"— a curve, not a half cylinder")
     print(f"             hangs {abs(TUBE_Z - TUBE_R):.1f} mm below the base plane")
+    print(f"  side rail  +{RAIL_W:.0f} mm on +X, top {RAIL_TOP:.1f} "
+          f"(bores start {FLOOR + PH_T / 2 - BTN_BORE_H / 2:.2f}) — "
+          f"{FLOOR + PH_T / 2 - BTN_BORE_H / 2 - RAIL_TOP:.2f} mm under the buttons")
+    print(f"             rises to full height past Y {RAIL_STEP_Y:.0f}, "
+          f"hangs {abs(RAIL_Z0):.1f} below the base plane")
+    print(f"  cable      exit {EXIT_Y1 - EXIT_Y0:.0f} x {EXIT_Z1 - EXIT_Z0:.0f} at "
+          f"Y {EXIT_Y0:.0f}-{EXIT_Y1:.0f}, riser, then {CH_W:.1f} x "
+          f"{CH_Z1 - CH_Z0:.1f} channel down to the mic")
+    print(f"  mic        blister {MIC_BLIS_W:.0f} x {MIC_BLIS_L:.0f} x "
+          f"{RAIL_TOP - RAIL_Z0:.1f} "
+          f"at Y {MIC_Y:.1f}, capsule d{2 * MIC_R:.1f} x {MIC_DEPTH:.1f}, "
+          f"{GRILLE_LINES} grille lines")
+    print(f"  plate      {PL_Y1 - PL_Y0:.0f} mm long, {PLATE_T:.1f} thick, "
+          f"{len(SCREWS)} x M2 — plate volume {plate.volume / 1000:.2f} cm3")
     print(f"  screen ap. {sx1 - sx0:.1f} x {sy1 - sy0:.1f} "
           f"(margins L/R {fx(SCREEN_SVG[0]) + PH_W / 2:.2f} / "
           f"{PH_W / 2 - fx(SCREEN_SVG[2]):.2f})")
