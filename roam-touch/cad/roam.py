@@ -38,7 +38,21 @@ FLOOR = 2.2          # tray floor under the phone
 LIP_SIDE = 2.5       # front lip over the long bezels
 LIP_END = 4.0        # front lip at the jack end
 LIP_H = 2.4          # lip height above the phone face (also screen standoff)
-BEZEL_CHAM = 1.5     # how far the aperture opens out at the top face
+# ⚠️⚠️ THE BEZEL IS AN ANGLE, NOT AN OFFSET — and 30°, not 58°. From the first
+# rough print: *"the screen bezel can't be a 45, it's too steep, it needs to be
+# like 30 degrees instead so i can 'slide' down the tray and use the edges of
+# the screen correctly."* It was 1.5 out over 2.4 up = 58° from horizontal,
+# which his thumb hits as a wall rather than a ramp. 30° needs 4.157 of run.
+BEZEL_ANGLE = 30.0   # from HORIZONTAL — a ramp onto the glass, not a chamfer
+
+# ⚠️ THE JACK END CANNOT BE 30° AND KEEP THE PROX RIB. There is 1.45 mm of lip
+# between the screen aperture and the proximity window, so a 4.157 run eats it
+# and stops 0.44 mm short of the prox's far edge, leaving a sliver. Running it
+# the full 4.60 instead ABSORBS the prox into the bezel recess: one tapered
+# opening rather than a hole with a knife-edge rib beside it. The prox sees out
+# better, not worse, and the lip still grips the phone at face level.
+# ★ It is one number — set BEZEL_RUN_JACK to 0.30 to keep the rib instead.
+BEZEL_RUN_JACK = 4.60
 
 # ⚠️⚠️ 0.6, and it stays 0.6 until someone measures a reason to change it.
 #
@@ -457,14 +471,26 @@ def face_openings() -> Part:
     h = LIP_H + 2 * EPS
     cut = Part()
 
-    # ★ The screen aperture is CHAMFERED, like his — it opens out toward the top
-    # face by BEZEL_CHAM a side. A square-cut window reads as a hole punched in a
-    # slab; the flare reads as an edge that was made.
+    # ★ The screen bezel — a RAMP at BEZEL_ANGLE, run per side so the jack end
+    # can differ from the other three. Lofted between two rectangles that are
+    # not concentric, which is the whole reason this is a loft and not an offset.
+    # ⚠️ Anchored at the PHONE FACE and run off the true rise. Padding the loft
+    # with EPS at both ends made it 32.0° instead of 30.0 and opened the glass
+    # aperture 0.21 mm a side — the pad changes the angle, because the angle is
+    # rise-over-run and EPS is part of the rise.
     sx0, sy0, sx1, sy1 = face_rect(SCREEN_SVG)
-    inner = Plane.XY.offset(z0) * Rectangle(sx1 - sx0, sy1 - sy0)
-    outer = Plane.XY.offset(z0 + h) * Rectangle(
-        sx1 - sx0 + 2 * BEZEL_CHAM, sy1 - sy0 + 2 * BEZEL_CHAM)
-    cut += Pos((sx0 + sx1) / 2, (sy0 + sy1) / 2, 0) * loft([inner, outer])
+    zf = FLOOR + POCK_D                    # the phone's face — aperture is exact here
+    t = math.tan(math.radians(BEZEL_ANGLE))
+    lo, hi = -0.3, LIP_H + EPS             # lo dips into the pocket, which is void
+    kj = BEZEL_RUN_JACK / (LIP_H / t)       # the jack end's own, shallower rate
+
+    def rect_at(dz):
+        r_, rj = dz / t, dz / t * kj
+        return (Plane.XY.offset(zf + dz) *
+                (Pos((sx0 + sx1) / 2, (sy0 - r_ + sy1 + rj) / 2) *
+                 Rectangle(sx1 - sx0 + 2 * r_, sy1 - sy0 + r_ + rj)))
+
+    cut += loft([rect_at(lo), rect_at(hi)])
 
     for svg in (EARPIECE_SVG, PROX_SVG):
         x0, y0, x1, y1 = face_rect(svg)
@@ -753,7 +779,14 @@ if __name__ == "__main__":
     print(f"  end wall   -X half RETAINED as the phone's stop "
           f"({POCK_W / 2:.1f} mm of it); +X half open for the plug")
     print(f"  plug cav.  {JACK_CAV:.1f} mm beyond that wall — right-angle plug")
-    print(f"  screen     chamfered {BEZEL_CHAM:.1f} mm a side, opening outward")
+    _run = LIP_H / math.tan(math.radians(BEZEL_ANGLE))
+    print(f"  bezel      {BEZEL_ANGLE:.0f} deg ramp — {_run:.2f} mm of run over "
+          f"{LIP_H:.1f} of rise, on three sides")
+    print(f"             jack end runs {BEZEL_RUN_JACK:.2f} at "
+          f"{math.degrees(math.atan(LIP_H / BEZEL_RUN_JACK)):.1f} deg — it ABSORBS "
+          f"the prox window rather than leave a 0.44 sliver")
+    print(f"             flat lip left: {sx0 + OUT_W / 2 - _run:.2f} / "
+          f"{OUT_W / 2 - sx1 - _run:.2f} mm on the long sides")
     print(f"  pack tube  bore d{2 * TUBE_BORE_R:.1f} x {TUBE_LEN:.1f} long, "
           f"OD {2 * TUBE_R:.1f}, centre X {TUBE_X:.1f}")
     print(f"             pocket wall to bore  "
