@@ -141,6 +141,20 @@ TUBE_X = -52.5
 TUBE_BULGE_FRAC = 1.0 / 3.0    # of the DIAMETER, standing above the tray face
 # TUBE_Z is derived from OUT_H below — crown flush with the tray face.
 
+# ---------------------------------------------------------- STEP 3: shroud
+# ★★ His concept has walls on THREE sides of the screen, and that is a different
+# object from a lip. Owner: "notice my shroud on 3 sides, it won't block all
+# glare but it will get a lot of it." He is right and my single plate was
+# answering the wrong physics — glare is the screen reflecting a broad source
+# into your eye, so what helps is enclosing the field, not shadowing one edge.
+#
+# ★ Two of the three sides already exist:
+#   −X  the tube's proud third IS that wall
+#   y=0 the CAP will be that wall — another reason it comes last
+# So the only one to build is the jack end. And +X stays open by necessity:
+# the plungers are in that wall.
+SHROUD_H = 24.9 - 13.4    # to the tube's crown — set below from TUBE_Z
+
 # --------------------------------------------------------------- derived
 POCK_L = PH_L + 2 * CLR
 POCK_W = PH_W + 2 * CLR
@@ -151,6 +165,7 @@ OUT_L = POCK_L + JACK_CAV + WALL   # pocket + plug cavity + closing wall
 OUT_H = FLOOR + POCK_D + LIP_H     # 13.4
 TUBE_BULGE = 2 * TUBE_R * TUBE_BULGE_FRAC   # how much crown stands above the face
 TUBE_Z = OUT_H + TUBE_BULGE - TUBE_R
+SHROUD_Z = TUBE_Z + TUBE_R          # shroud tops level with the tube's crown
 
 PHONE_TOP_Y = POCK_L - CLR
 
@@ -324,8 +339,20 @@ def pack_bore() -> Part:
         align=(Align.CENTER, Align.CENTER, Align.MIN))
 
 
+def shroud() -> Part:
+    """The jack-end wall, rising to the tube's crown.
+
+    ⚠️ Only this end. y=0 must stay open — the phone slides in there, and the
+    cap becomes that wall. +X must stay open — the plungers live in it.
+    """
+    return Pos(0, OUT_L - WALL, OUT_H) * Box(
+        OUT_W - 2 * WALL, WALL, SHROUD_Z - OUT_H,
+        align=(Align.CENTER, Align.MIN, Align.MIN))
+
+
 def build() -> Part:
     p = tray()
+    p += shroud()
     p += pack_tube()
     p -= pack_bore()      # ★ last, so nothing can intrude — see pack_bore()
     p -= face_openings()
@@ -364,6 +391,9 @@ if __name__ == "__main__":
     print(f"             crown z {TUBE_Z + TUBE_R:.1f} — bulges {TUBE_BULGE:.1f} mm "
           f"above the face ({100 * TUBE_BULGE_FRAC:.0f}% of dia), "
           f"hangs {abs(TUBE_Z - TUBE_R):.1f} mm below the base")
+    print(f"  shroud     jack-end wall to z {SHROUD_Z:.1f} "
+          f"({SHROUD_Z - OUT_H:.1f} above the face, level with the crown)")
+    print(f"             3 sides: tube (−X) · this wall (jack) · cap (wrist, later)")
     print(f"  screen ap. {sx1 - sx0:.1f} x {sy1 - sy0:.1f} "
           f"(margins L/R {fx(SCREEN_SVG[0]) + PH_W / 2:.2f} / "
           f"{PH_W / 2 - fx(SCREEN_SVG[2]):.2f})")
