@@ -195,6 +195,12 @@ RAIL_ROUND = 2.5
 RAIL_TOP = 4.2        # ⚠️ under the button bores at 4.45 — do not raise
 RAIL_STEP_Y = 112.0   # power button ends at 108.6; the rail rises after it
 RAIL_RAMP = 10.0      # the step is a ramp, not a shoulder
+# ★ Owner: *"the way you have the ramp on that top side, you should mirror it on
+# the botom, even if it doesn't do anything functional."* So the bottom drops by
+# exactly what the top rises, at the same Y, at the same angle — the jack end
+# becomes a symmetric wedge instead of a block with one chamfer. Purely a look;
+# dial RAIL_DROP to taste, it is the only number involved.
+RAIL_DROP = 9.2       # = OUT_H − RAIL_TOP, i.e. the top ramp, mirrored
 
 # ★ It hangs BELOW the base plane, like the tube does on −X, and that is what
 # buys the channel its height. At |X| 38–51 the arm (r ~49) has already fallen
@@ -270,6 +276,8 @@ TUBE_BULGE = TUBE_Z + TUBE_R - OUT_H        # crown standing above the face
 
 PHONE_TOP_Y = POCK_L - CLR
 
+RAIL_Z1 = RAIL_Z0 - RAIL_DROP       # the rail's underside past the ramp
+
 RAIL_X0 = OUT_W / 2
 RAIL_X1 = RAIL_X0 + RAIL_W
 CH_X0 = RAIL_X0 + 2.0               # 2 mm of land either side of the groove
@@ -292,13 +300,22 @@ CH_Y1 = EXIT_Y1 - 2.0
 # False` with every probe still passing, which is the quiet kind of broken.
 BLIS_BITE, BEZEL_SINK = 1.0, 0.2
 
-PL_Y0, PL_Y1 = MIC_Y - 15.0, 158.0  # the service plate's run
-PL_X0, PL_X1 = RAIL_X0 + 1.0, CH_X1 + 1.0
+# ⚠️ The plate has to STOP at the ramp — past it the rail's underside is 9.2 mm
+# lower, so a flat rebate carried on would float inside the solid. Beyond Y 111
+# the groove closes into a tunnel, which is fine: it is a straight 40 mm run
+# with an open mouth at each end, not something anyone has to fish blind.
+PL_Y0, PL_Y1 = MIC_Y - 15.0, RAIL_STEP_Y - 1.0
+# ⚠️ Wider than the groove needs, because the run's screws cannot sit on the
+# groove's centreline — there is no material there. They move to the outboard
+# land, and the plate has to reach them.
+PL_X0, PL_X1 = RAIL_X0 + 1.0, RAIL_X1 - 0.55
 PL_HEAD_X1 = MIC_BLIS_X1 - 1.0      # it widens under the blister
 PL_HEAD_L = 15.0
 PLATE_TOP = RAIL_Z0 + PLATE_T
-CH_Z0 = PLATE_TOP
-_SX = (PL_X0 + PL_X1) / 2
+CH_Z0 = PLATE_TOP - 0.5             # ⚠️ overlaps the rebate, never kisses it
+_SX = (CH_X1 + RAIL_X1) / 2         # ★ centred on the outboard LAND, not the
+                                    # groove and not the plate — 1.75 mm of
+                                    # material each side of a 1.7 mm pilot.
 SCREWS = [(_SX, PL_Y0 + 4.0), (_SX, PL_Y1 - 4.0),
           (MIC_BLIS_X1 - 2.5, MIC_Y - 6.5), (MIC_BLIS_X1 - 2.5, MIC_Y + 6.5)]
 
@@ -430,7 +447,8 @@ def side_rail() -> Part:
             (d0, RAIL_TOP), (d0 + MIC_DIP_RAMP, MIC_TOP),      # ★ the scallop
             (d1 - MIC_DIP_RAMP, MIC_TOP), (d1, RAIL_TOP),
             (RAIL_STEP_Y, RAIL_TOP), (RAIL_STEP_Y + RAIL_RAMP, OUT_H),
-            (OUT_L, OUT_H), (OUT_L, RAIL_Z0)]
+            (OUT_L, OUT_H), (OUT_L, RAIL_Z1),
+            (RAIL_STEP_Y + RAIL_RAMP, RAIL_Z1), (RAIL_STEP_Y, RAIL_Z0)]
     rail = Pos(RAIL_X0, 0, 0) * extrude(
         Plane.YZ * make_face(Polyline(*prof, close=True)), RAIL_W)
 
@@ -464,9 +482,11 @@ def cable_route() -> Part:
         CH_W, EXIT_Y1 - EXIT_Y0, EXIT_Z1 - CH_Z0,
         align=(Align.MIN, Align.MIN, Align.MIN))
 
-    # The run down the side, open at the bottom — see PLATE_T.
-    cut += Pos(CH_X0, MIC_Y, RAIL_Z0 - EPS) * Box(
-        CH_W, CH_Y1 - MIC_Y, CH_Z1 - RAIL_Z0 + EPS,
+    # The run down the side. Its floor is CH_Z0 throughout; the plate rebate is
+    # what opens it from below, so it is a groove where the plate reaches and a
+    # tunnel past that — one cut, no special case.
+    cut += Pos(CH_X0, MIC_Y, CH_Z0) * Box(
+        CH_W, CH_Y1 - MIC_Y, CH_Z1 - CH_Z0,
         align=(Align.MIN, Align.MIN, Align.MIN))
 
     # ⚠️ The pocket runs all the way down to PLATE_TOP, deliberately: that is how
@@ -661,7 +681,8 @@ if __name__ == "__main__":
           f"(bores start {FLOOR + PH_T / 2 - BTN_BORE_H / 2:.2f}) — "
           f"{FLOOR + PH_T / 2 - BTN_BORE_H / 2 - RAIL_TOP:.2f} mm under the buttons")
     print(f"             rises to full height past Y {RAIL_STEP_Y:.0f}, "
-          f"hangs {abs(RAIL_Z0):.1f} below the base plane")
+          f"hangs {abs(RAIL_Z0):.1f} below the base plane, "
+          f"{abs(RAIL_Z1):.1f} past the ramp (mirrored)")
     print(f"             dips to {MIC_TOP:.1f} over Y "
           f"{MIC_Y - MIC_DIP_HALF:.0f}-{MIC_Y + MIC_DIP_HALF:.0f} — "
           f"{FLOOR + PH_T / 2 - BTN_BORE_H / 2 - MIC_TOP - BEZEL_PROUD:.2f} mm "
