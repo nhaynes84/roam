@@ -773,7 +773,8 @@ if __name__ == "__main__":
     print(f"  grille     {GRILLE_LINES} straight slots, {GRILLE_W:.1f} wide on a "
           f"{GRILLE_GAP:.1f} web — HIS, tapering inboard "
           f"{min(SLOT_X_IN):.1f} -> {max(SLOT_X_IN):.1f}")
-    print(f"             they BREAK OUT the side over an r{EDGE_R:.1f} corner, "
+    print(f"             they BREAK OUT the side over a "
+          f"{CHAM_45:.1f}x{CHAM_45:.1f} 45 deg chamfer, "
           f"lengths {' '.join(f'{MIC_SWELL_X1 - x:.1f}' for x in SLOT_X_IN[:4])} ...")
     print(f"             spans {_span:.1f} mm in a {MIC_CH_L:.1f} chamber "
           f"({(MIC_CH_L - _span) / 2:.2f} mm clear at each end), no bezel")
