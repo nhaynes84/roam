@@ -123,7 +123,38 @@ TUBE_LEN = PH_L + 2 * CLR + JACK_CAV + WALL   # = OUT_L, defined below
 # between the phone pocket and the pack bore, and overlaps the tray's outer face
 # so the two fuse across a face rather than kissing on a tangent line.
 TUBE_X = -52.5
-TUBE_Z = TUBE_R            # sits on the same flat base plane as the tray
+
+# ★★ The tube's CROWN sits flush with the tray's top face — it hangs below the
+# base plane, it does not stand on it. Owner: "you centered the tube off the top
+# face, it makes it stick up pretty high, why not drop it down, it will make
+# your visor work easier as well."
+#
+# ★ It can drop because of where it is: at |X| 52.5 it is **outboard of the arm**
+# (radius 45), so the space under it is beside the forearm, not inside it. Sat on
+# the base plane the tube stood 21 mm proud and made the whole thing 34 mm tall
+# before the visor even started. Flush, the top face is continuous — tray and
+# crown at one height — and the cylinder bulges below and outboard, which is what
+# makes this read as a bracer wrapping an arm rather than a box stacked on one.
+# TUBE_Z is derived from OUT_H below — crown flush with the tray face.
+
+# ------------------------------------------------------------ STEP 3: visor
+# ★ The ROAM plate, on the SAME edge as the tube — his concept has it there and
+# the tube tucks under it. It does three jobs: shades the screen, carries the
+# branding, and later becomes the sliding cover's track (a separate model).
+#
+# ★★ The tube is already most of the visor. Standing 21 mm proud of the glass,
+# it does the shading work on its own; the plate only adds the last stretch and
+# the face to put a name on. That is why this is 12 mm and not 34 — building a
+# full-height visor on top of a 34 mm tube would make the thing 60 mm tall.
+# ⚠️ 20, not 12. With the crown dropped flush the plate lost its free 21 mm and
+# shading fell to 10 deg. The geometry is unforgiving: the far edge of the screen
+# is ~75 mm from the visor, so every degree of shade costs 1.3 mm of height.
+# 20 mm buys ~16 deg — a hood and a badge, which is what his concept is, not a
+# sun visor. Real shading arrives with the sliding cover, closed.
+VISOR_H = 20.0        # plate height above the tube's crown
+VISOR_T = 4.0         # plate thickness
+VISOR_RAKE = 20.0     # degrees, canting inboard over the screen
+VISOR_SINK = 4.0      # how far it buries into the tube, so they fuse on a face
 
 # --------------------------------------------------------------- derived
 POCK_L = PH_L + 2 * CLR
@@ -133,6 +164,7 @@ POCK_D = PH_T + 0.3
 OUT_W = POCK_W + 2 * WALL          # 75.1 — tray outer width
 OUT_L = POCK_L + JACK_CAV + WALL   # pocket + plug cavity + closing wall
 OUT_H = FLOOR + POCK_D + LIP_H     # 13.4
+TUBE_Z = OUT_H - TUBE_R            # crown flush with the tray's top face
 
 PHONE_TOP_Y = POCK_L - CLR
 
@@ -290,15 +322,30 @@ def pack_tube() -> Part:
     # read: "you should see most of the tube shape". Its upper two thirds stay
     # a bare cylinder; only the dead space underneath becomes structure — which
     # the flat base wanted anyway, for the sleeve to mount to.
+    # With the crown flush, the flank between tray wall and tube fills the full
+    # tray height — one continuous top face, and the cylinder reads on the
+    # outboard side and underneath where it is not fighting anything.
     web = Pos(TUBE_X, 0, 0) * Box(
-        abs(TUBE_X) - POCK_W / 2 - WALL, TUBE_LEN, 8.7,
+        abs(TUBE_X) - POCK_W / 2 - WALL, TUBE_LEN, OUT_H,
         align=(Align.MIN, Align.MIN, Align.MIN))
     return (tube + web) - bore
+
+
+def visor() -> Part:
+    """The raked plate springing off the tube's crown.
+
+    ⚠️ Rakes INBOARD, toward the screen. Raking outboard would make it a fin
+    that catches on doorways and shades nothing.
+    """
+    plate = Box(VISOR_T, TUBE_LEN, VISOR_H + VISOR_SINK,
+                align=(Align.CENTER, Align.MIN, Align.MIN))
+    return Pos(TUBE_X, 0, TUBE_Z + TUBE_R - VISOR_SINK) * Rot(0, VISOR_RAKE, 0) * plate
 
 
 def build() -> Part:
     p = tray()
     p += pack_tube()
+    p += visor()
     p -= face_openings()
     p -= port_openings()
     p -= button_bores()
@@ -311,11 +358,11 @@ if __name__ == "__main__":
     here = os.path.dirname(os.path.abspath(__file__))
     out = os.path.join(here, "out")
     os.makedirs(out, exist_ok=True)
-    export_step(part, os.path.join(out, "roam_step2.step"))
-    export_stl(part, os.path.join(out, "roam_step2.stl"))
+    export_step(part, os.path.join(out, "roam_step3.step"))
+    export_stl(part, os.path.join(out, "roam_step3.stl"))
 
     bb = part.bounding_box()
-    print(f"STEP 2 — phone housing + pack tube")
+    print(f"STEP 3 — housing + pack tube + visor")
     print(f"  outer      {bb.size.X:.1f} x {bb.size.Y:.1f} x {bb.size.Z:.1f} mm")
     print(f"  pocket     {POCK_W:.1f} x {POCK_L:.1f} x {POCK_D:.1f}")
     print(f"  volume     {part.volume / 1000:.1f} cm3  ~= "
@@ -332,7 +379,20 @@ if __name__ == "__main__":
     print(f"             pocket wall to bore  "
           f"{abs(TUBE_X) - TUBE_BORE_R - POCK_W / 2:.2f} mm  (tube on -X, "
           f"opposite the buttons)")
-    print(f"             stands {2 * TUBE_R - OUT_H:+.1f} mm proud of the tray face")
+    print(f"             crown at z {TUBE_Z + TUBE_R:.1f} (tray face {OUT_H:.1f}), "
+          f"hangs {abs(TUBE_Z - TUBE_R):.1f} mm below the base plane")
+    import math as _m
+    _top_z = TUBE_Z + TUBE_R + VISOR_H * _m.cos(_m.radians(VISOR_RAKE))
+    _top_x = TUBE_X + VISOR_H * _m.sin(_m.radians(VISOR_RAKE))
+    _glass = FLOOR + POCK_D
+    _far = fx(SCREEN_SVG[2])
+    print(f"  ABOVE ARM  {_top_z:.1f} mm  (bbox height is misleading — "
+          f"{abs(TUBE_Z - TUBE_R):.1f} mm of tube hangs BESIDE the arm)")
+    print(f"  visor      top edge ({_top_x:.1f}, {_top_z:.1f}), "
+          f"{_top_z - _glass:.1f} mm above the glass")
+    print(f"             shades light to "
+          f"{_m.degrees(_m.atan2(_top_z - _glass, _far - _top_x)):.0f} deg "
+          f"above the screen plane")
     print(f"  screen ap. {sx1 - sx0:.1f} x {sy1 - sy0:.1f} "
           f"(margins L/R {fx(SCREEN_SVG[0]) + PH_W / 2:.2f} / "
           f"{PH_W / 2 - fx(SCREEN_SVG[2]):.2f})")

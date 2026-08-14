@@ -38,6 +38,11 @@ VIEWS = [
     ("roam2_end",   "roam_step2.stl", 4, 0),
     ("roam2_top",   "roam_step2.stl", 88, 0),
     ("roam2_worn",  "roam_step2.stl", 14, 60),
+    # STEP 3 — the visor. End-on is the judgement view: does the tube still read
+    # under it, or has the plate swallowed the cylinder?
+    ("roam3_end",   "roam_step3.stl", 4, 0),
+    ("roam3_iso",   "roam_step3.stl", 26, 34),
+    ("roam3_worn",  "roam_step3.stl", 14, 60),
     ("print_iso",   "bracer_print.stl", 26, 34),
     ("print_side",  "bracer_print.stl", 8, 96),
     ("print_back",  "bracer_print.stl", 22, 208),
