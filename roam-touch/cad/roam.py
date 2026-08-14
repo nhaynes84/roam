@@ -202,12 +202,16 @@ RAIL_ROUND = 2.5
 RAIL_TOP = 4.2        # ⚠️ under the button bores at 4.45 — do not raise
 RAIL_STEP_Y = 112.0   # power button ends at 108.6; the rail rises after it
 RAIL_RAMP = 10.0      # the step is a ramp, not a shoulder
-# ★ Owner: *"the way you have the ramp on that top side, you should mirror it on
-# the botom, even if it doesn't do anything functional."* So the bottom drops by
-# exactly what the top rises, at the same Y, at the same angle — the jack end
-# becomes a symmetric wedge instead of a block with one chamfer. Purely a look;
-# dial RAIL_DROP to taste, it is the only number involved.
-RAIL_DROP = 9.2       # = OUT_H − RAIL_TOP, i.e. the top ramp, mirrored
+# ★★ Owner: *"the way you have the ramp on that top side, you should mirror it
+# on the botom, even if it doesn't do anything functional."*
+#
+# ⚠️⚠️ I read "top / bottom" as the rail's two FACES and dropped its underside by
+# 9.2 mm. Wrong axis entirely. He meant the two ENDS — and said so plainly when
+# I got it back to him: *"you have a ramp down to a rail that runs to a mic and
+# then keeps going past and just terminates, it doesn't ramp back up on the
+# other side."* The rail rose to full height at the jack end and simply stopped
+# square at the USB end. So the ramp is mirrored END TO END, and the whole
+# profile is now symmetric about MIC_Y — which is also OUT_L/2.
 
 # ★ It hangs BELOW the base plane, like the tube does on −X, and that is what
 # buys the channel its height. At |X| 38–51 the arm (r ~49) has already fallen
@@ -289,7 +293,8 @@ TUBE_BULGE = TUBE_Z + TUBE_R - OUT_H        # crown standing above the face
 
 PHONE_TOP_Y = POCK_L - CLR
 
-RAIL_Z1 = RAIL_Z0 - RAIL_DROP       # the rail's underside past the ramp
+# The USB-end ramp, placed so the low run is symmetric about the housing centre.
+RAIL_START_Y = OUT_L - RAIL_STEP_Y - 2 * RAIL_RAMP
 
 RAIL_X0 = OUT_W / 2
 RAIL_X1 = RAIL_X0 + RAIL_W
@@ -313,11 +318,9 @@ CH_Y1 = EXIT_Y1 - 2.0
 # False` with every probe still passing, which is the quiet kind of broken.
 BEZEL_SINK = 0.2                    # ⚠️ overlaps the shelf, never kisses it
 
-# ⚠️ The plate has to STOP at the ramp — past it the rail's underside is 9.2 mm
-# lower, so a flat rebate carried on would float inside the solid. Beyond Y 111
-# the groove closes into a tunnel, which is fine: it is a straight 40 mm run
-# with an open mouth at each end, not something anyone has to fish blind.
-PL_Y0, PL_Y1 = MIC_Y - 15.0, RAIL_STEP_Y - 1.0
+# ★ With the underside flat again the plate runs the WHOLE groove, so the cable
+# is laid into an open channel end to end rather than fished down a tunnel.
+PL_Y0, PL_Y1 = MIC_Y - 15.0, 156.0
 # ⚠️ Wider than the groove needs, because the run's screws cannot sit on the
 # groove's centreline — there is no material there. They move to the outboard
 # land, and the plate has to reach them.
@@ -327,7 +330,7 @@ CH_Z0 = PLATE_TOP - 0.5             # ⚠️ overlaps the rebate, never kisses i
 _SX = (CH_X1 + RAIL_X1) / 2         # ★ centred on the outboard LAND, not the
                                     # groove and not the plate — the groove's
                                     # centreline has no material in it at all.
-SCREWS = [(_SX, PL_Y0 + 4.0 + i * (PL_Y1 - PL_Y0 - 8.0) / 2) for i in range(3)]
+SCREWS = [(_SX, PL_Y0 + 4.0 + i * (PL_Y1 - PL_Y0 - 8.0) / 3) for i in range(4)]
 
 
 def fx(x):
@@ -453,12 +456,12 @@ def _roll(x_outer: float) -> Part:
 def side_rail() -> Part:
     """The thickened +X side: a low rail under the buttons, rising past them."""
     d0, d1 = MIC_Y - MIC_DIP_HALF, MIC_Y + MIC_DIP_HALF
-    prof = [(0, RAIL_Z0), (0, RAIL_TOP),
+    prof = [(0, RAIL_Z0), (0, OUT_H),
+            (RAIL_START_Y, OUT_H), (RAIL_START_Y + RAIL_RAMP, RAIL_TOP),
             (d0, RAIL_TOP), (d0 + MIC_DIP_RAMP, MIC_TOP),      # ★ the scallop
             (d1 - MIC_DIP_RAMP, MIC_TOP), (d1, RAIL_TOP),
             (RAIL_STEP_Y, RAIL_TOP), (RAIL_STEP_Y + RAIL_RAMP, OUT_H),
-            (OUT_L, OUT_H), (OUT_L, RAIL_Z1),
-            (RAIL_STEP_Y + RAIL_RAMP, RAIL_Z1), (RAIL_STEP_Y, RAIL_Z0)]
+            (OUT_L, OUT_H), (OUT_L, RAIL_Z0)]
     rail = Pos(RAIL_X0, 0, 0) * extrude(
         Plane.YZ * make_face(Polyline(*prof, close=True)), RAIL_W)
 
@@ -680,9 +683,11 @@ if __name__ == "__main__":
     print(f"  side rail  +{RAIL_W:.1f} mm on +X, top {RAIL_TOP:.1f} "
           f"(bores start {FLOOR + PH_T / 2 - BTN_BORE_H / 2:.2f}) — "
           f"{FLOOR + PH_T / 2 - BTN_BORE_H / 2 - RAIL_TOP:.2f} mm under the buttons")
-    print(f"             rises to full height past Y {RAIL_STEP_Y:.0f}, "
-          f"hangs {abs(RAIL_Z0):.1f} below the base plane, "
-          f"{abs(RAIL_Z1):.1f} past the ramp (mirrored)")
+    print(f"             low run Y {RAIL_START_Y + RAIL_RAMP:.1f}-{RAIL_STEP_Y:.0f}, "
+          f"hangs {abs(RAIL_Z0):.1f} below the base plane")
+    print(f"             ramps at BOTH ends — full height to Y {RAIL_START_Y:.1f} "
+          f"and from Y {RAIL_STEP_Y + RAIL_RAMP:.1f}, symmetric about "
+          f"{OUT_L / 2:.1f}")
     print(f"             dips to {MIC_TOP:.1f} over Y "
           f"{MIC_Y - MIC_DIP_HALF:.0f}-{MIC_Y + MIC_DIP_HALF:.0f} — "
           f"{FLOOR + PH_T / 2 - BTN_BORE_H / 2 - MIC_TOP - BEZEL_PROUD:.2f} mm "
