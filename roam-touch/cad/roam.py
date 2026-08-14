@@ -149,19 +149,23 @@ TUBE_X = -52.5
 TUBE_AXIS_BELOW_FACE = 2 * TUBE_R / 4.0    # a quarter of the diameter
 # TUBE_Z is derived from OUT_H below — crown flush with the tray face.
 
-# ---------------------------------------------------------- STEP 3: shroud
-# ★★ His concept has walls on THREE sides of the screen, and that is a different
-# object from a lip. Owner: "notice my shroud on 3 sides, it won't block all
-# glare but it will get a lot of it." He is right and my single plate was
-# answering the wrong physics — glare is the screen reflecting a broad source
-# into your eye, so what helps is enclosing the field, not shadowing one edge.
+# ----------------------------------------------------------- STEP 3: plate
+# ★★ HIS plate, measured off RoamTouchConcept.step rather than invented. Owner:
+# "look at my model; it IS the aesthetic, just without the moving cover plate,
+# mine is locked in place, no mechanism."
 #
-# ★ Two of the three sides already exist:
-#   −X  the tube's proud third IS that wall
-#   y=0 the CAP will be that wall — another reason it comes last
-# So the only one to build is the jack end. And +X stays open by necessity:
-# the plungers are in that wall.
-SHROUD_H = 24.9 - 13.4    # to the tube's crown — set below from TUBE_Z
+# Section at mid-length, X normalised to his low-X edge:
+#     Z 2–4    tray floor, 85 wide
+#     Z 14–24  a wall on the low-X edge ONLY, inner edge walking x 14.1 → 4.2
+#     Z 26–28  widens to 32–36 — the flange at the top
+#
+# ⚠️ It rakes OUTWARD, ~44° AWAY from the screen, and overhangs past the tray's
+# own edge. I built the last one canting inboard over the screen, which is why
+# it read as a lip. Outward is what makes the silhouette his.
+PLATE_H = 22.0        # rise above the tray face
+PLATE_T = 5.0         # thickness
+PLATE_RAKE = 44.0     # degrees, leaning OUTBOARD
+PLATE_SINK = 2.0      # ⚠️ under TUBE_WALL — see pack_bore()
 
 # --------------------------------------------------------------- derived
 POCK_L = PH_L + 2 * CLR
@@ -173,7 +177,6 @@ OUT_L = POCK_L + JACK_CAV + WALL   # pocket + plug cavity + closing wall
 OUT_H = FLOOR + POCK_D + LIP_H     # 13.4
 TUBE_Z = OUT_H - TUBE_AXIS_BELOW_FACE
 TUBE_BULGE = TUBE_Z + TUBE_R - OUT_H        # crown standing above the face
-SHROUD_Z = TUBE_Z + TUBE_R          # shroud tops level with the tube's crown
 
 PHONE_TOP_Y = POCK_L - CLR
 
@@ -347,20 +350,16 @@ def pack_bore() -> Part:
         align=(Align.CENTER, Align.CENTER, Align.MIN))
 
 
-def shroud() -> Part:
-    """The jack-end wall, rising to the tube's crown.
-
-    ⚠️ Only this end. y=0 must stay open — the phone slides in there, and the
-    cap becomes that wall. +X must stay open — the plungers live in it.
-    """
-    return Pos(0, OUT_L - WALL, OUT_H) * Box(
-        OUT_W - 2 * WALL, WALL, SHROUD_Z - OUT_H,
-        align=(Align.CENTER, Align.MIN, Align.MIN))
+def plate() -> Part:
+    """The fixed ROAM plate — his form, raking outboard off the tube."""
+    slab = Box(PLATE_T, TUBE_LEN, PLATE_H + PLATE_SINK,
+               align=(Align.CENTER, Align.MIN, Align.MIN))
+    return Pos(TUBE_X, 0, OUT_H - PLATE_SINK) * Rot(0, -PLATE_RAKE, 0) * slab
 
 
 def build() -> Part:
     p = tray()
-    p += shroud()
+    p += plate()
     p += pack_tube()
     p -= pack_bore()      # ★ last, so nothing can intrude — see pack_bore()
     p -= face_openings()
@@ -403,9 +402,13 @@ if __name__ == "__main__":
     print(f"             crown {TUBE_BULGE:.1f} mm proud, over a {_chord:.1f} mm chord "
           f"— a curve, not a half cylinder")
     print(f"             hangs {abs(TUBE_Z - TUBE_R):.1f} mm below the base plane")
-    print(f"  shroud     jack-end wall to z {SHROUD_Z:.1f} "
-          f"({SHROUD_Z - OUT_H:.1f} above the face, level with the crown)")
-    print(f"             3 sides: tube (−X) · this wall (jack) · cap (wrist, later)")
+    import math as _p
+    _px = TUBE_X - PLATE_H * _p.sin(_p.radians(PLATE_RAKE))
+    _pz = OUT_H + PLATE_H * _p.cos(_p.radians(PLATE_RAKE))
+    print(f"  plate      rakes {PLATE_RAKE:.0f} deg OUTBOARD, top edge "
+          f"({_px:.1f}, {_pz:.1f})")
+    print(f"             {_pz - OUT_H:.1f} mm above the face, overhangs the tray "
+          f"edge by {abs(_px) - OUT_W / 2:.1f} mm")
     print(f"  screen ap. {sx1 - sx0:.1f} x {sy1 - sy0:.1f} "
           f"(margins L/R {fx(SCREEN_SVG[0]) + PH_W / 2:.2f} / "
           f"{PH_W / 2 - fx(SCREEN_SVG[2]):.2f})")
