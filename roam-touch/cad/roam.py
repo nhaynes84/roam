@@ -135,10 +135,18 @@ TUBE_X = -52.5
 #    all the way down, it kills the aesthetic, you need at least 1/3 of it
 #    bulging above the face plate."
 #
-# ★ So it is a fraction, not a flush face — the cylinder has to READ, and a
-# cylinder tangent to a plane reads as a plane. A third of the diameter above
-# the face is what makes it legible as a tube from every angle except dead-on.
-TUBE_BULGE_FRAC = 1.0 / 3.0    # of the DIAMETER, standing above the tray face
+# ★★ The control is where the AXIS sits relative to the top face, not how much
+# crown shows — that is the way he describes it and it is the better handle.
+# Owner: "from the horizontal center line, the tube sits at most a third below
+# it, maybe a quarter, so you get curve coming up off the top face but it's not
+# half a cylinder."
+#
+# ⚠️ Axis ON the face would show exactly half a cylinder. Axis BELOW the face
+# shows less — the deeper it sits, the gentler the curve rising off the plane.
+# A third of the diameter below leaves 5.7 mm of crown; a quarter leaves 8.6.
+# I had it at 5.7 mm below (a third of the RADIUS) which left 11.5 mm proud —
+# most of a dome, which is what read wrong.
+TUBE_AXIS_BELOW_FACE = 2 * TUBE_R / 4.0    # a quarter of the diameter
 # TUBE_Z is derived from OUT_H below — crown flush with the tray face.
 
 # ---------------------------------------------------------- STEP 3: shroud
@@ -163,8 +171,8 @@ POCK_D = PH_T + 0.3
 OUT_W = POCK_W + 2 * WALL          # 75.1 — tray outer width
 OUT_L = POCK_L + JACK_CAV + WALL   # pocket + plug cavity + closing wall
 OUT_H = FLOOR + POCK_D + LIP_H     # 13.4
-TUBE_BULGE = 2 * TUBE_R * TUBE_BULGE_FRAC   # how much crown stands above the face
-TUBE_Z = OUT_H + TUBE_BULGE - TUBE_R
+TUBE_Z = OUT_H - TUBE_AXIS_BELOW_FACE
+TUBE_BULGE = TUBE_Z + TUBE_R - OUT_H        # crown standing above the face
 SHROUD_Z = TUBE_Z + TUBE_R          # shroud tops level with the tube's crown
 
 PHONE_TOP_Y = POCK_L - CLR
@@ -388,9 +396,13 @@ if __name__ == "__main__":
     print(f"             pocket wall to bore  "
           f"{abs(TUBE_X) - TUBE_BORE_R - POCK_W / 2:.2f} mm  (tube on -X, "
           f"opposite the buttons)")
-    print(f"             crown z {TUBE_Z + TUBE_R:.1f} — bulges {TUBE_BULGE:.1f} mm "
-          f"above the face ({100 * TUBE_BULGE_FRAC:.0f}% of dia), "
-          f"hangs {abs(TUBE_Z - TUBE_R):.1f} mm below the base")
+    import math as _mm
+    _chord = 2 * _mm.sqrt(max(0.0, TUBE_R**2 - TUBE_AXIS_BELOW_FACE**2))
+    print(f"             axis {TUBE_AXIS_BELOW_FACE:.1f} mm below the face "
+          f"({100 * TUBE_AXIS_BELOW_FACE / (2 * TUBE_R):.0f}% of dia)")
+    print(f"             crown {TUBE_BULGE:.1f} mm proud, over a {_chord:.1f} mm chord "
+          f"— a curve, not a half cylinder")
+    print(f"             hangs {abs(TUBE_Z - TUBE_R):.1f} mm below the base plane")
     print(f"  shroud     jack-end wall to z {SHROUD_Z:.1f} "
           f"({SHROUD_Z - OUT_H:.1f} above the face, level with the crown)")
     print(f"             3 sides: tube (−X) · this wall (jack) · cap (wrist, later)")
