@@ -137,7 +137,12 @@ TUBE_R = TUBE_BORE_R + TUBE_WALL           # 17.20
 # lump that landed somewhere; running the whole length reads as a spine.
 # It also pays for itself — the pack is 106.7, so the spare 40 mm at the cap end
 # becomes the cavity the lead and the port live in, rather than dead tube.
-TUBE_LEN = PH_L + 2 * CLR + JACK_CAV + WALL   # = OUT_L, defined below
+# ⚠️⚠️ This USED to be spelled out as PH_L + 2*CLR + JACK_CAV + WALL with the
+# comment "= OUT_L". It stopped being equal the moment the retained end wall
+# added 2.4 mm to OUT_L, and the tube quietly ended 2.4 mm short of the housing
+# for every build since — a step at the jack end that no probe was looking for.
+# ★ Derive it, never restate it. TUBE_LEN is set to OUT_L in the derived block.
+TUBE_LEN = None
 
 # ⚠️⚠️ NEGATIVE X, and that is not a style choice — it is the only side free.
 # The power and volume plungers live in the +X wall and stand BTN_PROUD past it;
@@ -219,7 +224,7 @@ RAIL_ROUND = 2.5
 # mic's local dip) and letting the existing 0.92 ramps run further to reach it.
 # The dip is therefore GONE — the whole rail sits at the dip's level now, which
 # is why the buttons have 5.25 mm of clearance instead of 0.25.
-RAIL_TOP = -0.8
+RAIL_TOP = 0.1        # ⚠️ his cleanup: was −0.8
 RAMP_SLOPE = 0.92     # rise per mm of Y — 42.6°, unchanged from mine
 RAIL_FLAT_Y0 = 15.30  # where the USB-end ramp lands on the flat
 RAIL_FLAT_Y1 = 134.63 # where the jack-end ramp leaves it
@@ -376,7 +381,11 @@ GRILLE_PITCH = GRILLE_W + GRILLE_GAP
 #
 # ⚠️ 11.0 above the lip puts the top at 24.40, which is 2.4 ABOVE the tube's
 # crown. The surround is the tallest thing on the object, not the tube.
-SURROUND_H = 11.0
+# ⚠️ 5.0, not 11.0 — his cleanup. At 11 the walls stood 2.4 ABOVE the tube's
+# crown and the surround was the tallest thing on the object. At 5 the tube
+# takes the silhouette back and the well is still deep enough to shade the
+# glass at the angles that matter.
+SURROUND_H = 5.0
 
 # ----------------------------------------------- STEP 6: the flush end cap
 # ★ It closes the USB end (Y = 0), which is where BOTH the phone and the pack
@@ -407,7 +416,26 @@ CAP_SCREW_D = 8.0     # end with real depth of material behind it
 # from, and the spigot comes out as two loose arcs floating in space. The model
 # still exports, still looks right in a render, and is three separate solids.
 # ★ The step this leaves at Y = 0 is useful anyway: it is the pack's stop.
-CAP_BORE_R = TUBE_BORE_R - CAP_CLR - CAP_SPIG_WALL     # end with real depth of material behind it
+CAP_BORE_R = TUBE_BORE_R - CAP_CLR - CAP_SPIG_WALL
+
+# ------------------------------------------------- his cleanup: the jack end
+# ★ A 45° chamfer around the WHOLE jack end — top, sides and underside — the
+# same house angle as everything else. Measured off his file: the tube's crown
+# starts falling at Y 154.3 and the cone's radius drops 1:1 with Y.
+# ⚠️ NOT applied in this model, deliberately. OCCT refuses it above ~2 mm on
+# this end, and that refusal is diagnostic rather than a tool limitation: 7.1
+# is wider than the 9.5 mm rail and nearly 3x the 2.5 mm tube wall, so the cut
+# has nothing to land on. It is also exactly why his file has holes. The jack
+# end stays HIS to shape; this constant records what he used.
+END_CHAM = 7.1
+
+# ⚠️⚠️ AND THIS IS WHY THE TUBE HAD HOLES IN IT. Owner: *"fill in the holes i
+# made in the tube."* The tube wall is 2.5 mm; a 7 mm chamfer on the end goes
+# straight through it and opens the pack bore, so his file is missing wall from
+# Y 146 to 161, spreading from the underside round to the crown. The fix is not
+# to patch the holes — it is to STOP THE BORE SHORT so the chamfer never
+# reaches it. 145 leaves the bore 38 mm longer than the pack needs.
+BORE_END_Y = 145.0     # end with real depth of material behind it
 
 # --------------------------------------------------------------- derived
 POCK_L = PH_L + 2 * CLR
@@ -419,6 +447,8 @@ OUT_L = POCK_L + WALL + JACK_CAV + WALL   # pocket, its wall, plug cavity, end
 OUT_H = FLOOR + POCK_D + LIP_H     # 13.4
 TUBE_Z = OUT_H - TUBE_AXIS_BELOW_FACE
 TUBE_BULGE = TUBE_Z + TUBE_R - OUT_H        # crown standing above the face
+
+TUBE_LEN = OUT_L                        # ★ derived, not restated — see above
 
 PHONE_TOP_Y = POCK_L - CLR
 SURROUND_TOP = OUT_H + SURROUND_H
@@ -855,7 +885,7 @@ def pack_bore() -> Part:
     could see it. Cutting the void last makes that class of mistake impossible.
     """
     return Pos(TUBE_X, -EPS, TUBE_Z) * Rot(-90, 0, 0) * Cylinder(
-        TUBE_BORE_R, TUBE_LEN - TUBE_WALL + EPS,
+        TUBE_BORE_R, BORE_END_Y + EPS,
         align=(Align.CENTER, Align.CENTER, Align.MIN))
 
 
