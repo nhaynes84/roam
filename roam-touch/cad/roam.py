@@ -177,7 +177,15 @@ TUBE_AXIS_BELOW_FACE = 2 * TUBE_R / 4.0    # a quarter of the diameter
 # rail — it runs under both buttons and stops short of them — and it only swells
 # to full height past Y 112, where the power button has already ended and the
 # cable needs the headroom to come out of the plug cavity.
-RAIL_W = 8.0          # how much thicker the +X side gets
+# ⚠️ 10, not 8 — the channel needs a land either side AND the rounding eats the
+# bottom-outer corner. At 8 there was nowhere for the service plate to seat.
+RAIL_W = 10.0         # how much thicker the +X side gets
+# ★ Owner: *"the asymmetry; if youre going to do the right side like that, the
+# left needs to match it, at least aesthetically."* They cannot match in MASS —
+# the left is a 34 mm battery tube and the right is a 10 mm rail — so they match
+# in LANGUAGE: the rail's outer face rolls over top and bottom and hangs below
+# the base plane, the same move the tube makes, at a tenth the volume.
+RAIL_ROUND = 2.5
 RAIL_TOP = 4.2        # ⚠️ under the button bores at 4.45 — do not raise
 RAIL_STEP_Y = 112.0   # power button ends at 108.6; the rail rises after it
 RAIL_RAMP = 10.0      # the step is a ramp, not a shoulder
@@ -202,9 +210,8 @@ PLATE_CLR = 0.25
 # ⚠️ The blister's top is RAIL_TOP and cannot go higher — at Y 80.7 it sits
 # directly in front of the volume rocker, so anything above the button line is
 # a thumb standing between him and the button he is reaching for.
-MIC_BLIS_W, MIC_BLIS_L = 13.0, 16.0
+MIC_BLIS_W, MIC_BLIS_L = 14.5, 18.0
 MIC_R = 3.5           # capsule pocket radius — a 6 mm electret with room
-MIC_DEPTH = 6.5
 
 # ★★ GRILLE LINES, not a hole pattern. Owner: *"i do want grille lines though
 # regardless."* Slots, tapering to a circle — which is his concept's round
@@ -213,11 +220,21 @@ MIC_DEPTH = 6.5
 # ⚠️ Lines over a d7 pocket would go blind at their ends, so there is a PLENUM
 # behind the face: the bore opens out to GRILLE_PL_R for GRILLE_PL_D before it
 # necks down to the capsule. Every line is through-air for its whole length.
-GRILLE_FACE = 1.5     # face wall the lines are cut through
-GRILLE_PL_R = 4.6
-GRILLE_PL_D = 1.6
-GRILLE_W = 1.0        # line width — 1.0 web between, ~3 perimeters at 0.4 mm
-GRILLE_PITCH = 2.0
+# ⚠️⚠️ It faces UP, not outboard. Owner: *"it faces forward, not up, i'll be
+# looking down at this thing, my voice will be coming basically straight down."*
+# The grille moves onto the rail's top shelf, which is also the only surface on
+# that side that is flat, unobstructed and pointed at his mouth.
+#
+# ★ And it is a GRILLE, not slots in a wall — his two references (a ribbon mic's
+# chrome ring, a 55SH's barred dome) are the same idea twice: **a bold raised
+# bezel with long bars tapering to the circle.** That taper is the whole look;
+# parallel lines of equal length read as ventilation.
+GRILLE_FACE = 1.5     # face the bars are cut through
+GRILLE_A, GRILLE_B = 7.0, 4.6   # grille ellipse — semi-axis along Y, along X
+BEZEL_W, BEZEL_PROUD = 1.3, 0.6
+GRILLE_PL_D = 1.6     # plenum behind the face, so no bar goes blind
+GRILLE_W = 1.0
+GRILLE_PITCH = 1.9
 GRILLE_LINES = 5
 
 # --------------------------------------------------------------- derived
@@ -235,24 +252,27 @@ PHONE_TOP_Y = POCK_L - CLR
 
 RAIL_X0 = OUT_W / 2
 RAIL_X1 = RAIL_X0 + RAIL_W
-CH_X0 = RAIL_X0 + 1.75              # 1.75 mm of land either side of the groove
+CH_X0 = RAIL_X0 + 2.0               # 2 mm of land either side of the groove
 CH_X1 = CH_X0 + CH_W
 
 MIC_Y = OUT_L / 2                   # "centered on the right side"
-MIC_Z = (RAIL_Z0 + RAIL_TOP) / 2    # centred in the blister
-MIC_X1 = RAIL_X0 + MIC_BLIS_W       # the blister's outer face, where the grille is
+MIC_X = RAIL_X0 + 7.45              # the grille's centre on the shelf
+MIC_BLIS_X1 = RAIL_X0 + MIC_BLIS_W
+GR_Z = RAIL_TOP                     # the shelf the grille sits in
+PLENUM_Z = GR_Z - GRILLE_FACE - GRILLE_PL_D
 
 EXIT_Y0, EXIT_Y1 = 148.0, 154.0     # the hole in the top right
 EXIT_Z0, EXIT_Z1 = 3.5, 8.5         # inside the plug cavity's 2.2 – 10.7
 CH_Y1 = EXIT_Y1
 
 PL_Y0, PL_Y1 = MIC_Y - 15.0, 158.0  # the service plate's run
-PL_X0, PL_X1 = RAIL_X0 + 0.75, CH_X1 + 1.0
-PL_HEAD_X1 = MIC_X1 - 1.0           # it widens under the blister
+PL_X0, PL_X1 = RAIL_X0 + 1.0, CH_X1 + 1.0
+PL_HEAD_X1 = MIC_BLIS_X1 - 1.0      # it widens under the blister
 PL_HEAD_L = 15.0
 PLATE_TOP = RAIL_Z0 + PLATE_T
-SCREWS = [(41.5, PL_Y0 + 4.0), (41.5, PL_Y1 - 4.0),
-          (RAIL_X0 + 9.5, MIC_Y - 5.5), (RAIL_X0 + 9.5, MIC_Y + 5.5)]
+_SX = (PL_X0 + PL_X1) / 2
+SCREWS = [(_SX, PL_Y0 + 4.0), (_SX, PL_Y1 - 4.0),
+          (MIC_BLIS_X1 - 2.5, MIC_Y - 6.5), (MIC_BLIS_X1 - 2.5, MIC_Y + 6.5)]
 
 
 def fx(x):
@@ -362,6 +382,19 @@ def button_bores() -> Part:
     return cut
 
 
+def _roll(x_outer: float) -> Part:
+    """★ The rounded outer face — the rail's answer to the tube's roundness."""
+    w = x_outer - RAIL_X0 + 20.0
+    h = OUT_H - RAIL_Z0
+    sec = RectangleRounded(w, h, RAIL_ROUND)
+    # ⚠️ `both=True` on purpose — Plane.XZ's normal points −Y, so a one-sided
+    # extrude lands the prism entirely off the end of the part and the
+    # intersection comes back EMPTY. It fails at the next `+`, not here, which
+    # is a long way from the cause.
+    return Pos(x_outer - w / 2, OUT_L / 2, (OUT_H + RAIL_Z0) / 2) * extrude(
+        Plane.XZ * sec, (OUT_L + 4) / 2, both=True)
+
+
 def side_rail() -> Part:
     """The thickened +X side: a low rail under the buttons, rising past them."""
     prof = [(0, RAIL_Z0), (0, RAIL_TOP),
@@ -369,13 +402,21 @@ def side_rail() -> Part:
             (OUT_L, OUT_H), (OUT_L, RAIL_Z0)]
     rail = Pos(RAIL_X0, 0, 0) * extrude(
         Plane.YZ * make_face(Polyline(*prof, close=True)), RAIL_W)
+    rail = rail & _roll(RAIL_X1)
 
     # ★ The blister. Rounded in plan so it reads as a pod rather than a lump,
     # and it doubles as the seat the service plate screws into — a capsule
     # pocket needs more width than the rail has, so the rail grows to meet it.
     blis = Pos(RAIL_X0 + MIC_BLIS_W / 2, MIC_Y, RAIL_Z0) * extrude(
         Plane.XY * RectangleRounded(MIC_BLIS_W, MIC_BLIS_L, 4.0), RAIL_TOP - RAIL_Z0)
-    return rail + blis
+
+    # ★ The bezel — the raised ring off both his references. It is what makes the
+    # thing read as a grille instead of a set of holes, and it is 0.6 proud so it
+    # never stands between his finger and the volume rocker it sits beside.
+    bez = Pos(MIC_X, MIC_Y, GR_Z) * extrude(
+        Plane.XY * (Ellipse(GRILLE_B + BEZEL_W, GRILLE_A + BEZEL_W)
+                    - Ellipse(GRILLE_B, GRILLE_A)), BEZEL_PROUD)
+    return rail + (blis & _roll(MIC_BLIS_X1)) + bez
 
 
 def cable_route() -> Part:
@@ -397,32 +438,32 @@ def cable_route() -> Part:
         CH_W, CH_Y1 - MIC_Y, CH_Z1 - RAIL_Z0 + EPS,
         align=(Align.MIN, Align.MIN, Align.MIN))
 
-    # The capsule pocket, and the well beneath it the capsule drops through.
-    cut += Pos(MIC_X1 - 1.6, MIC_Y, MIC_Z) * Rot(0, -90, 0) * Cylinder(
-        MIC_R, MIC_DEPTH, align=(Align.CENTER, Align.CENTER, Align.MIN))
-    cut += Pos(CH_X0, MIC_Y, RAIL_Z0 - EPS) * Box(
-        MIC_X1 - 1.6 - CH_X0, 2 * MIC_R, MIC_Z - RAIL_Z0 + EPS,
-        align=(Align.MIN, Align.CENTER, Align.MIN))
+    # ⚠️ The pocket runs all the way down to PLATE_TOP, deliberately: that is how
+    # the capsule gets in from below and what the plate then holds it against.
+    cut += Pos(MIC_X, MIC_Y, PLATE_TOP) * Cylinder(
+        MIC_R, PLENUM_Z - PLATE_TOP,
+        align=(Align.CENTER, Align.CENTER, Align.MIN))
 
-    # ★ The plenum, then the lines through the face into it — see GRILLE_*.
-    cut += Pos(MIC_X1 - GRILLE_FACE, MIC_Y, MIC_Z) * Rot(0, -90, 0) * Cylinder(
-        GRILLE_PL_R, GRILLE_PL_D, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    # ★ The plenum is the SAME ellipse as the grille, so every bar is through-air
+    # for its whole length. Over a round pocket the outer bars would go blind.
+    cut += Pos(MIC_X, MIC_Y, PLENUM_Z) * extrude(
+        Plane.XY * Ellipse(GRILLE_B, GRILLE_A), GRILLE_PL_D)
 
+    # ★★ The bars, tapering to the ellipse — the 55SH move. Equal-length lines
+    # read as a vent; lines that shorten toward the rim read as a grille.
+    bars = None
     for i in range(GRILLE_LINES):
-        dz = (i - (GRILLE_LINES - 1) / 2) * GRILLE_PITCH
-        half = math.sqrt(max(0.0, GRILLE_PL_R ** 2 - dz ** 2))
-        length = 2 * half - 0.6          # ★ tapering, so the set reads as a circle
+        dx = (i - (GRILLE_LINES - 1) / 2) * GRILLE_PITCH
+        k = 1.0 - (dx / GRILLE_B) ** 2
+        if k <= 0:
+            continue
+        length = 2 * GRILLE_A * math.sqrt(k) - 0.5
         if length <= GRILLE_W:
             continue
-        z = MIC_Z + dz
-        x = MIC_X1 - GRILLE_FACE - EPS
-        cut += Pos(x, MIC_Y, z) * Rot(0, 90, 0) * Box(
-            GRILLE_W, length - GRILLE_W, GRILLE_FACE + 2 * EPS,
-            align=(Align.CENTER, Align.CENTER, Align.MIN))
-        for dy in (-(length - GRILLE_W) / 2, (length - GRILLE_W) / 2):
-            cut += Pos(x, MIC_Y + dy, z) * Rot(0, 90, 0) * Cylinder(
-                GRILLE_W / 2, GRILLE_FACE + 2 * EPS,
-                align=(Align.CENTER, Align.CENTER, Align.MIN))
+        bar = Pos(dx, 0) * SlotOverall(length, GRILLE_W, rotation=90)
+        bars = bar if bars is None else bars + bar
+    cut += Pos(MIC_X, MIC_Y, GR_Z - GRILLE_FACE - EPS) * extrude(
+        Plane.XY * bars, GRILLE_FACE + BEZEL_PROUD + 2 * EPS)
     return cut
 
 
@@ -593,10 +634,11 @@ if __name__ == "__main__":
     print(f"  cable      exit {EXIT_Y1 - EXIT_Y0:.0f} x {EXIT_Z1 - EXIT_Z0:.0f} at "
           f"Y {EXIT_Y0:.0f}-{EXIT_Y1:.0f}, riser, then {CH_W:.1f} x "
           f"{CH_Z1 - CH_Z0:.1f} channel down to the mic")
-    print(f"  mic        blister {MIC_BLIS_W:.0f} x {MIC_BLIS_L:.0f} x "
-          f"{RAIL_TOP - RAIL_Z0:.1f} "
-          f"at Y {MIC_Y:.1f}, capsule d{2 * MIC_R:.1f} x {MIC_DEPTH:.1f}, "
-          f"{GRILLE_LINES} grille lines")
+    print(f"  mic        blister {MIC_BLIS_W:.1f} x {MIC_BLIS_L:.0f} "
+          f"at Y {MIC_Y:.1f}, capsule d{2 * MIC_R:.1f} x "
+          f"{PLENUM_Z - PLATE_TOP:.1f} deep")
+    print(f"             grille faces UP — {2 * GRILLE_B:.1f} x {2 * GRILLE_A:.0f} "
+          f"ellipse, {GRILLE_LINES} tapering bars, bezel {BEZEL_PROUD:.1f} proud")
     print(f"  plate      {PL_Y1 - PL_Y0:.0f} mm long, {PLATE_T:.1f} thick, "
           f"{len(SCREWS)} x M2 — plate volume {plate.volume / 1000:.2f} cm3")
     print(f"  screen ap. {sx1 - sx0:.1f} x {sy1 - sy0:.1f} "
