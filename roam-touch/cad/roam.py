@@ -179,7 +179,14 @@ TUBE_AXIS_BELOW_FACE = 2 * TUBE_R / 4.0    # a quarter of the diameter
 # cable needs the headroom to come out of the plug cavity.
 # ⚠️ 10, not 8 — the channel needs a land either side AND the rounding eats the
 # bottom-outer corner. At 8 there was nowhere for the service plate to seat.
-RAIL_W = 10.0         # how much thicker the +X side gets
+# ★★ Owner: *"i also slimmed it down, and sat it properly in line with the mic."*
+# The blister is GONE. It was the fat part — 14.5 mm of pad bulging 4.5 mm past
+# the rail — and deleting it slims the whole right side more than shaving the
+# rail ever could. The grille now sits centred in the rail's own width.
+#
+# ⚠️ 9.5 is close to the floor: the capsule pocket is d6.4 and needs ~1.5 mm of
+# wall each side. Slimmer than this and the capsule has to shrink with it.
+RAIL_W = 9.5          # how much thicker the +X side gets
 # ★ Owner: *"the asymmetry; if youre going to do the right side like that, the
 # left needs to match it, at least aesthetically."* They cannot match in MASS —
 # the left is a 34 mm battery tube and the right is a 10 mm rail — so they match
@@ -209,7 +216,11 @@ RAIL_DROP = 9.2       # = OUT_H − RAIL_TOP, i.e. the top ramp, mirrored
 # sake, and it would cost the channel 6 mm it has nowhere else to find.
 RAIL_Z0 = -10.0
 
-CH_W = 4.5            # cable channel, generous for a 2–3 mm lav lead
+# ⚠️ 4.0, and it moved inboard. At 4.5 centred, the outboard LAND was 3.0 mm —
+# an M2 pilot down the middle of that leaves 0.65 mm of wall each side, which
+# splits the first time it is driven. The groove gives up 0.5 mm it does not
+# need (a lav lead is 2–3 mm) so the screws get 1.25 mm of wall instead.
+CH_W = 4.0            # cable channel, generous for a 2–3 mm lav lead
 CH_Z1 = 2.0           # CH_Z0 is PLATE_TOP — the groove's floor IS the plate
 
 # ⚠️ The channel is open at the BOTTOM for its whole length, not a blind bore.
@@ -222,7 +233,6 @@ PLATE_CLR = 0.25
 # ⚠️ The blister's top is RAIL_TOP and cannot go higher — at Y 80.7 it sits
 # directly in front of the volume rocker, so anything above the button line is
 # a thumb standing between him and the button he is reaching for.
-MIC_BLIS_W, MIC_BLIS_L = 14.5, 18.0
 # ⚠️⚠️ Owner: *"your mic case needs to drop down, it's blocking the buttons."*
 # It was not the bezel's 0.6 — it was the whole pad sitting at RAIL_TOP, right
 # in the volume rocker's approach and 4.5 mm wider than the rail besides. So the
@@ -236,8 +246,8 @@ MIC_BLIS_W, MIC_BLIS_L = 14.5, 18.0
 MIC_TOP = -0.8
 # ⚠️ 15, not 13 — at 13 the RAMPS ate the last 1.4 mm of the rocker at each end,
 # so the dip's flat has to cover the whole button, not just its middle.
-MIC_DIP_HALF, MIC_DIP_RAMP = 15.0, 5.0
-MIC_R = 3.5           # capsule pocket radius — a 6 mm electret with room
+MIC_DIP_HALF, MIC_DIP_RAMP = 16.0, 5.0
+MIC_R = 3.2           # d6.4 pocket — a 6 mm electret with 0.4 of clearance
 
 # ★★ GRILLE LINES, not a hole pattern. Owner: *"i do want grille lines though
 # regardless."* Slots, tapering to a circle — which is his concept's round
@@ -256,12 +266,15 @@ MIC_R = 3.5           # capsule pocket radius — a 6 mm electret with room
 # bezel with long bars tapering to the circle.** That taper is the whole look;
 # parallel lines of equal length read as ventilation.
 GRILLE_FACE = 1.5     # face the bars are cut through
-GRILLE_A, GRILLE_B = 7.0, 4.6   # grille ellipse — semi-axis along Y, along X
+# ⚠️ Narrow and long, because it has to live inside 9.5 mm of rail now instead
+# of a 14.5 mm pad. Three bars, not five — at this width five would mean 0.5 mm
+# webs. The taper still carries the look.
+GRILLE_A, GRILLE_B = 8.0, 2.6   # grille ellipse — semi-axis along Y, along X
 BEZEL_W, BEZEL_PROUD = 1.3, 0.6
 GRILLE_PL_D = 1.6     # plenum behind the face, so no bar goes blind
-GRILLE_W = 1.0
+GRILLE_W = 1.1
 GRILLE_PITCH = 1.9
-GRILLE_LINES = 5
+GRILLE_LINES = 3
 
 # --------------------------------------------------------------- derived
 POCK_L = PH_L + 2 * CLR
@@ -280,12 +293,12 @@ RAIL_Z1 = RAIL_Z0 - RAIL_DROP       # the rail's underside past the ramp
 
 RAIL_X0 = OUT_W / 2
 RAIL_X1 = RAIL_X0 + RAIL_W
-CH_X0 = RAIL_X0 + 2.0               # 2 mm of land either side of the groove
+CH_X0 = RAIL_X0 + 1.3               # ⚠️ NOT centred — biased inboard so the
+                                    # outboard land can carry the screws
 CH_X1 = CH_X0 + CH_W
 
 MIC_Y = OUT_L / 2                   # "centered on the right side"
-MIC_X = RAIL_X0 + 7.45              # the grille's centre on the shelf
-MIC_BLIS_X1 = RAIL_X0 + MIC_BLIS_W
+MIC_X = RAIL_X0 + RAIL_W / 2        # ★ centred on the rail — "in line"
 GR_Z = MIC_TOP                      # the shelf the grille sits in
 PLENUM_Z = GR_Z - GRILLE_FACE - GRILLE_PL_D
 
@@ -298,7 +311,7 @@ CH_Y1 = EXIT_Y1 - 2.0
 # blister. Both were landing exactly on their neighbour's face, and a union
 # across coincident planes tessellates to a non-watertight seam — `watertight
 # False` with every probe still passing, which is the quiet kind of broken.
-BLIS_BITE, BEZEL_SINK = 1.0, 0.2
+BEZEL_SINK = 0.2                    # ⚠️ overlaps the shelf, never kisses it
 
 # ⚠️ The plate has to STOP at the ramp — past it the rail's underside is 9.2 mm
 # lower, so a flat rebate carried on would float inside the solid. Beyond Y 111
@@ -309,15 +322,12 @@ PL_Y0, PL_Y1 = MIC_Y - 15.0, RAIL_STEP_Y - 1.0
 # groove's centreline — there is no material there. They move to the outboard
 # land, and the plate has to reach them.
 PL_X0, PL_X1 = RAIL_X0 + 1.0, RAIL_X1 - 0.55
-PL_HEAD_X1 = MIC_BLIS_X1 - 1.0      # it widens under the blister
-PL_HEAD_L = 15.0
 PLATE_TOP = RAIL_Z0 + PLATE_T
 CH_Z0 = PLATE_TOP - 0.5             # ⚠️ overlaps the rebate, never kisses it
 _SX = (CH_X1 + RAIL_X1) / 2         # ★ centred on the outboard LAND, not the
-                                    # groove and not the plate — 1.75 mm of
-                                    # material each side of a 1.7 mm pilot.
-SCREWS = [(_SX, PL_Y0 + 4.0), (_SX, PL_Y1 - 4.0),
-          (MIC_BLIS_X1 - 2.5, MIC_Y - 6.5), (MIC_BLIS_X1 - 2.5, MIC_Y + 6.5)]
+                                    # groove and not the plate — the groove's
+                                    # centreline has no material in it at all.
+SCREWS = [(_SX, PL_Y0 + 4.0 + i * (PL_Y1 - PL_Y0 - 8.0) / 2) for i in range(3)]
 
 
 def fx(x):
@@ -452,20 +462,13 @@ def side_rail() -> Part:
     rail = Pos(RAIL_X0, 0, 0) * extrude(
         Plane.YZ * make_face(Polyline(*prof, close=True)), RAIL_W)
 
-    # ★ The blister. Rounded in plan so it reads as a pod rather than a lump,
-    # and it doubles as the seat the service plate screws into — a capsule
-    # pocket needs more width than the rail has, so the rail grows to meet it.
-    blis = Pos((RAIL_X0 - BLIS_BITE + MIC_BLIS_X1) / 2, MIC_Y, RAIL_Z0) * extrude(
-        Plane.XY * RectangleRounded(MIC_BLIS_W + BLIS_BITE, MIC_BLIS_L, 4.0),
-        MIC_TOP - RAIL_Z0)
-
     # ★ The bezel — the raised ring off both his references. It is what makes the
     # thing read as a grille instead of a set of holes, and it is 0.6 proud so it
     # never stands between his finger and the volume rocker it sits beside.
     bez = Pos(MIC_X, MIC_Y, GR_Z - BEZEL_SINK) * extrude(
         Plane.XY * (Ellipse(GRILLE_B + BEZEL_W, GRILLE_A + BEZEL_W)
                     - Ellipse(GRILLE_B, GRILLE_A)), BEZEL_PROUD + BEZEL_SINK)
-    return rail + blis + bez
+    return rail + bez
 
 
 def cable_route() -> Part:
@@ -519,12 +522,9 @@ def cable_route() -> Part:
 
 
 def _plate_profile(clr: float):
-    """The service plate in plan — a narrow run with a head under the blister."""
-    run = Pos((PL_X0 + PL_X1) / 2, (PL_Y0 + PL_Y1) / 2) * Rectangle(
+    """The service plate in plan — a plain strip now the blister is gone."""
+    return Pos((PL_X0 + PL_X1) / 2, (PL_Y0 + PL_Y1) / 2) * Rectangle(
         PL_X1 - PL_X0 - 2 * clr, PL_Y1 - PL_Y0 - 2 * clr)
-    head = Pos((PL_X0 + PL_HEAD_X1) / 2, MIC_Y) * RectangleRounded(
-        PL_HEAD_X1 - PL_X0 - 2 * clr, PL_HEAD_L - 2 * clr, 3.0)
-    return run + head
 
 
 def plate_rebate() -> Part:
@@ -677,7 +677,7 @@ if __name__ == "__main__":
     print(f"             crown {TUBE_BULGE:.1f} mm proud, over a {_chord:.1f} mm chord "
           f"— a curve, not a half cylinder")
     print(f"             hangs {abs(TUBE_Z - TUBE_R):.1f} mm below the base plane")
-    print(f"  side rail  +{RAIL_W:.0f} mm on +X, top {RAIL_TOP:.1f} "
+    print(f"  side rail  +{RAIL_W:.1f} mm on +X, top {RAIL_TOP:.1f} "
           f"(bores start {FLOOR + PH_T / 2 - BTN_BORE_H / 2:.2f}) — "
           f"{FLOOR + PH_T / 2 - BTN_BORE_H / 2 - RAIL_TOP:.2f} mm under the buttons")
     print(f"             rises to full height past Y {RAIL_STEP_Y:.0f}, "
@@ -690,9 +690,10 @@ if __name__ == "__main__":
     print(f"  cable      exit {EXIT_Y1 - EXIT_Y0:.0f} x {EXIT_Z1 - EXIT_Z0:.0f} at "
           f"Y {EXIT_Y0:.0f}-{EXIT_Y1:.0f}, riser, then {CH_W:.1f} x "
           f"{CH_Z1 - CH_Z0:.1f} channel down to the mic")
-    print(f"  mic        blister {MIC_BLIS_W:.1f} x {MIC_BLIS_L:.0f} "
-          f"at Y {MIC_Y:.1f}, capsule d{2 * MIC_R:.1f} x "
+    print(f"  mic        in the rail at X {MIC_X:.2f} (rail centre), Y {MIC_Y:.1f} "
+          f"— no blister; capsule d{2 * MIC_R:.1f} x "
           f"{PLENUM_Z - PLATE_TOP:.1f} deep")
+    print(f"             wall to the capsule  {RAIL_W / 2 - MIC_R:.2f} mm each side")
     print(f"             grille faces UP — {2 * GRILLE_B:.1f} x {2 * GRILLE_A:.0f} "
           f"ellipse, {GRILLE_LINES} tapering bars, bezel {BEZEL_PROUD:.1f} proud")
     print(f"  plate      {PL_Y1 - PL_Y0:.0f} mm long, {PLATE_T:.1f} thick, "
