@@ -183,8 +183,14 @@ RAIL_W = 10.0         # how much thicker the +X side gets
 # ★ Owner: *"the asymmetry; if youre going to do the right side like that, the
 # left needs to match it, at least aesthetically."* They cannot match in MASS —
 # the left is a 34 mm battery tube and the right is a 10 mm rail — so they match
-# in LANGUAGE: the rail's outer face rolls over top and bottom and hangs below
-# the base plane, the same move the tube makes, at a tenth the volume.
+# in what they DO: both hang below the base plane and both read as a spine.
+#
+# ⚠️ I first tried matching the tube by ROLLING the rail's outer edges (r2.5).
+# Owner: *"your thing is [too] boxy in a bad way, stick with the unfilited
+# angles for now, you have a mix and we'll do finishing touches later."* One
+# rolled edge against hard angles everywhere else is worse than either — it
+# reads as unfinished rather than soft. Edges stay crisp until a pass that does
+# ALL of them. `_roll()` is kept, unused, for that pass.
 RAIL_ROUND = 2.5
 RAIL_TOP = 4.2        # ⚠️ under the button bores at 4.45 — do not raise
 RAIL_STEP_Y = 112.0   # power button ends at 108.6; the rail rises after it
@@ -195,10 +201,10 @@ RAIL_RAMP = 10.0      # the step is a ramp, not a shoulder
 # ~30 mm away, so there is nothing down there to foul — the same argument that
 # let the tube drop. A flat base at the +X edge would be flatness for its own
 # sake, and it would cost the channel 6 mm it has nowhere else to find.
-RAIL_Z0 = -6.0
+RAIL_Z0 = -10.0
 
 CH_W = 4.5            # cable channel, generous for a 2–3 mm lav lead
-CH_Z0, CH_Z1 = -4.0, 2.0
+CH_Z1 = 2.0           # CH_Z0 is PLATE_TOP — the groove's floor IS the plate
 
 # ⚠️ The channel is open at the BOTTOM for its whole length, not a blind bore.
 # Threading a lead down 70 mm of buried tunnel is a job nobody does twice; laying
@@ -211,6 +217,20 @@ PLATE_CLR = 0.25
 # directly in front of the volume rocker, so anything above the button line is
 # a thumb standing between him and the button he is reaching for.
 MIC_BLIS_W, MIC_BLIS_L = 14.5, 18.0
+# ⚠️⚠️ Owner: *"your mic case needs to drop down, it's blocking the buttons."*
+# It was not the bezel's 0.6 — it was the whole pad sitting at RAIL_TOP, right
+# in the volume rocker's approach and 4.5 mm wider than the rail besides. So the
+# grille shelf DROPS to MIC_TOP and the rail's top dips with it, which turns the
+# problem into a feature: over the rocker the side is now 4.45 mm lower than the
+# bore, so his thumb comes down into a scallop instead of onto a lump.
+# ⚠️ −0.8, NOT 0.0. At 0.0 the dipped rail top is exactly coplanar with the
+# tray's base plane, and the union across those two coincident planes
+# tessellates to a seam — OCCT reports a valid single solid, the STEP is fine,
+# and the STL quietly comes out non-watertight. Off-plane by 0.8 and it closes.
+MIC_TOP = -0.8
+# ⚠️ 15, not 13 — at 13 the RAMPS ate the last 1.4 mm of the rocker at each end,
+# so the dip's flat has to cover the whole button, not just its middle.
+MIC_DIP_HALF, MIC_DIP_RAMP = 15.0, 5.0
 MIC_R = 3.5           # capsule pocket radius — a 6 mm electret with room
 
 # ★★ GRILLE LINES, not a hole pattern. Owner: *"i do want grille lines though
@@ -258,18 +278,26 @@ CH_X1 = CH_X0 + CH_W
 MIC_Y = OUT_L / 2                   # "centered on the right side"
 MIC_X = RAIL_X0 + 7.45              # the grille's centre on the shelf
 MIC_BLIS_X1 = RAIL_X0 + MIC_BLIS_W
-GR_Z = RAIL_TOP                     # the shelf the grille sits in
+GR_Z = MIC_TOP                      # the shelf the grille sits in
 PLENUM_Z = GR_Z - GRILLE_FACE - GRILLE_PL_D
 
-EXIT_Y0, EXIT_Y1 = 148.0, 154.0     # the hole in the top right
+# ⚠️ Ends at 152.5 so the riser clears the plate's top screw at Y 154 — at 154
+# the screw was drilling into the cable riser and had no land at all.
+EXIT_Y0, EXIT_Y1 = 147.0, 152.5     # the hole in the top right
 EXIT_Z0, EXIT_Z1 = 3.5, 8.5         # inside the plug cavity's 2.2 – 10.7
-CH_Y1 = EXIT_Y1
+CH_Y1 = EXIT_Y1 - 2.0
+# ⚠️ The blister reaches 1 mm INTO the tray wall and the bezel sinks 0.2 into the
+# blister. Both were landing exactly on their neighbour's face, and a union
+# across coincident planes tessellates to a non-watertight seam — `watertight
+# False` with every probe still passing, which is the quiet kind of broken.
+BLIS_BITE, BEZEL_SINK = 1.0, 0.2
 
 PL_Y0, PL_Y1 = MIC_Y - 15.0, 158.0  # the service plate's run
 PL_X0, PL_X1 = RAIL_X0 + 1.0, CH_X1 + 1.0
 PL_HEAD_X1 = MIC_BLIS_X1 - 1.0      # it widens under the blister
 PL_HEAD_L = 15.0
 PLATE_TOP = RAIL_Z0 + PLATE_T
+CH_Z0 = PLATE_TOP
 _SX = (PL_X0 + PL_X1) / 2
 SCREWS = [(_SX, PL_Y0 + 4.0), (_SX, PL_Y1 - 4.0),
           (MIC_BLIS_X1 - 2.5, MIC_Y - 6.5), (MIC_BLIS_X1 - 2.5, MIC_Y + 6.5)]
@@ -397,26 +425,29 @@ def _roll(x_outer: float) -> Part:
 
 def side_rail() -> Part:
     """The thickened +X side: a low rail under the buttons, rising past them."""
+    d0, d1 = MIC_Y - MIC_DIP_HALF, MIC_Y + MIC_DIP_HALF
     prof = [(0, RAIL_Z0), (0, RAIL_TOP),
+            (d0, RAIL_TOP), (d0 + MIC_DIP_RAMP, MIC_TOP),      # ★ the scallop
+            (d1 - MIC_DIP_RAMP, MIC_TOP), (d1, RAIL_TOP),
             (RAIL_STEP_Y, RAIL_TOP), (RAIL_STEP_Y + RAIL_RAMP, OUT_H),
             (OUT_L, OUT_H), (OUT_L, RAIL_Z0)]
     rail = Pos(RAIL_X0, 0, 0) * extrude(
         Plane.YZ * make_face(Polyline(*prof, close=True)), RAIL_W)
-    rail = rail & _roll(RAIL_X1)
 
     # ★ The blister. Rounded in plan so it reads as a pod rather than a lump,
     # and it doubles as the seat the service plate screws into — a capsule
     # pocket needs more width than the rail has, so the rail grows to meet it.
-    blis = Pos(RAIL_X0 + MIC_BLIS_W / 2, MIC_Y, RAIL_Z0) * extrude(
-        Plane.XY * RectangleRounded(MIC_BLIS_W, MIC_BLIS_L, 4.0), RAIL_TOP - RAIL_Z0)
+    blis = Pos((RAIL_X0 - BLIS_BITE + MIC_BLIS_X1) / 2, MIC_Y, RAIL_Z0) * extrude(
+        Plane.XY * RectangleRounded(MIC_BLIS_W + BLIS_BITE, MIC_BLIS_L, 4.0),
+        MIC_TOP - RAIL_Z0)
 
     # ★ The bezel — the raised ring off both his references. It is what makes the
     # thing read as a grille instead of a set of holes, and it is 0.6 proud so it
     # never stands between his finger and the volume rocker it sits beside.
-    bez = Pos(MIC_X, MIC_Y, GR_Z) * extrude(
+    bez = Pos(MIC_X, MIC_Y, GR_Z - BEZEL_SINK) * extrude(
         Plane.XY * (Ellipse(GRILLE_B + BEZEL_W, GRILLE_A + BEZEL_W)
-                    - Ellipse(GRILLE_B, GRILLE_A)), BEZEL_PROUD)
-    return rail + (blis & _roll(MIC_BLIS_X1)) + bez
+                    - Ellipse(GRILLE_B, GRILLE_A)), BEZEL_PROUD + BEZEL_SINK)
+    return rail + blis + bez
 
 
 def cable_route() -> Part:
@@ -631,6 +662,10 @@ if __name__ == "__main__":
           f"{FLOOR + PH_T / 2 - BTN_BORE_H / 2 - RAIL_TOP:.2f} mm under the buttons")
     print(f"             rises to full height past Y {RAIL_STEP_Y:.0f}, "
           f"hangs {abs(RAIL_Z0):.1f} below the base plane")
+    print(f"             dips to {MIC_TOP:.1f} over Y "
+          f"{MIC_Y - MIC_DIP_HALF:.0f}-{MIC_Y + MIC_DIP_HALF:.0f} — "
+          f"{FLOOR + PH_T / 2 - BTN_BORE_H / 2 - MIC_TOP - BEZEL_PROUD:.2f} mm "
+          f"of clear approach under the rocker")
     print(f"  cable      exit {EXIT_Y1 - EXIT_Y0:.0f} x {EXIT_Z1 - EXIT_Z0:.0f} at "
           f"Y {EXIT_Y0:.0f}-{EXIT_Y1:.0f}, riser, then {CH_W:.1f} x "
           f"{CH_Z1 - CH_Z0:.1f} channel down to the mic")
