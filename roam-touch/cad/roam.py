@@ -333,7 +333,16 @@ SLOT_X_OUT = 54.0     # past the face — the slots vent out the side
 # face all the way down to Z −10.6, so the outboard wall survives only as seven
 # ribs (the webs) tied by a 1.4 mm rail along the bottom. That is why his reads
 # as a grille from the side and mine read as a slotted lid.
-SLOT_Z0 = -10.6       # measured off his; 1.4 mm of wall left under the cut
+# ⚠️⚠️ AND THEY TAPER ON THE BOTTOM TOO. Owner: *"not all the way down, the cuts
+# taper on bottom to mirror the depth taper on the top face."* Each slot's DEPTH
+# tracks its length, so the openings in the side wall form the same lens the
+# slots form on the top face — the grille reads as one shape from both views.
+#
+# ⚠️ My error was method, not arithmetic: I bisected slot 4's bottom, found
+# −10.6, and generalised from ONE sample. Measure every one, every time — his
+# numbers are drawn by eye and are not a formula (the bottom steps are 4.40 /
+# 2.60 / 1.30 against the top's 5.20 / 2.80 / 1.20; close, deliberately not equal).
+SLOT_Z_BOT = (-6.20, -8.00, -9.30, -10.60, -10.60, -9.30, -8.00, -6.20)
 CHAM_45 = 1.0         # ★ the house chamfer — 45°, used everywhere from now on
 GRILLE_LINES = len(SLOT_X_IN)
 GRILLE_PITCH = GRILLE_W + GRILLE_GAP
@@ -570,17 +579,17 @@ def cable_route() -> Part:
 
     # ★★ The slots — straight, but each one shorter than the last, and running
     # out past the face so they wrap the rounded corner. See SLOT_X_IN.
-    bars = None
+    # ⚠️ Each slot is extruded from ITS OWN bottom, so they cannot share one
+    # sketch — the depth taper is per-slot.
     for i, x_in in enumerate(SLOT_X_IN):
         dy = (i - (GRILLE_LINES - 1) / 2) * GRILLE_PITCH
+        z_bot = SLOT_Z_BOT[i]
         # ⚠️ SQUARE ends, not SlotOverall. His are square, and a rounded end
         # domes visibly when you look down a slot — it was the giveaway in his
         # screenshot of my version. Everything else here is a hard edge too.
-        bar = Pos((x_in + SLOT_X_OUT) / 2 - MIC_X, dy) * Rectangle(
+        bar = Pos((x_in + SLOT_X_OUT) / 2, MIC_Y + dy) * Rectangle(
             SLOT_X_OUT - x_in, GRILLE_W)
-        bars = bar if bars is None else bars + bar
-    cut += Pos(MIC_X, MIC_Y, SLOT_Z0) * extrude(
-        Plane.XY * bars, GR_Z - SLOT_Z0 + EPS)
+        cut += Pos(0, 0, z_bot) * extrude(Plane.XY * bar, GR_Z - z_bot + EPS)
 
     # ★ The mesh pocket, up into the ceiling — see MESH_*.
     cut += Pos(MIC_X, MIC_Y, MIC_CH_TOP) * extrude(
@@ -785,9 +794,9 @@ if __name__ == "__main__":
     print(f"             they BREAK OUT the side over a "
           f"{CHAM_45:.1f}x{CHAM_45:.1f} 45 deg chamfer, "
           f"lengths {' '.join(f'{MIC_SWELL_X1 - x:.1f}' for x in SLOT_X_IN[:4])} ...")
-    print(f"             FULL HEIGHT — cut {GR_Z - SLOT_Z0:.1f} mm down to "
-          f"Z {SLOT_Z0:.1f}, so the outboard wall is {GRILLE_LINES - 1} ribs on a "
-          f"{SLOT_Z0 - RAIL_Z0:.1f} mm bottom rail")
+    print(f"             depths taper too — {' '.join(f'{GR_Z - z:.1f}' for z in SLOT_Z_BOT[:4])} "
+          f"... (bottoms {min(SLOT_Z_BOT):.1f} to {max(SLOT_Z_BOT):.1f}), so the side "
+          f"reads as the same lens the top does")
     print(f"             spans {_span:.1f} mm in a {MIC_CH_L:.1f} chamber "
           f"({(MIC_CH_L - _span) / 2:.2f} mm clear at each end), no bezel")
     print(f"             mesh pocket {MESH_W:.1f} x {MESH_L:.1f} x {MESH_T:.1f} in the "
