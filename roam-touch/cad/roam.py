@@ -378,6 +378,37 @@ GRILLE_PITCH = GRILLE_W + GRILLE_GAP
 # crown. The surround is the tallest thing on the object, not the tube.
 SURROUND_H = 11.0
 
+# ----------------------------------------------- STEP 6: the flush end cap
+# ★ It closes the USB end (Y = 0), which is where BOTH the phone and the pack
+# load and where BOTH their ports face. Owner: *"flush cap has to have space to
+# connect the charger usb to the phone in it"* — so the cap is not a lid, it is
+# a room: the phone's USB-C plug, the pack's lead and the jumper between them
+# all live inside it.
+#
+# ⚠️ It sits at NEGATIVE Y, Y −CAP_L … 0. That is deliberate: every measured
+# number in this file is referenced to Y = 0 at the USB end, and growing the
+# model in −Y leaves all of them untouched. Overall length grows by CAP_L.
+#
+# ⚠️ FLUSH means no wrap-over — he dislikes the lip on the Basic. So the cap is
+# a prism of the housing's own section at Y = 0 and retention moves INSIDE:
+# a spigot into the pack bore locates it, two screws hold it.
+CAP_L = 18.0
+CAP_WALL = 2.4        # the closed end face
+CAP_CLR = 0.25        # fit clearance on the spigot
+CAP_SPIG_L = 12.0     # how far the spigot reaches into the pack bore
+CAP_SPIG_WALL = 1.8
+CAP_LEAD_W = 7.0      # slot in the spigot for the pack's lead to pass
+CAP_SCREW_X = 20.0    # ★ into the SURROUND's end block — the only place at this
+CAP_SCREW_D = 8.0     # end with real depth of material behind it
+
+# ⚠️⚠️ The cap's bore is NARROWER than the housing's, and it has to be. The
+# spigot's wall sits at TUBE_BORE_R − CAP_CLR − CAP_SPIG_WALL; if the cap's own
+# bore is cut at TUBE_BORE_R it removes exactly the ring the spigot springs
+# from, and the spigot comes out as two loose arcs floating in space. The model
+# still exports, still looks right in a render, and is three separate solids.
+# ★ The step this leaves at Y = 0 is useful anyway: it is the pack's stop.
+CAP_BORE_R = TUBE_BORE_R - CAP_CLR - CAP_SPIG_WALL     # end with real depth of material behind it
+
 # --------------------------------------------------------------- derived
 POCK_L = PH_L + 2 * CLR
 POCK_W = PH_W + 2 * CLR
@@ -391,6 +422,8 @@ TUBE_BULGE = TUBE_Z + TUBE_R - OUT_H        # crown standing above the face
 
 PHONE_TOP_Y = POCK_L - CLR
 SURROUND_TOP = OUT_H + SURROUND_H
+CAP_CAV = CAP_L - CAP_WALL              # the room inside it
+CAP_SCREW_Z = OUT_H + SURROUND_H / 2    # mid-height of the surround block
 
 # The USB-end ramp, placed so the low run is symmetric about the housing centre.
 RAIL_TOP_Y0 = RAIL_TOP + RAIL_FLAT_Y0 * RAMP_SLOPE      # the rail's top at Y=0
@@ -700,6 +733,59 @@ def glare_surround() -> Part:
         Plane.XY * ring, SURROUND_H + EPS)
 
 
+def cap_screw_pilots() -> Part:
+    """Pilots in the housing's end face — cut into the HOUSING, not the cap."""
+    cut = Part()
+    for sx in (-CAP_SCREW_X, CAP_SCREW_X):
+        cut += Pos(sx, -EPS, CAP_SCREW_Z) * Rot(-90, 0, 0) * Cylinder(
+            1.25, CAP_SCREW_D + EPS, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    return cut
+
+
+def end_cap() -> Part:
+    """The flush cap — a prism of the housing's own section at Y = 0."""
+    y0 = -CAP_L
+    p = Box(OUT_W, CAP_L, OUT_H, align=(Align.CENTER, Align.MIN, Align.MIN))
+    p += Pos(0, 0, OUT_H) * Box(OUT_W, CAP_L, SURROUND_H,
+                                align=(Align.CENTER, Align.MIN, Align.MIN))
+    p += Pos(RAIL_X0, 0, RAIL_Z0) * Box(RAIL_W, CAP_L, OUT_H - RAIL_Z0,
+                                        align=(Align.MIN, Align.MIN, Align.MIN))
+    p += Pos(TUBE_X, 0, TUBE_Z) * Rot(-90, 0, 0) * Cylinder(
+        TUBE_R, CAP_L, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    p += Pos(TUBE_X, 0, 0) * Box(abs(TUBE_X) - POCK_W / 2 - WALL, CAP_L, OUT_H,
+                                 align=(Align.MIN, Align.MIN, Align.MIN))
+    p = Pos(0, y0, 0) * p
+
+    # ★ ONE room, not two. The phone's plug pocket and the pack's bore are
+    # joined by a slot at plug height, so the jumper crosses between them
+    # instead of needing a hole drilled through the tray wall later.
+    cav = Pos(0, y0 + CAP_WALL, FLOOR) * Box(
+        POCK_W, CAP_CAV + EPS, POCK_D, align=(Align.CENTER, Align.MIN, Align.MIN))
+    cav += Pos(TUBE_X, y0 + CAP_WALL, TUBE_Z) * Rot(-90, 0, 0) * Cylinder(
+        CAP_BORE_R, CAP_CAV + EPS, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    cav += Pos(TUBE_X, y0 + CAP_WALL, FLOOR + PH_T / 2) * Box(
+        abs(TUBE_X) - POCK_W / 2, CAP_CAV + EPS, CAP_LEAD_W,
+        align=(Align.MIN, Align.MIN, Align.CENTER))
+    p -= cav
+
+    # The spigot: reaches +Y into the pack bore to locate the cap, slotted so
+    # the pack's own lead still gets past it.
+    spig = Pos(TUBE_X, 0, TUBE_Z) * Rot(-90, 0, 0) * Cylinder(
+        TUBE_BORE_R - CAP_CLR, CAP_SPIG_L, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    spig -= Pos(TUBE_X, -EPS, TUBE_Z) * Rot(-90, 0, 0) * Cylinder(
+        CAP_BORE_R, CAP_SPIG_L + 2 * EPS,
+        align=(Align.CENTER, Align.CENTER, Align.MIN))
+    spig -= Pos(TUBE_X, -EPS, TUBE_Z) * Box(
+        CAP_LEAD_W, CAP_SPIG_L + 2 * EPS, 2 * TUBE_BORE_R,
+        align=(Align.CENTER, Align.MIN, Align.CENTER))
+    p += spig
+
+    for sx in (-CAP_SCREW_X, CAP_SCREW_X):
+        p -= Pos(sx, y0 - EPS, CAP_SCREW_Z) * Rot(-90, 0, 0) * Cylinder(
+            1.7, CAP_L + 2 * EPS, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    return p
+
+
 def gaps():
     """★ The webs between apertures — the thing that actually bounds FEAT_TOL.
 
@@ -784,6 +870,7 @@ def build() -> Part:
     p -= face_openings()
     p -= port_openings()
     p -= button_bores()
+    p -= cap_screw_pilots()
     return p
 
 
@@ -794,11 +881,14 @@ if __name__ == "__main__":
     out = os.path.join(here, "out")
     os.makedirs(out, exist_ok=True)
     plate = service_plate()
+    cap = end_cap()
     export_step(part, os.path.join(out, "roam_step3.step"))
     export_stl(part, os.path.join(out, "roam_step3.stl"))
     export_step(plate, os.path.join(out, "roam_plate.step"))
     export_stl(plate, os.path.join(out, "roam_plate.stl"))
-    export_step(Compound(children=[part, plate]),
+    export_step(cap, os.path.join(out, "roam_cap.step"))
+    export_stl(cap, os.path.join(out, "roam_cap.stl"))
+    export_step(Compound(children=[part, plate, cap]),
                 os.path.join(out, "roam_assembly.step"))
 
     bb = part.bounding_box()
@@ -873,6 +963,15 @@ if __name__ == "__main__":
           f"({(MIC_CH_L - _span) / 2:.2f} mm clear at each end), no bezel")
     print(f"             mesh pocket {MESH_W:.1f} x {MESH_L:.1f} x {MESH_T:.1f} in the "
           f"ceiling, {GRILLE_FACE - MESH_T:.1f} mm of face left over it")
+    print(f"  end cap    {CAP_L:.1f} long at Y {-CAP_L:.1f}..0 — cavity "
+          f"{CAP_CAV:.1f} deep, {POCK_W:.1f} x {POCK_D:.1f} at plug height")
+    print(f"             joined to the pack bore by a {CAP_LEAD_W:.1f} mm slot, so "
+          f"phone plug + pack lead + jumper share ONE room")
+    print(f"             spigot d{2 * (TUBE_BORE_R - CAP_CLR):.1f} x {CAP_SPIG_L:.0f} "
+          f"into the bore, slotted for the lead; 2 x M3 into the surround")
+    print(f"             cap bore d{2 * CAP_BORE_R:.1f} — narrower than the housing's "
+          f"d{2 * TUBE_BORE_R:.1f}, so the step at Y 0 is the pack's stop")
+    print(f"             ⚠️ overall length {OUT_L:.1f} -> {OUT_L + CAP_L:.1f}")
     print(f"  plate      {PL_Y1 - PL_Y0:.0f} mm long, {PLATE_T:.1f} thick, "
           f"{len(SCREWS)} x M2 — plate volume {plate.volume / 1000:.2f} cm3")
     print(f"  screen ap. {sx1 - sx0:.1f} x {sy1 - sy0:.1f} "
