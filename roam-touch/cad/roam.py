@@ -313,15 +313,19 @@ GRILLE_GAP = 1.5      # web between — his number
 # 2. THEY BREAK OUT THROUGH THE OUTBOARD FACE. They do not stop in the top
 #    face; they run over the corner and open on the side, so the grille reads
 #    from the side as well as from above. That is the vintage-mic wrap.
-# 3. The corner they wrap is ROUNDED, r1.5, tangent to both faces. ⚠️ This is
-#    the one round on the part and it is deliberate — a square corner would cut
-#    the slots off in a hard line instead of letting them turn.
+# 3. The corner they wrap is CHAMFERED — ⚠️ **chamfered, not rounded.** I fitted
+#    a radius to it and got told: *"i didn't round, i chamfered the corner, which
+#    we're going to do in a lot of places later so it will read consistent."*
+#    Measured off his: dx/dz = −1.000 the whole way, i.e. exactly 45°, exactly
+#    1.0 x 1.0, from (51.00, −0.80) to (52.00, −1.80). ★ CHAM_45 is the house
+#    chamfer from here on — every edge that gets softened gets this one, so they
+#    read as a set rather than as one-off decisions.
 #
 # ⚠️ The inboard ends are HIS NUMBERS, not a curve I refitted. I tried: they are
 # not a circle (0.5–0.65 mm off) and not an ellipse either. He drew it by eye.
 SLOT_X_IN = (45.00, 42.60, 41.00, 39.80, 39.80, 41.00, 42.60, 45.00)
 SLOT_X_OUT = 54.0     # past the face — the slots vent out the side
-EDGE_R = 1.5          # the rounded outboard corner they wrap over
+CHAM_45 = 1.0         # ★ the house chamfer — 45°, used everywhere from now on
 GRILLE_LINES = len(SLOT_X_IN)
 GRILLE_PITCH = GRILLE_W + GRILLE_GAP
 
@@ -560,7 +564,10 @@ def cable_route() -> Part:
     bars = None
     for i, x_in in enumerate(SLOT_X_IN):
         dy = (i - (GRILLE_LINES - 1) / 2) * GRILLE_PITCH
-        bar = Pos((x_in + SLOT_X_OUT) / 2 - MIC_X, dy) * SlotOverall(
+        # ⚠️ SQUARE ends, not SlotOverall. His are square, and a rounded end
+        # domes visibly when you look down a slot — it was the giveaway in his
+        # screenshot of my version. Everything else here is a hard edge too.
+        bar = Pos((x_in + SLOT_X_OUT) / 2 - MIC_X, dy) * Rectangle(
             SLOT_X_OUT - x_in, GRILLE_W)
         bars = bar if bars is None else bars + bar
     cut += Pos(MIC_X, MIC_Y, CH_Z1 - EPS) * extrude(
@@ -570,14 +577,15 @@ def cable_route() -> Part:
     cut += Pos(MIC_X, MIC_Y, MIC_CH_TOP) * extrude(
         Plane.XY * RectangleRounded(MESH_W, MESH_L, 2.0), MESH_T)
 
-    # ★ The rounded outboard corner the slots turn over — r1.5, tangent to the
-    # top face at RAIL_TOP and to the swell's face at MIC_SWELL_X1.
-    box = Pos(MIC_SWELL_X1 - EDGE_R, MIC_Y, CH_Z1) * Box(
-        2 * EDGE_R, 2 * MIC_SWELL_HALF, EDGE_R + EPS,
-        align=(Align.MIN, Align.CENTER, Align.MIN))
-    cut += box - (Pos(MIC_SWELL_X1 - EDGE_R, 0, CH_Z1) * Rot(-90, 0, 0) * Cylinder(
-        EDGE_R, 2 * MIC_SWELL_HALF + 2 * EPS,
-        align=(Align.CENTER, Align.CENTER, Align.MIN)))
+    # ★ The 45° chamfer the slots turn over. Built as a big right triangle whose
+    # hypotenuse IS the 45° line through (MIC_SWELL_X1 − CHAM_45, RAIL_TOP), so
+    # the angle is exact by construction rather than by fitting two legs.
+    tri = [(MIC_SWELL_X1 - CHAM_45, RAIL_TOP),
+           (MIC_SWELL_X1 + 6.0, RAIL_TOP),
+           (MIC_SWELL_X1 + 6.0, RAIL_TOP - CHAM_45 - 6.0)]
+    cut += Pos(0, MIC_Y, 0) * extrude(
+        Plane.XZ * make_face(Polyline(*tri, close=True)),
+        MIC_SWELL_HALF + EPS, both=True)
     return cut
 
 
