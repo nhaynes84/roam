@@ -261,13 +261,12 @@ PLATE_CLR = 0.25
 # outboard and downward, because up is where the volume rocker's approach is —
 # that is what killed the old blister and it has not stopped being true.
 MIC_SWELL_X1 = 52.0
-# ⚠️ 12.5, not 10. Eight slots at 2.5 pitch span 18.5 mm, so the chamber has to
-# be 21 long to keep every slot over open air — and the swell has to be longer
-# still to leave the chamber a wall at each end. The slot count sizes the swell,
-# not the other way round.
-MIC_SWELL_HALF = 12.5     # flat span either side of the mic
+MIC_SWELL_HALF = 10.0     # flat span either side of the mic
 MIC_SWELL_BITE = 1.0      # ⚠️ starts inside the rail's face, never on it
-MIC_CH_W, MIC_CH_L = 11.0, 21.0
+# ★ The chamber reaches inboard to CH_X0 — it and the cable groove are one void,
+# which is how the lead gets to the capsule without a separate connecting cut.
+MIC_CH_X1 = 50.90
+MIC_CH_L = 19.0
 
 # ★ Owner: *"i might even put a little bit of black screen on the underside too
 # for vibes."* A pocket in the chamber's CEILING, so the mesh sits right against
@@ -275,7 +274,7 @@ MIC_CH_W, MIC_CH_L = 11.0, 21.0
 # capsule. ⚠️ It must be SMALLER than the chamber, not larger — a pocket wider
 # than the chamber is an undercut you cannot get the mesh through.
 MESH_T = 0.5
-MESH_W, MESH_L = 10.0, 19.5
+MESH_W, MESH_L = 10.0, 17.0
 
 # ★★ GRILLE LINES, not a hole pattern. Owner: *"i do want grille lines though
 # regardless."* Slots, tapering to a circle — which is his concept's round
@@ -304,8 +303,26 @@ MESH_W, MESH_L = 10.0, 19.5
 GRILLE_FACE = 1.5     # face the slots are cut through
 GRILLE_W = 1.0        # slot width — his number
 GRILLE_GAP = 1.5      # web between — his number
-GRILLE_LEN = 9.0      # slot length, along X
-GRILLE_LINES = 8      # 6, plus "one more on each end"
+# ★★ MEASURED OFF `RoamTouchBetterGrille.step` — his, and better than my version
+# in three ways at once, all of which I had missed:
+#
+# 1. THE SLOTS TAPER. Not the field, the slots: each one's INBOARD end pulls
+#    back as you go out from the middle, so the set reads as a lens while every
+#    cut stays dead straight. That is the taper I lost when I dropped the
+#    ellipse — recovered without a single curve in the grille itself.
+# 2. THEY BREAK OUT THROUGH THE OUTBOARD FACE. They do not stop in the top
+#    face; they run over the corner and open on the side, so the grille reads
+#    from the side as well as from above. That is the vintage-mic wrap.
+# 3. The corner they wrap is ROUNDED, r1.5, tangent to both faces. ⚠️ This is
+#    the one round on the part and it is deliberate — a square corner would cut
+#    the slots off in a hard line instead of letting them turn.
+#
+# ⚠️ The inboard ends are HIS NUMBERS, not a curve I refitted. I tried: they are
+# not a circle (0.5–0.65 mm off) and not an ellipse either. He drew it by eye.
+SLOT_X_IN = (45.00, 42.60, 41.00, 39.80, 39.80, 41.00, 42.60, 45.00)
+SLOT_X_OUT = 54.0     # past the face — the slots vent out the side
+EDGE_R = 1.5          # the rounded outboard corner they wrap over
+GRILLE_LINES = len(SLOT_X_IN)
 GRILLE_PITCH = GRILLE_W + GRILLE_GAP
 
 # --------------------------------------------------------------- derived
@@ -351,9 +368,11 @@ CH_Y1 = EXIT_Y1 - 2.0
 
 # ★ With the underside flat again the plate runs the WHOLE groove, so the cable
 # is laid into an open channel end to end rather than fished down a tunnel.
-# ⚠️ −18, not −15: at −15 the first screw landed 0.5 mm from the chamber wall
-# and its pilot broke into it. The chamber grew; the plate's datum has to move.
-PL_Y0, PL_Y1 = MIC_Y - 18.0, 156.0
+# ⚠️ Back to −15, which is where his plate sits. I had moved it to −18 when the
+# chamber was 21 long and the first screw's pilot broke into it; his chamber is
+# 19, so −15 clears again by 0.65 mm. Chamber length and plate datum are coupled
+# — change one and re-probe the other.
+PL_Y0, PL_Y1 = MIC_Y - 15.0, 156.0
 # ⚠️ Wider than the groove needs, because the run's screws cannot sit on the
 # groove's centreline — there is no material there. They move to the outboard
 # land, and the plate has to reach them.
@@ -532,22 +551,33 @@ def cable_route() -> Part:
     # ★ One CHAMBER, floor to ceiling: it is the capsule's room and the grille's
     # plenum at once. ⚠️ Its floor is PLATE_TOP, so the capsule drops in from
     # below and the plate is what holds it up against the grille.
-    cut += Pos(MIC_X, MIC_Y, PLATE_TOP) * extrude(
-        Plane.XY * RectangleRounded(MIC_CH_W, MIC_CH_L, 3.0),
+    cut += Pos((CH_X0 + MIC_CH_X1) / 2, MIC_Y, PLATE_TOP) * extrude(
+        Plane.XY * RectangleRounded(MIC_CH_X1 - CH_X0, MIC_CH_L, 3.0),
         MIC_CH_TOP - PLATE_TOP)
 
-    # ★★ The slots. Equal, straight, across the rail — no taper, no bezel.
+    # ★★ The slots — straight, but each one shorter than the last, and running
+    # out past the face so they wrap the rounded corner. See SLOT_X_IN.
     bars = None
-    for i in range(GRILLE_LINES):
+    for i, x_in in enumerate(SLOT_X_IN):
         dy = (i - (GRILLE_LINES - 1) / 2) * GRILLE_PITCH
-        bar = Pos(0, dy) * SlotOverall(GRILLE_LEN, GRILLE_W)
+        bar = Pos((x_in + SLOT_X_OUT) / 2 - MIC_X, dy) * SlotOverall(
+            SLOT_X_OUT - x_in, GRILLE_W)
         bars = bar if bars is None else bars + bar
-    cut += Pos(MIC_X, MIC_Y, GR_Z - GRILLE_FACE - EPS) * extrude(
+    cut += Pos(MIC_X, MIC_Y, CH_Z1 - EPS) * extrude(
         Plane.XY * bars, GRILLE_FACE + 2 * EPS)
 
     # ★ The mesh pocket, up into the ceiling — see MESH_*.
     cut += Pos(MIC_X, MIC_Y, MIC_CH_TOP) * extrude(
         Plane.XY * RectangleRounded(MESH_W, MESH_L, 2.0), MESH_T)
+
+    # ★ The rounded outboard corner the slots turn over — r1.5, tangent to the
+    # top face at RAIL_TOP and to the swell's face at MIC_SWELL_X1.
+    box = Pos(MIC_SWELL_X1 - EDGE_R, MIC_Y, CH_Z1) * Box(
+        2 * EDGE_R, 2 * MIC_SWELL_HALF, EDGE_R + EPS,
+        align=(Align.MIN, Align.CENTER, Align.MIN))
+    cut += box - (Pos(MIC_SWELL_X1 - EDGE_R, 0, CH_Z1) * Rot(-90, 0, 0) * Cylinder(
+        EDGE_R, 2 * MIC_SWELL_HALF + 2 * EPS,
+        align=(Align.CENTER, Align.CENTER, Align.MIN)))
     return cut
 
 
@@ -726,13 +756,17 @@ if __name__ == "__main__":
           f"{MIC_Y - MIC_SWELL_HALF:.1f}-{MIC_Y + MIC_SWELL_HALF:.1f}, "
           f"tapers {MIC_SWELL_TAPER:.2f} mm at {math.degrees(math.atan(RAMP_SLOPE)):.1f} deg "
           f"— top stays flat")
-    print(f"             chamber {MIC_CH_W:.1f} x {MIC_CH_L:.1f} x "
+    _cw = MIC_CH_X1 - CH_X0
+    print(f"             chamber {_cw:.2f} x {MIC_CH_L:.1f} x "
           f"{MIC_CH_TOP - PLATE_TOP:.1f} = "
-          f"{MIC_CH_W * MIC_CH_L * (MIC_CH_TOP - PLATE_TOP) / 1000:.2f} cm3, "
-          f"walls {(MIC_SWELL_X1 - RAIL_X0 - MIC_CH_W) / 2:.2f} mm each side")
+          f"{_cw * MIC_CH_L * (MIC_CH_TOP - PLATE_TOP) / 1000:.2f} cm3, "
+          f"outboard wall {MIC_SWELL_X1 - MIC_CH_X1:.2f} mm")
     _span = (GRILLE_LINES - 1) * GRILLE_PITCH + GRILLE_W
-    print(f"             grille faces UP — {GRILLE_LINES} straight slots, "
-          f"{GRILLE_W:.1f} wide on a {GRILLE_GAP:.1f} web, {GRILLE_LEN:.1f} long")
+    print(f"  grille     {GRILLE_LINES} straight slots, {GRILLE_W:.1f} wide on a "
+          f"{GRILLE_GAP:.1f} web — HIS, tapering inboard "
+          f"{min(SLOT_X_IN):.1f} -> {max(SLOT_X_IN):.1f}")
+    print(f"             they BREAK OUT the side over an r{EDGE_R:.1f} corner, "
+          f"lengths {' '.join(f'{MIC_SWELL_X1 - x:.1f}' for x in SLOT_X_IN[:4])} ...")
     print(f"             spans {_span:.1f} mm in a {MIC_CH_L:.1f} chamber "
           f"({(MIC_CH_L - _span) / 2:.2f} mm clear at each end), no bezel")
     print(f"             mesh pocket {MESH_W:.1f} x {MESH_L:.1f} x {MESH_T:.1f} in the "
