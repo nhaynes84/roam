@@ -261,38 +261,52 @@ PLATE_CLR = 0.25
 # outboard and downward, because up is where the volume rocker's approach is —
 # that is what killed the old blister and it has not stopped being true.
 MIC_SWELL_X1 = 52.0
-MIC_SWELL_HALF = 10.0     # flat span either side of the mic
+# ⚠️ 12.5, not 10. Eight slots at 2.5 pitch span 18.5 mm, so the chamber has to
+# be 21 long to keep every slot over open air — and the swell has to be longer
+# still to leave the chamber a wall at each end. The slot count sizes the swell,
+# not the other way round.
+MIC_SWELL_HALF = 12.5     # flat span either side of the mic
 MIC_SWELL_BITE = 1.0      # ⚠️ starts inside the rail's face, never on it
-MIC_CH_W, MIC_CH_L = 11.0, 16.0
+MIC_CH_W, MIC_CH_L = 11.0, 21.0
+
+# ★ Owner: *"i might even put a little bit of black screen on the underside too
+# for vibes."* A pocket in the chamber's CEILING, so the mesh sits right against
+# the back of the slots and reads as black through them instead of showing the
+# capsule. ⚠️ It must be SMALLER than the chamber, not larger — a pocket wider
+# than the chamber is an undercut you cannot get the mesh through.
+MESH_T = 0.5
+MESH_W, MESH_L = 10.0, 19.5
 
 # ★★ GRILLE LINES, not a hole pattern. Owner: *"i do want grille lines though
 # regardless."* Slots, tapering to a circle — which is his concept's round
 # grille, and the one element on this thing that says it is not a phone in a box.
 #
 # ⚠️ Lines over a d7 pocket would go blind at their ends, so there is a PLENUM
-# behind the face: the bore opens out to GRILLE_PL_R for GRILLE_PL_D before it
+# behind the face: the slots all open into one CHAMBER, so none of them
 # necks down to the capsule. Every line is through-air for its whole length.
 # ⚠️⚠️ It faces UP, not outboard. Owner: *"it faces forward, not up, i'll be
 # looking down at this thing, my voice will be coming basically straight down."*
-# The grille moves onto the rail's top shelf, which is also the only surface on
-# that side that is flat, unobstructed and pointed at his mouth.
 #
-# ★ And it is a GRILLE, not slots in a wall — his two references (a ribbon mic's
-# chrome ring, a 55SH's barred dome) are the same idea twice: **a bold raised
-# bezel with long bars tapering to the circle.** That taper is the whole look;
-# parallel lines of equal length read as ventilation.
-GRILLE_FACE = 1.5     # face the bars are cut through
-# ⚠️ Narrow and long, because it has to live inside 9.5 mm of rail now instead
-# of a 14.5 mm pad. Three bars, not five — at this width five would mean 0.5 mm
-# webs. The taper still carries the look.
-# ★ Back to 5 bars — the swell gives the grille its width back, and 3 bars was
-# only ever what a 9.5 mm rail could carry.
-GRILLE_A, GRILLE_B = 8.0, 4.4   # grille ellipse — semi-axis along Y, along X
-BEZEL_W, BEZEL_PROUD = 1.3, 0.6
-GRILLE_PL_D = 1.6     # plenum behind the face, so no bar goes blind
-GRILLE_W = 1.1
-GRILLE_PITCH = 1.9
-GRILLE_LINES = 5
+# ★★ STRAIGHT EQUAL SLOTS ACROSS THE SWELL — his, chosen against my elliptical
+# tapering version: *"i had 1mm slot widths, 1.5 between, i would even put one
+# more on each end; i like the aesthitic better too."*
+#
+# He is right and the reason is consistency: every other cut on this object is a
+# straight line at a fixed angle — the end ramps, the swell's tapers, the tray.
+# The ellipse and its bezel were the only curves on the part besides the battery
+# tube, so they read as imported from a different design. Same mix he called out
+# on the fillets. THE BEZEL IS GONE with them.
+#
+# ⚠️ Slots run along X (across the rail), NOT along Y. At 9 mm they are 6 mm
+# shorter than the old bars, so they are stiffer and print without drooping.
+# ⚠️ Ingress is a non-issue by his ruling: *"not worried about shit getting into
+# it, i can clean it, the bottom comes off."* Do not add a lip to solve it.
+GRILLE_FACE = 1.5     # face the slots are cut through
+GRILLE_W = 1.0        # slot width — his number
+GRILLE_GAP = 1.5      # web between — his number
+GRILLE_LEN = 9.0      # slot length, along X
+GRILLE_LINES = 8      # 6, plus "one more on each end"
+GRILLE_PITCH = GRILLE_W + GRILLE_GAP
 
 # --------------------------------------------------------------- derived
 POCK_L = PH_L + 2 * CLR
@@ -324,7 +338,6 @@ MIC_SWELL_TAPER = (MIC_SWELL_X1 - RAIL_X1 + MIC_SWELL_BITE) / RAMP_SLOPE
 GR_Z = RAIL_TOP                     # the grille is flush in the rail's top
 CH_Z1 = RAIL_TOP - GRILLE_FACE      # ★ the roof that closes the channel
 MIC_CH_TOP = CH_Z1                  # the chamber's ceiling is that same skin
-PLENUM_Z = GR_Z - GRILLE_FACE - GRILLE_PL_D
 
 # ⚠️ Ends at 152.5 so the riser clears the plate's top screw at Y 154 — at 154
 # the screw was drilling into the cable riser and had no land at all.
@@ -335,11 +348,12 @@ CH_Y1 = EXIT_Y1 - 2.0
 # blister. Both were landing exactly on their neighbour's face, and a union
 # across coincident planes tessellates to a non-watertight seam — `watertight
 # False` with every probe still passing, which is the quiet kind of broken.
-BEZEL_SINK = 0.2                    # ⚠️ overlaps the shelf, never kisses it
 
 # ★ With the underside flat again the plate runs the WHOLE groove, so the cable
 # is laid into an open channel end to end rather than fished down a tunnel.
-PL_Y0, PL_Y1 = MIC_Y - 15.0, 156.0
+# ⚠️ −18, not −15: at −15 the first screw landed 0.5 mm from the chamber wall
+# and its pilot broke into it. The chamber grew; the plate's datum has to move.
+PL_Y0, PL_Y1 = MIC_Y - 18.0, 156.0
 # ⚠️ Wider than the groove needs, because the run's screws cannot sit on the
 # groove's centreline — there is no material there. They move to the outboard
 # land, and the plate has to reach them.
@@ -491,13 +505,7 @@ def side_rail() -> Part:
     rail = Pos(RAIL_X0, 0, 0) * extrude(
         Plane.YZ * make_face(Polyline(*prof, close=True)), RAIL_W)
 
-    # ★ The bezel — the raised ring off both his references. It is what makes the
-    # thing read as a grille instead of a set of holes, and it is 0.6 proud so it
-    # never stands between his finger and the volume rocker it sits beside.
-    bez = Pos(MIC_X, MIC_Y, GR_Z - BEZEL_SINK) * extrude(
-        Plane.XY * (Ellipse(GRILLE_B + BEZEL_W, GRILLE_A + BEZEL_W)
-                    - Ellipse(GRILLE_B, GRILLE_A)), BEZEL_PROUD + BEZEL_SINK)
-    return rail + swell + bez
+    return rail + swell
 
 
 def cable_route() -> Part:
@@ -528,21 +536,18 @@ def cable_route() -> Part:
         Plane.XY * RectangleRounded(MIC_CH_W, MIC_CH_L, 3.0),
         MIC_CH_TOP - PLATE_TOP)
 
-    # ★★ The bars, tapering to the ellipse — the 55SH move. Equal-length lines
-    # read as a vent; lines that shorten toward the rim read as a grille.
+    # ★★ The slots. Equal, straight, across the rail — no taper, no bezel.
     bars = None
     for i in range(GRILLE_LINES):
-        dx = (i - (GRILLE_LINES - 1) / 2) * GRILLE_PITCH
-        k = 1.0 - (dx / GRILLE_B) ** 2
-        if k <= 0:
-            continue
-        length = 2 * GRILLE_A * math.sqrt(k) - 0.5
-        if length <= GRILLE_W:
-            continue
-        bar = Pos(dx, 0) * SlotOverall(length, GRILLE_W, rotation=90)
+        dy = (i - (GRILLE_LINES - 1) / 2) * GRILLE_PITCH
+        bar = Pos(0, dy) * SlotOverall(GRILLE_LEN, GRILLE_W)
         bars = bar if bars is None else bars + bar
     cut += Pos(MIC_X, MIC_Y, GR_Z - GRILLE_FACE - EPS) * extrude(
-        Plane.XY * bars, GRILLE_FACE + BEZEL_PROUD + 2 * EPS)
+        Plane.XY * bars, GRILLE_FACE + 2 * EPS)
+
+    # ★ The mesh pocket, up into the ceiling — see MESH_*.
+    cut += Pos(MIC_X, MIC_Y, MIC_CH_TOP) * extrude(
+        Plane.XY * RectangleRounded(MESH_W, MESH_L, 2.0), MESH_T)
     return cut
 
 
@@ -706,7 +711,7 @@ if __name__ == "__main__":
           f"— a curve, not a half cylinder")
     print(f"             hangs {abs(TUBE_Z - TUBE_R):.1f} mm below the base plane")
     print(f"  side rail  +{RAIL_W:.1f} mm on +X, top {RAIL_TOP:.1f} — "
-          f"{FLOOR + PH_T / 2 - BTN_BORE_H / 2 - RAIL_TOP - BEZEL_PROUD:.2f} mm "
+          f"{FLOOR + PH_T / 2 - BTN_BORE_H / 2 - RAIL_TOP:.2f} mm "
           f"of clear approach under the buttons (his geometry)")
     print(f"             flat Y {RAIL_FLAT_Y0:.2f}-{RAIL_FLAT_Y1:.2f}, ramps at "
           f"{math.degrees(math.atan(RAMP_SLOPE)):.1f} deg, "
@@ -725,8 +730,13 @@ if __name__ == "__main__":
           f"{MIC_CH_TOP - PLATE_TOP:.1f} = "
           f"{MIC_CH_W * MIC_CH_L * (MIC_CH_TOP - PLATE_TOP) / 1000:.2f} cm3, "
           f"walls {(MIC_SWELL_X1 - RAIL_X0 - MIC_CH_W) / 2:.2f} mm each side")
-    print(f"             grille faces UP — {2 * GRILLE_B:.1f} x {2 * GRILLE_A:.0f} "
-          f"ellipse, {GRILLE_LINES} tapering bars, bezel {BEZEL_PROUD:.1f} proud")
+    _span = (GRILLE_LINES - 1) * GRILLE_PITCH + GRILLE_W
+    print(f"             grille faces UP — {GRILLE_LINES} straight slots, "
+          f"{GRILLE_W:.1f} wide on a {GRILLE_GAP:.1f} web, {GRILLE_LEN:.1f} long")
+    print(f"             spans {_span:.1f} mm in a {MIC_CH_L:.1f} chamber "
+          f"({(MIC_CH_L - _span) / 2:.2f} mm clear at each end), no bezel")
+    print(f"             mesh pocket {MESH_W:.1f} x {MESH_L:.1f} x {MESH_T:.1f} in the "
+          f"ceiling, {GRILLE_FACE - MESH_T:.1f} mm of face left over it")
     print(f"  plate      {PL_Y1 - PL_Y0:.0f} mm long, {PLATE_T:.1f} thick, "
           f"{len(SCREWS)} x M2 — plate volume {plate.volume / 1000:.2f} cm3")
     print(f"  screen ap. {sx1 - sx0:.1f} x {sy1 - sy0:.1f} "
