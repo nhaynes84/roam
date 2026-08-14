@@ -199,9 +199,20 @@ RAIL_W = 9.5          # how much thicker the +X side gets
 # reads as unfinished rather than soft. Edges stay crisp until a pass that does
 # ALL of them. `_roll()` is kept, unused, for that pass.
 RAIL_ROUND = 2.5
-RAIL_TOP = 4.2        # ⚠️ under the button bores at 4.45 — do not raise
-RAIL_STEP_Y = 112.0   # power button ends at 108.6; the rail rises after it
-RAIL_RAMP = 10.0      # the step is a ramp, not a shoulder
+# ★★ MEASURED OFF HIS MODEL — `RoamTouchLatestDemo.step`, 2026-08-13, "i fixed
+# it". He did not reshape anything: he took 9.2 cm3 out of the rail and nothing
+# else, dropping its top from 4.2 all the way to −0.8 (what had been only the
+# mic's local dip) and letting the existing 0.92 ramps run further to reach it.
+# The dip is therefore GONE — the whole rail sits at the dip's level now, which
+# is why the buttons have 5.25 mm of clearance instead of 0.25.
+RAIL_TOP = -0.8
+RAMP_SLOPE = 0.92     # rise per mm of Y — 42.6°, unchanged from mine
+RAIL_FLAT_Y0 = 15.30  # where the USB-end ramp lands on the flat
+RAIL_FLAT_Y1 = 134.63 # where the jack-end ramp leaves it
+# ⚠️ NOT symmetric, and deliberately his: the USB ramp's apex falls 0.14 mm off
+# the end of the part while the jack end keeps 11.34 mm of flat. Owner: *"the
+# bottom right isn't perfectly symmetric because we also don't have the base
+# plate yet so I'm just guestimating."* Leave it until the plate exists.
 # ★★ Owner: *"the way you have the ramp on that top side, you should mirror it
 # on the botom, even if it doesn't do anything functional."*
 #
@@ -225,7 +236,12 @@ RAIL_Z0 = -10.0
 # splits the first time it is driven. The groove gives up 0.5 mm it does not
 # need (a lav lead is 2–3 mm) so the screws get 1.25 mm of wall instead.
 CH_W = 4.0            # cable channel, generous for a 2–3 mm lav lead
-CH_Z1 = 2.0           # CH_Z0 is PLATE_TOP — the groove's floor IS the plate
+# ⚠️⚠️ THE CHANNEL WAS OPEN. Its roof was at +2.0, which was under the old
+# 4.2 rail top and is 2.8 mm ABOVE the new one — so lowering the rail turned the
+# groove into a slot straight through the part, open at the top and opened at
+# the bottom by the plate rebate. Owner: *"it just needs the channel closed."*
+# Roof is now GRILLE_FACE thick, so the skin over the cable and the skin the
+# grille bars are cut through are the same 1.5 mm.  CH_Z0 is PLATE_TOP.
 
 # ⚠️ The channel is open at the BOTTOM for its whole length, not a blind bore.
 # Threading a lead down 70 mm of buried tunnel is a job nobody does twice; laying
@@ -234,23 +250,6 @@ PLATE_T = 2.0         # the removable service plate
 PLATE_CLR = 0.25
 
 # The mic blister: centred on the side, sitting entirely below the button line.
-# ⚠️ The blister's top is RAIL_TOP and cannot go higher — at Y 80.7 it sits
-# directly in front of the volume rocker, so anything above the button line is
-# a thumb standing between him and the button he is reaching for.
-# ⚠️⚠️ Owner: *"your mic case needs to drop down, it's blocking the buttons."*
-# It was not the bezel's 0.6 — it was the whole pad sitting at RAIL_TOP, right
-# in the volume rocker's approach and 4.5 mm wider than the rail besides. So the
-# grille shelf DROPS to MIC_TOP and the rail's top dips with it, which turns the
-# problem into a feature: over the rocker the side is now 4.45 mm lower than the
-# bore, so his thumb comes down into a scallop instead of onto a lump.
-# ⚠️ −0.8, NOT 0.0. At 0.0 the dipped rail top is exactly coplanar with the
-# tray's base plane, and the union across those two coincident planes
-# tessellates to a seam — OCCT reports a valid single solid, the STEP is fine,
-# and the STL quietly comes out non-watertight. Off-plane by 0.8 and it closes.
-MIC_TOP = -0.8
-# ⚠️ 15, not 13 — at 13 the RAMPS ate the last 1.4 mm of the rocker at each end,
-# so the dip's flat has to cover the whole button, not just its middle.
-MIC_DIP_HALF, MIC_DIP_RAMP = 16.0, 5.0
 MIC_R = 3.2           # d6.4 pocket — a 6 mm electret with 0.4 of clearance
 
 # ★★ GRILLE LINES, not a hole pattern. Owner: *"i do want grille lines though
@@ -294,7 +293,8 @@ TUBE_BULGE = TUBE_Z + TUBE_R - OUT_H        # crown standing above the face
 PHONE_TOP_Y = POCK_L - CLR
 
 # The USB-end ramp, placed so the low run is symmetric about the housing centre.
-RAIL_START_Y = OUT_L - RAIL_STEP_Y - 2 * RAIL_RAMP
+RAIL_TOP_Y0 = RAIL_TOP + RAIL_FLAT_Y0 * RAMP_SLOPE      # the rail's top at Y=0
+RAIL_APEX_Y = RAIL_FLAT_Y1 + (OUT_H - RAIL_TOP) / RAMP_SLOPE
 
 RAIL_X0 = OUT_W / 2
 RAIL_X1 = RAIL_X0 + RAIL_W
@@ -304,7 +304,8 @@ CH_X1 = CH_X0 + CH_W
 
 MIC_Y = OUT_L / 2                   # "centered on the right side"
 MIC_X = RAIL_X0 + RAIL_W / 2        # ★ centred on the rail — "in line"
-GR_Z = MIC_TOP                      # the shelf the grille sits in
+GR_Z = RAIL_TOP                     # the grille is flush in the rail's top
+CH_Z1 = RAIL_TOP - GRILLE_FACE      # ★ the roof that closes the channel
 PLENUM_Z = GR_Z - GRILLE_FACE - GRILLE_PL_D
 
 # ⚠️ Ends at 152.5 so the riser clears the plate's top screw at Y 154 — at 154
@@ -455,13 +456,9 @@ def _roll(x_outer: float) -> Part:
 
 def side_rail() -> Part:
     """The thickened +X side: a low rail under the buttons, rising past them."""
-    d0, d1 = MIC_Y - MIC_DIP_HALF, MIC_Y + MIC_DIP_HALF
-    prof = [(0, RAIL_Z0), (0, OUT_H),
-            (RAIL_START_Y, OUT_H), (RAIL_START_Y + RAIL_RAMP, RAIL_TOP),
-            (d0, RAIL_TOP), (d0 + MIC_DIP_RAMP, MIC_TOP),      # ★ the scallop
-            (d1 - MIC_DIP_RAMP, MIC_TOP), (d1, RAIL_TOP),
-            (RAIL_STEP_Y, RAIL_TOP), (RAIL_STEP_Y + RAIL_RAMP, OUT_H),
-            (OUT_L, OUT_H), (OUT_L, RAIL_Z0)]
+    prof = [(0, RAIL_Z0), (0, RAIL_TOP_Y0),
+            (RAIL_FLAT_Y0, RAIL_TOP), (RAIL_FLAT_Y1, RAIL_TOP),
+            (RAIL_APEX_Y, OUT_H), (OUT_L, OUT_H), (OUT_L, RAIL_Z0)]
     rail = Pos(RAIL_X0, 0, 0) * extrude(
         Plane.YZ * make_face(Polyline(*prof, close=True)), RAIL_W)
 
@@ -680,21 +677,18 @@ if __name__ == "__main__":
     print(f"             crown {TUBE_BULGE:.1f} mm proud, over a {_chord:.1f} mm chord "
           f"— a curve, not a half cylinder")
     print(f"             hangs {abs(TUBE_Z - TUBE_R):.1f} mm below the base plane")
-    print(f"  side rail  +{RAIL_W:.1f} mm on +X, top {RAIL_TOP:.1f} "
-          f"(bores start {FLOOR + PH_T / 2 - BTN_BORE_H / 2:.2f}) — "
-          f"{FLOOR + PH_T / 2 - BTN_BORE_H / 2 - RAIL_TOP:.2f} mm under the buttons")
-    print(f"             low run Y {RAIL_START_Y + RAIL_RAMP:.1f}-{RAIL_STEP_Y:.0f}, "
-          f"hangs {abs(RAIL_Z0):.1f} below the base plane")
-    print(f"             ramps at BOTH ends — full height to Y {RAIL_START_Y:.1f} "
-          f"and from Y {RAIL_STEP_Y + RAIL_RAMP:.1f}, symmetric about "
-          f"{OUT_L / 2:.1f}")
-    print(f"             dips to {MIC_TOP:.1f} over Y "
-          f"{MIC_Y - MIC_DIP_HALF:.0f}-{MIC_Y + MIC_DIP_HALF:.0f} — "
-          f"{FLOOR + PH_T / 2 - BTN_BORE_H / 2 - MIC_TOP - BEZEL_PROUD:.2f} mm "
-          f"of clear approach under the rocker")
+    print(f"  side rail  +{RAIL_W:.1f} mm on +X, top {RAIL_TOP:.1f} — "
+          f"{FLOOR + PH_T / 2 - BTN_BORE_H / 2 - RAIL_TOP - BEZEL_PROUD:.2f} mm "
+          f"of clear approach under the buttons (his geometry)")
+    print(f"             flat Y {RAIL_FLAT_Y0:.2f}-{RAIL_FLAT_Y1:.2f}, ramps at "
+          f"{math.degrees(math.atan(RAMP_SLOPE)):.1f} deg, "
+          f"{OUT_L - RAIL_APEX_Y:.2f} mm of flat at the jack end")
+    print(f"             hangs {abs(RAIL_Z0):.1f} below the base plane")
     print(f"  cable      exit {EXIT_Y1 - EXIT_Y0:.0f} x {EXIT_Z1 - EXIT_Z0:.0f} at "
           f"Y {EXIT_Y0:.0f}-{EXIT_Y1:.0f}, riser, then {CH_W:.1f} x "
           f"{CH_Z1 - CH_Z0:.1f} channel down to the mic")
+    print(f"             CLOSED — {RAIL_TOP - CH_Z1:.1f} mm roof over the cable, "
+          f"same skin the grille bars cut through")
     print(f"  mic        in the rail at X {MIC_X:.2f} (rail centre), Y {MIC_Y:.1f} "
           f"— no blister; capsule d{2 * MIC_R:.1f} x "
           f"{PLENUM_Z - PLATE_TOP:.1f} deep")
