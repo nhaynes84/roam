@@ -93,5 +93,33 @@ Override the target with `ROAM_DEV=<host:port>`; default is the Pixel's tailnet 
 
 **This is critical** — without these messages, the user has no idea what you're doing or asking. The automatic "Sent"/"Ready" hooks only signal that a prompt was submitted and a response finished, not what was said.
 
+## Android Emulator — etiquette (talos)
+
+`roam-touch/nexus/tools/roam-emu` is the ONLY sanctioned way to start the QA emulator.
+Never run a raw `emulator -avd`. Two rules, both learned the expensive way:
+
+1. ★ **Always headless (`-no-window`).** Over SSH the only reliable renderer is
+   `-gpu swiftshader_indirect`, and with a window it composites in software forever.
+   Measured 2026-08-14: **915% CPU with a COMPLETELY IDLE guest** (0% user inside
+   Android, everything at 0.0%), holding talos at load ~10 for two days. Headless is
+   ~8-10% and boots in under 7s. Nothing is lost — install, `am start`, screencap and
+   logcat all work headless.
+2. ★ **`./tools/roam-emu stop` when you are done.** Nothing reaps it: no launchd agent,
+   no timeout. It runs until someone kills it or the box reboots. That is how one
+   survived two days.
+
+Diagnosing "talos feels slow": check `uptime`, then look for a stray emulator. **Host
+process hot while the guest is idle means the emulator's rendering, never the app under
+test** — from inside Android nothing looks wrong at all, which is why it hides.
+
+⛔ **Never install to the Pixel over network adb** (`100.95.196.87:5555`). It is the
+owner's worn device showing real notifications, and a 12-year-old sailfish. The emulator
+is the default target; the Pixel is for final confirmation by the owner, not for agents.
+`adb disconnect 100.95.196.87:5555` if it appears in `adb devices`.
+
+Environment note: `ANDROID_HOME` is unset in interactive shells and the SDK is at
+`/opt/homebrew/share/android-commandlinetools`, not `~/Library/Android/sdk`. `roam-emu`
+sets it; a bare `emulator` on PATH will not work.
+
 ## Git Workflow
 - Commit directly to main. Use worktrees for parallel Claude sessions.
