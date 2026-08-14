@@ -146,15 +146,15 @@ TUBE_X = -52.5
 # it does the shading work on its own; the plate only adds the last stretch and
 # the face to put a name on. That is why this is 12 mm and not 34 — building a
 # full-height visor on top of a 34 mm tube would make the thing 60 mm tall.
-# ⚠️ 20, not 12. With the crown dropped flush the plate lost its free 21 mm and
-# shading fell to 10 deg. The geometry is unforgiving: the far edge of the screen
-# is ~75 mm from the visor, so every degree of shade costs 1.3 mm of height.
-# 20 mm buys ~16 deg — a hood and a badge, which is what his concept is, not a
-# sun visor. Real shading arrives with the sliding cover, closed.
-VISOR_H = 20.0        # plate height above the tube's crown
+# ⚠️ Proportioned to HIS concept, not to a shading angle. Owner: "it doesn't
+# have to be a literal sun block, i'm not going to hike through the arizona
+# desert with it on my wrist." I grew this to 20 mm chasing 16 deg of shade and
+# lost his form doing it. His plate stands ~10 mm above the rim; this is 12.
+# ★ Real shading was always going to come from the cover, closed.
+VISOR_H = 12.0        # plate height above the tube's crown
 VISOR_T = 4.0         # plate thickness
 VISOR_RAKE = 20.0     # degrees, canting inboard over the screen
-VISOR_SINK = 4.0      # how far it buries into the tube, so they fuse on a face
+VISOR_SINK = 2.0      # ⚠️ must stay under TUBE_WALL (2.5) — see pack_bore()
 
 # --------------------------------------------------------------- derived
 POCK_L = PH_L + 2 * CLR
@@ -306,12 +306,6 @@ def pack_tube() -> Part:
     """
     tube = Pos(TUBE_X, 0, TUBE_Z) * Rot(-90, 0, 0) * Cylinder(
         TUBE_R, TUBE_LEN, align=(Align.CENTER, Align.CENTER, Align.MIN))
-    # ⚠️ Open at the cap end (y=0), closed at the jack end. The pack seats
-    # against that closed end, which locates it and leaves its port facing the
-    # cap with the spare length in front of it for the jumper.
-    bore = Pos(TUBE_X, -EPS, TUBE_Z) * Rot(-90, 0, 0) * Cylinder(
-        TUBE_BORE_R, TUBE_LEN - TUBE_WALL + EPS,
-        align=(Align.CENTER, Align.CENTER, Align.MIN))
     # ⚠️ The tube's surface is only outboard of the tray's wall between
     # z 8.7 and 25.7 — a 4.7 mm band where the two solids actually overlap.
     # Below that the cylinder curves away and leaves a valley, so the join was
@@ -328,7 +322,20 @@ def pack_tube() -> Part:
     web = Pos(TUBE_X, 0, 0) * Box(
         abs(TUBE_X) - POCK_W / 2 - WALL, TUBE_LEN, OUT_H,
         align=(Align.MIN, Align.MIN, Align.MIN))
-    return (tube + web) - bore
+    return tube + web
+
+
+def pack_bore() -> Part:
+    """★ Cut LAST, in build(), so nothing added later can intrude into it.
+
+    ⚠️ The visor did exactly that: VISOR_SINK was 4 mm against a 2.5 mm tube
+    wall, so the plate pushed 1.5 mm into the cavity and the pack would not have
+    gone in. The bore was being cut before the visor was unioned, so no check
+    could see it. Cutting the void last makes that class of mistake impossible.
+    """
+    return Pos(TUBE_X, -EPS, TUBE_Z) * Rot(-90, 0, 0) * Cylinder(
+        TUBE_BORE_R, TUBE_LEN - TUBE_WALL + EPS,
+        align=(Align.CENTER, Align.CENTER, Align.MIN))
 
 
 def visor() -> Part:
@@ -346,6 +353,7 @@ def build() -> Part:
     p = tray()
     p += pack_tube()
     p += visor()
+    p -= pack_bore()      # ★ last, so nothing can intrude — see pack_bore()
     p -= face_openings()
     p -= port_openings()
     p -= button_bores()
@@ -390,9 +398,8 @@ if __name__ == "__main__":
           f"{abs(TUBE_Z - TUBE_R):.1f} mm of tube hangs BESIDE the arm)")
     print(f"  visor      top edge ({_top_x:.1f}, {_top_z:.1f}), "
           f"{_top_z - _glass:.1f} mm above the glass")
-    print(f"             shades light to "
-          f"{_m.degrees(_m.atan2(_top_z - _glass, _far - _top_x)):.0f} deg "
-          f"above the screen plane")
+    print(f"             (shade {_m.degrees(_m.atan2(_top_z - _glass, _far - _top_x)):.0f} deg — "
+          f"reported, not chased; the cover does the shading)")
     print(f"  screen ap. {sx1 - sx0:.1f} x {sy1 - sy0:.1f} "
           f"(margins L/R {fx(SCREEN_SVG[0]) + PH_W / 2:.2f} / "
           f"{PH_W / 2 - fx(SCREEN_SVG[2]):.2f})")
