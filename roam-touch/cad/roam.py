@@ -361,6 +361,23 @@ CHAM_45 = 1.0         # ★ the house chamfer — 45°, used everywhere from now
 GRILLE_LINES = len(SLOT_X_IN)
 GRILLE_PITCH = GRILLE_W + GRILLE_GAP
 
+# --------------------------------------------- STEP 5: the glare surround
+# ★★ MEASURED OFF `RoamTouchSurroundStep1.step`. He answered a question about
+# this with geometry instead of words, which is the fastest either of us has
+# communicated all night.
+#
+# Walls on THREE sides — the tube side and both ends — and the button/mic side
+# stays open. That is the side his thumb comes in on and where the buttons,
+# grille and rail all live, so a wall there would be in the way of everything.
+#
+# ★ The footprint is exactly the flat lip the 30° bezel leaves behind, so each
+# wall's inner face springs straight off the TOP of the ramp — no ledge, no
+# second edge. Ramp and wall are one surface turning a corner.
+#
+# ⚠️ 11.0 above the lip puts the top at 24.40, which is 2.4 ABOVE the tube's
+# crown. The surround is the tallest thing on the object, not the tube.
+SURROUND_H = 11.0
+
 # --------------------------------------------------------------- derived
 POCK_L = PH_L + 2 * CLR
 POCK_W = PH_W + 2 * CLR
@@ -373,6 +390,7 @@ TUBE_Z = OUT_H - TUBE_AXIS_BELOW_FACE
 TUBE_BULGE = TUBE_Z + TUBE_R - OUT_H        # crown standing above the face
 
 PHONE_TOP_Y = POCK_L - CLR
+SURROUND_TOP = OUT_H + SURROUND_H
 
 # The USB-end ramp, placed so the low run is symmetric about the housing centre.
 RAIL_TOP_Y0 = RAIL_TOP + RAIL_FLAT_Y0 * RAMP_SLOPE      # the rail's top at Y=0
@@ -468,7 +486,9 @@ def tray() -> Part:
 def face_openings() -> Part:
     """★ The apertures, as one cutting tool. Corrected against a printed part."""
     z0 = FLOOR + POCK_D - EPS
-    h = LIP_H + 2 * EPS
+    # ⚠️ Up through the SURROUND, not just the lip. The earpiece and camera sit
+    # under the jack-end wall, so a cut that stops at the lip leaves them buried.
+    h = SURROUND_TOP - z0 + EPS
     cut = Part()
 
     # ★ The screen bezel — a RAMP at BEZEL_ANGLE, run per side so the jack end
@@ -665,6 +685,21 @@ def service_plate() -> Part:
     return plate
 
 
+def glare_surround() -> Part:
+    """The three-sided wall around the screen — his, see SURROUND_H."""
+    sx0, sy0, sx1, sy1 = face_rect(SCREEN_SVG)
+    run = LIP_H / math.tan(math.radians(BEZEL_ANGLE))
+
+    # The whole top face...
+    ring = Pos(0, OUT_L / 2) * Rectangle(OUT_W, OUT_L)
+    # ...less everything from the bezel's top edge outboard on +X. One cut does
+    # both jobs: it opens the bezel AND leaves the button side wall-free.
+    ring -= Pos((sx0 - run + OUT_W / 2) / 2, (sy0 - run + sy1 + BEZEL_RUN_JACK) / 2) * \
+        Rectangle(OUT_W / 2 - sx0 + run, sy1 + BEZEL_RUN_JACK - sy0 + run)
+    return Pos(0, 0, OUT_H - EPS) * extrude(
+        Plane.XY * ring, SURROUND_H + EPS)
+
+
 def gaps():
     """★ The webs between apertures — the thing that actually bounds FEAT_TOL.
 
@@ -742,6 +777,7 @@ def build() -> Part:
     p = tray()
     p += pack_tube()
     p += side_rail()
+    p += glare_surround()
     p -= cable_route()
     p -= plate_rebate()
     p -= pack_bore()      # ★ last, so nothing can intrude — see pack_bore()
@@ -780,6 +816,9 @@ if __name__ == "__main__":
           f"({POCK_W / 2:.1f} mm of it); +X half open for the plug")
     print(f"  plug cav.  {JACK_CAV:.1f} mm beyond that wall — right-angle plug")
     _run = LIP_H / math.tan(math.radians(BEZEL_ANGLE))
+    print(f"  surround   {SURROUND_H:.1f} mm walls to Z {SURROUND_TOP:.1f} — tube side "
+          f"+ both ends, button side OPEN ({SURROUND_TOP - (TUBE_Z + TUBE_R):.1f} above "
+          f"the tube crown)")
     print(f"  bezel      {BEZEL_ANGLE:.0f} deg ramp — {_run:.2f} mm of run over "
           f"{LIP_H:.1f} of rise, on three sides")
     print(f"             jack end runs {BEZEL_RUN_JACK:.2f} at "
