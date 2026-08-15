@@ -889,6 +889,62 @@ def pack_bore() -> Part:
         align=(Align.CENTER, Align.CENTER, Align.MIN))
 
 
+# ================================================================ THE SLEEVE
+# ★★ STEP 7, his spec: a FLUSH-MOUNTED HALF-CIRCLE SLEEVE — **not ribs** — with slots
+# at both ends for two velcro straps. He adds the comfort layer under the velcro.
+# This is what kills the ~1 inch of stack (ribs + velcro + strap) and the roll: the
+# housing base becomes a flat mounting face and the arm-conforming job leaves the
+# housing entirely.
+#
+# ★ THE KEY MOVE: the arm's crown sits AT the housing's mounting plane, so the sleeve
+# adds ZERO standoff. Its inner cylinder is therefore centred ARM_R below that plane
+# and the shell only exists where the housing is not — which is why it is cut against
+# the REAL housing solid rather than against my idea of the underside. The tube dives
+# to Z −12.2 on −X and the rail sits at −0.4 on +X; conforming to that by hand would
+# be three assumptions I would get wrong.
+#
+# ⚠️ ARM_R IS THE ONE NUMBER I CANNOT DERIVE. 45.0 is bracer.py's nominal, and it says
+# so itself: "nominal, NOT critical, and that is deliberate". That was fine for a
+# shallow saddle. A half-circle that WRAPS and takes strap tension is sized by the
+# real limb — measure the forearm's circumference at the strap stations and set
+# ARM_R = circumference / (2*pi). Everything below follows from it.
+# ★ the mounting plane IS the rail top — the flat band the probe found running
+# X −36..+34 at this Z, which is the only continuous flat on the underside.
+MOUNT_Z = RAIL_TOP
+ARM_R = 45.0                  # inner radius: forearm + the comfort layer he adds
+SLEEVE_WALL = 3.0
+SLEEVE_Y0, SLEEVE_Y1 = 8.0, 152.0
+SLEEVE_Z_C = MOUNT_Z - ARM_R  # arm crown touches the mounting plane -> zero standoff
+STRAP_W, STRAP_T = 26.0, 4.0  # 25 mm webbing through a 26 x 4 slot
+STRAP_Y = (24.0, 128.0)       # two straps, one near each end
+STRAP_Z = 30.0                # slot height above the arm centre — near the open edge
+
+
+def sleeve() -> Part:
+    """★ Half-circle arm sleeve, cut against the housing so it mates flush."""
+    ln = SLEEVE_Y1 - SLEEVE_Y0
+    shell = (Pos(0, SLEEVE_Y0, SLEEVE_Z_C) * Rot(-90, 0, 0)
+             * Cylinder(ARM_R + SLEEVE_WALL, ln, align=(Align.CENTER, Align.CENTER, Align.MIN)))
+    shell -= (Pos(0, SLEEVE_Y0 - EPS, SLEEVE_Z_C) * Rot(-90, 0, 0)
+              * Cylinder(ARM_R, ln + 2 * EPS, align=(Align.CENTER, Align.CENTER, Align.MIN)))
+    # ★ everything above the arm's crown is the housing's job, not the sleeve's
+    shell -= Pos(0, SLEEVE_Y0 - EPS, MOUNT_Z) * Box(
+        400, ln + 2 * EPS, 100, align=(Align.CENTER, Align.MIN, Align.MIN))
+    # ★★ cut against the REAL housing — the sleeve conforms to the tube and the rail
+    # wherever they intrude, instead of me assuming a flat underside that is not there.
+    shell -= build()
+    # ★ TWO SLOTS PER STRAP, one at each side edge — the webbing goes out one slot,
+    # around the arm, in the other, and velcros to itself. ⚠️ NOT an annular cut: a band
+    # taken right round removes the whole wall and severs the sleeve into three pieces,
+    # which is exactly what the first attempt did.
+    for sy in STRAP_Y:
+        for sx in (-1, 1):
+            shell -= Pos(sx * (ARM_R + SLEEVE_WALL / 2), sy, SLEEVE_Z_C + STRAP_Z) * Box(
+                2 * SLEEVE_WALL + 8, STRAP_W, STRAP_T,
+                align=(Align.CENTER, Align.CENTER, Align.CENTER))
+    return shell
+
+
 def build() -> Part:
     p = tray()
     p += pack_tube()
@@ -912,13 +968,16 @@ if __name__ == "__main__":
     os.makedirs(out, exist_ok=True)
     plate = service_plate()
     cap = end_cap()
+    slv = sleeve()
     export_step(part, os.path.join(out, "roam_step3.step"))
     export_stl(part, os.path.join(out, "roam_step3.stl"))
     export_step(plate, os.path.join(out, "roam_plate.step"))
     export_stl(plate, os.path.join(out, "roam_plate.stl"))
     export_step(cap, os.path.join(out, "roam_cap.step"))
     export_stl(cap, os.path.join(out, "roam_cap.stl"))
-    export_step(Compound(children=[part, plate, cap]),
+    export_step(slv, os.path.join(out, "roam_sleeve.step"))
+    export_stl(slv, os.path.join(out, "roam_sleeve.stl"))
+    export_step(Compound(children=[part, plate, cap, slv]),
                 os.path.join(out, "roam_assembly.step"))
 
     bb = part.bounding_box()
@@ -1004,6 +1063,13 @@ if __name__ == "__main__":
     print(f"             ⚠️ overall length {OUT_L:.1f} -> {OUT_L + CAP_L:.1f}")
     print(f"  plate      {PL_Y1 - PL_Y0:.0f} mm long, {PLATE_T:.1f} thick, "
           f"{len(SCREWS)} x M2 — plate volume {plate.volume / 1000:.2f} cm3")
+    _sb = slv.bounding_box()
+    print(f"  SLEEVE     {_sb.size.X:.1f} wide x {_sb.size.Y:.1f} long x {_sb.size.Z:.1f} deep, "
+          f"{slv.volume/1000:.0f} cm3 ~= {slv.volume/1000*1.27:.0f} g PETG")
+    print(f"             arm r{ARM_R:.1f} inside, crown AT the mounting plane Z {MOUNT_Z:.1f} "
+          f"-> ZERO standoff, which is the whole point")
+    print(f"             {2*len(STRAP_Y)} strap slots {STRAP_W:.0f} x {STRAP_T:.0f} at Y {STRAP_Y}")
+    print(f"             ⚠️ ARM_R IS A GUESS (bracer.py nominal) — measure the forearm")
     print(f"  screen ap. {sx1 - sx0:.1f} x {sy1 - sy0:.1f} "
           f"(margins L/R {fx(SCREEN_SVG[0]) + PH_W / 2:.2f} / "
           f"{PH_W / 2 - fx(SCREEN_SVG[2]):.2f})")
