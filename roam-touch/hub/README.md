@@ -19,6 +19,9 @@ transcript.py  pull the assistant's answer out of a session transcript;
                summarise it for Piper and for a glance
 hub.py         FastAPI service + WebSocket + the tmux poller
 bridge.py      hub events -> phone notifications, via tools/roam-push
+files.py       ~/Collab browsing, path safety, share-to-Claude, thumbnails
+photo_bridge.py  a Google Photos shared album -> ~/.claude/dropzone/inbox
+web/           browse.html + stl.html, and a vendored three.js r112
 roam-hub-hook  the Claude Code hook that posts receipts and outcomes
 tests/         pytest; tmux faked at channels._run, network at urlopen
 ```
@@ -155,6 +158,39 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.talos.roam-photos.pl
   what moves `inbox/` into `dropzone/` and names the files to Claude.
 * ⚠️ **EXIF, including GPS and the device model, arrives intact.** Nothing here
   strips it — that is the owner's call, not a silent default.
+
+## The file browser (`~/Collab` → the wrist → Claude)
+
+`GET /browse` is a small HTML file browser over `~/Collab/CAD` and
+`~/Collab/Photos`, so a part can be looked at from the arm instead of from the
+desk. Read-only; `POST /share` copies a file *out*, into the dropzone inbox, so
+it reaches Claude by the same door a shared-album photo does.
+
+```
+files.py     path resolution, listing, share, sips thumbnails
+web/         browse.html, stl.html, and a vendored three.js r112
+```
+
+* **All the safety is `files.resolve`.** A browse path is `<root>/<relative>`
+  and a request that does not land strictly inside a declared root is refused —
+  `..` in either slash direction, an absolute path, a nul byte, a sibling
+  directory whose name merely *starts* with a root's, and (the one lexical
+  checks always miss) **a symlink inside a shared folder pointing elsewhere**.
+  Containment is checked after `realpath`, on path components, never on strings.
+* **`?token=` is accepted** on these endpoints, exactly as `/ws` already does it:
+  a browser cannot put a header on `<img src>`. The pages send
+  `Referrer-Policy: no-referrer` so it cannot leak onward.
+* **STL only.** The CAD folders are mostly `.step` — b-rep, needs an OCCT-class
+  kernel — so `/view/stl` answers 415 for one and the listing advertises the
+  `.stl` the build pipeline drops beside it (`mesh_path`).
+* ⚠️ **The client is Chrome 74 (2019) on a Pixel 1 and cannot ever be updated**
+  (signature-pinned, no Play Store on the device). No `?.`, no `??`, no class
+  fields, no `:has()`, and **no flexbox `gap`** — that one is Chrome 84 and is
+  silently ignored before it, so the layout just collapses. three.js is pinned
+  at **r112** because the modern builds are ES2020 modules that engine cannot
+  parse at all. `tests/test_files_api.py` fails on modern syntax, and — where
+  `node` is installed — really parses the pages at `ecmaVersion: 2019` and runs
+  the viewer's whole data path against the vendored three.
 
 ### The inbox contract (for anything that wants to hand Claude a file)
 

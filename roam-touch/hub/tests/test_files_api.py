@@ -474,6 +474,95 @@ def test_three_js_is_the_pinned_2020_build():
         assert path.stat().st_size > 1000, path
 
 
+def _binary_stl(triangles: int = 4) -> bytes:
+    """A minimal valid binary STL: 80-byte header, uint32 count, 50 bytes each."""
+    import struct
+
+    out = [b"roam test stl".ljust(80, b"\0"), struct.pack("<I", triangles)]
+    for i in range(triangles):
+        out.append(struct.pack("<3f", 0.0, 0.0, 1.0))                  # normal
+        out.append(struct.pack("<3f", 0.0, 0.0, float(i)))             # v1
+        out.append(struct.pack("<3f", 10.0, 0.0, float(i)))            # v2
+        out.append(struct.pack("<3f", 0.0, 20.0, float(i)))            # v3
+        out.append(struct.pack("<H", 0))                               # attr
+    return b"".join(out)
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+def test_the_vendored_three_actually_loads_and_parses_an_stl(tmp_path):
+    """The viewer's whole data path, minus the draw call.
+
+    Everything `stl.html` does before WebGL gets involved — STLLoader.parse on
+    real bytes, the Box3 fit, the camera framing, constructing OrbitControls —
+    run against the vendored r112 in a browser-shaped sandbox. It catches the
+    failure that matters and cannot be seen from here: an API that moved
+    between three.js releases, which on his wrist is a blank screen.
+    """
+    model = tmp_path / "model.stl"
+    model.write_bytes(_binary_stl(6))
+    script = tmp_path / "check.js"
+    script.write_text(
+        """
+        const fs = require("fs"), vm = require("vm"), path = require("path");
+        // argv is [node, this script, ...] -- the arguments start at 2.
+        const V = process.argv[2], MODEL = process.argv[3];
+        // No `module`/`exports` here: the UMD build must take its BROWSER branch
+        // and set a global THREE, exactly as it does behind a <script> tag.
+        const sandbox = { console, window: {}, self: {} };
+        sandbox.window = sandbox;
+        sandbox.document = {
+          createElement: () => ({ style: {}, setAttribute() {},
+                                  getContext: () => null, addEventListener() {} }),
+          addEventListener() {}, removeEventListener() {},
+        };
+        vm.createContext(sandbox);
+        for (const f of ["three.min.js", "STLLoader.js", "OrbitControls.js"]) {
+          vm.runInContext(fs.readFileSync(path.join(V, f), "utf8"), sandbox, { filename: f });
+        }
+        const THREE = sandbox.THREE;
+        // REVISION is the STRING "112" in this build, not a number.
+        if (String(THREE.REVISION) !== "112") {
+          throw new Error("expected r112, got " + THREE.REVISION);
+        }
+        const buf = fs.readFileSync(MODEL);
+        const geometry = new THREE.STLLoader()
+          .parse(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
+        const triangles = geometry.attributes.position.count / 3;
+        if (triangles !== 6) { throw new Error("triangles: " + triangles); }
+        if (!geometry.attributes.normal) { throw new Error("no normals"); }
+        const mesh = new THREE.Mesh(geometry, new THREE.MeshPhongMaterial({
+          color: 0xb9c4d0, specular: 0x222222, shininess: 24, side: THREE.DoubleSide }));
+        const box = new THREE.Box3().setFromObject(mesh);
+        const size = box.getSize(new THREE.Vector3());
+        const centre = box.getCenter(new THREE.Vector3());
+        const camera = new THREE.PerspectiveCamera(45, 1080 / 1920, 0.1, 100000);
+        const radius = Math.max(size.x, size.y, size.z) * 0.5 || 1;
+        const distance = radius / Math.sin((camera.fov * Math.PI / 180) / 2) * 1.35;
+        camera.near = Math.max(radius / 1000, 0.01);
+        camera.far = distance + radius * 12;
+        camera.updateProjectionMatrix();
+        camera.position.set(centre.x + distance * 0.72, centre.y - distance * 0.62,
+                            centre.z + distance * 0.55);
+        camera.up.set(0, 0, 1);
+        const d = camera.position.distanceTo(centre);
+        if (!(d > camera.near && d + radius < camera.far)) {
+          throw new Error("model is outside the frustum");
+        }
+        const controls = new THREE.OrbitControls(camera, sandbox.document.createElement("c"));
+        controls.enableDamping = true; controls.target.copy(centre); controls.update();
+        console.log("ok " + triangles);
+        """,
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        ("node", str(script), str(WEB_DIR / "vendor"), str(model)),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "ok 6"
+
+
 def _acorn_available() -> bool:
     if shutil.which("node") is None:
         return False

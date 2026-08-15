@@ -563,6 +563,81 @@ One event, **never trimmed** — this is "expand the details" behind a summary.
 
 `404` if there is no such event.
 
+### Files — browsing `~/Collab`, and handing one to Claude
+
+A read-only window onto two shared folders, so a part can be looked at from the
+arm instead of from the desk. Roots are named, not paths: `CAD` and `Photos`.
+A **browse path** is `<root>/<relative>` — `CAD/roam-touch/bracer.stl`.
+
+⚠️ **These endpoints also accept `?token=`**, exactly as `/ws` does, because a
+browser cannot put an `Authorization` header on `<img src>` or a navigation. The
+pages send `Referrer-Policy: no-referrer` so the token in the URL cannot leak
+onward. Prefer the header wherever you can set one.
+
+#### `GET /files`
+
+Query: `path` (default `""`, which lists the roots).
+
+```json
+{"path": "CAD/roam-touch", "parent": "CAD", "entries": [
+  {"name": "archive", "path": "CAD/roam-touch/archive", "kind": "dir",
+   "size": 0, "mtime": 1786760296.9},
+  {"name": "bracer.step", "path": "CAD/roam-touch/bracer.step", "kind": "cad",
+   "size": 963991, "mtime": 1786762523.9,
+   "mesh_path": "CAD/roam-touch/bracer.stl"}
+]}
+```
+
+`kind` is `dir` | `image` | `mesh` (STL) | `cad` (STEP and friends) | `file`.
+Dot-files are never listed. **`mesh_path`** appears on a `cad` entry when the
+build pipeline has dropped an `.stl` beside it — that is the thing a client can
+actually render.
+
+`400` for a path that tries to leave the shared folders, `404` for one that is
+simply not there.
+
+#### `GET /files/raw` · `GET /files/thumb`
+
+Query: `path`; `thumb` also takes `size` (48–1024, default 320). `raw` is the
+bytes, served inline. `thumb` is a cached JPEG, **falling back to the original**
+if it cannot be made — so a client can always just use it.
+
+#### `POST /share`
+
+```json
+{"path": "CAD/roam-touch/bracer.stl"}
+```
+
+Copies the file into `~/.claude/dropzone/inbox/`. Never moves it: the shared
+folders are his.
+
+```json
+{"ok": true, "path": "CAD/…/bracer.stl", "name": "bracer.stl",
+ "inbox": "/Users/talos/.claude/dropzone/inbox/bracer.stl",
+ "note": "reaches Claude on the next prompt, via the dropzone hook"}
+```
+
+★ **"Shared" means "will be in front of Claude on his next prompt"**, not "is on
+disk". Claude does not watch the filesystem; the `UserPromptSubmit` hook moves
+the inbox into the dropzone and *names* each file, and the naming is what makes
+it visible. Same door the Google Photos album comes through — one delivery
+route, one place for it to break. Tell the user that honestly; do not report
+"sent" as if it had already been read.
+
+#### `GET /browse` · `GET /view/stl` — HTML
+
+For a phone browser, not for the app. `/view/stl` takes `path` and answers
+**`415` for anything but `.stl`** — a `.step` is a b-rep needing an OCCT-class
+kernel, which is not something to attempt on the client. Point it at the
+`mesh_path` instead.
+
+⚠️ **The client is Chrome 74 (2019) on a Pixel 1 and cannot be updated** — it is
+signature-pinned with no Play Store on the device. Anything served to it must
+avoid `?.`, `??`, class fields, `:has()` and flexbox `gap`; three.js is pinned at
+r112 for the same reason. If you touch `web/`, read the header comment in
+`web/browse.html` and run the suite — `tests/test_files_api.py` fails on modern
+syntax rather than letting the wrist find out.
+
 ---
 
 ## 4. WebSocket
