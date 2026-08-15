@@ -951,7 +951,7 @@ SLEEVE_Y0, SLEEVE_Y1 = 8.0, 152.0
 # ★ Yaw is about Z, so it costs nothing geometrically: the cone stays tangent to the
 # mounting plane at exactly the same height, and every horizontal cut below still lands
 # where it did. Only the crown LINE swings.
-SLEEVE_YAW = -20.0
+SLEEVE_YAW = 20.0
 SLEEVE_Z_C = MOUNT_Z - ARM_R_WRIST   # crown on the mounting plane at the wrist end
 STRAP_W, STRAP_T = 26.0, 4.0  # 25 mm webbing through a 26 x 4 slot
 STRAP_AT = (0.12, 0.83)       # two straps, as a fraction ALONG the sleeve axis
@@ -969,6 +969,50 @@ SLEEVE_OPEN = 1.0
 STRAP_FRAC = 0.35             # slot height above the axis, as a fraction of the local radius
 
 
+# ★★ ORGANIC = the cuff reads as the housing carried on down and around the arm, not a
+# cone butted against it. His words: "it should look organic, like an extension of the
+# existing piece, but clearly read as a cuff, just not a cuff glued to a phone".
+# ★ HOW: at each station take the CONVEX HULL of the arm circle and the pack tube's
+# circle. One outline containing both forms, so the tube's curve flows into the cuff
+# instead of intersecting it. Loft those sections along the arm, subtract the arm, then
+# subtract the housing. What is left grew out of the housing's own silhouette.
+ORGANIC = True
+
+
+def _organic(a: Vector, b: Vector) -> Part:
+    secs = []
+    n = 5
+    for i in range(n):
+        t = i / (n - 1)
+        c = a + (b - a) * t
+        r = ARM_R_WRIST + t * (ARM_R_ELBOW - ARM_R_WRIST) + SLEEVE_WALL
+        pl = Plane(origin=Vector(c.X, c.Y, c.Z), z_dir=(b - a).normalized())
+        # the arm, and the pack tube where it runs alongside on PORT
+        arm = pl * Circle(r)
+        tube = pl * Pos((TUBE_X - c.X) * 0.55, (TUBE_Z - c.Z) * 0.55) * Circle(TUBE_R + 1.0)
+        secs.append(make_hull((arm + tube).edges()))
+    body = loft(secs)
+    # hollow it: the arm bore, then everything above the crown, then the housing itself
+    inner = []
+    for i in range(n):
+        t = i / (n - 1)
+        c = a + (b - a) * t
+        r = ARM_R_WRIST + t * (ARM_R_ELBOW - ARM_R_WRIST)
+        inner.append(Plane(origin=Vector(c.X, c.Y, c.Z),
+                           z_dir=(b - a).normalized()) * Circle(r))
+    body -= loft(inner)
+    body -= Pos(0, SLEEVE_Y0 - 80, MOUNT_Z - SLEEVE_OPEN * ARM_R_WRIST - 200) * Box(
+        500, (SLEEVE_Y1 - SLEEVE_Y0) + 200, 200, align=(Align.CENTER, Align.MIN, Align.MIN))
+    body -= Pos(0, SLEEVE_Y0 - 80, MOUNT_Z) * Box(
+        500, (SLEEVE_Y1 - SLEEVE_Y0) + 200, 200, align=(Align.CENTER, Align.MIN, Align.MIN))
+    body -= build()
+    solids = sorted(body.solids(), key=lambda q: q.volume, reverse=True)
+    if len(solids) > 1:
+        print(f"  sleeve: dropped {len(solids)-1} fragment(s), "
+              f"{sum(q.volume for q in solids[1:])/1000:.2f} cm3")
+    return Part() + solids[0]
+
+
 def sleeve() -> Part:
     """★ Half-circle arm sleeve, cut against the housing so it mates flush."""
     # ★ axis defined by its two END POINTS, so the crown rides the mounting plane the
@@ -983,6 +1027,8 @@ def sleeve() -> Part:
         return Vector(dx * c - dy * sn, py + dx * sn + dy * c, v.Z)
     a = _yaw(Vector(0, SLEEVE_Y0, MOUNT_Z - ARM_R_WRIST))
     b = _yaw(Vector(0, SLEEVE_Y1, MOUNT_Z - ARM_R_ELBOW))
+    if ORGANIC:
+        return _organic(a, b)
     axis = (b - a).normalized()
     ln = (b - a).length
     pl = Plane(origin=a, z_dir=axis)
