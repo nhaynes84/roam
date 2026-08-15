@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import os
 import re
@@ -36,12 +37,14 @@ from fastapi import (
     WebSocketDisconnect,
     status,
 )
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import AliasChoices, BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from starlette.concurrency import run_in_threadpool
 
 import channels as channels_mod
+import files as files_mod
 from channels import Channel, TmuxError
 from presence import DEFAULT_TTL_S, UNKNOWN_COVERAGE, Presence
 from store import (
@@ -57,7 +60,10 @@ from store import (
 from transcript import INLINE_BODY_CHARS
 
 HUB_DIR = Path(__file__).resolve().parent
-HUB_VERSION = "1.3.0"
+#: HTML and the vendored three.js the file browser serves. See `web/browse.html`
+#: for the browser constraints -- they are not negotiable and not obvious.
+WEB_DIR = HUB_DIR / "web"
+HUB_VERSION = "1.4.0"
 PROTOCOL_VERSION = 1
 
 #: WebSocket frames a subscriber may fall behind by before we cut it loose and
@@ -82,6 +88,31 @@ CONTROL_ACTIONS: dict[str, str] = {
 #: read as if the user typed them, and the search index inherits the noise.
 _CONTROL_CHARS = {chr(c) for c in range(0x20)} - {"\n", "\r", "\t"}
 _CONTROL_CHARS.add("\x7f")
+
+
+#: The only files `/web/vendor/{name}` will serve. An allow-list, not a
+#: directory: this must never become "read any path under web/".
+VENDOR_ASSETS: frozenset[str] = frozenset(
+    {"three.min.js", "STLLoader.js", "OrbitControls.js"}
+)
+
+
+def _js_literal(value: str) -> str:
+    """A string as a safe JavaScript literal, for templating into a page.
+
+    ⚠️ `json.dumps` alone is not enough inside a `<script>`: a value containing
+    `</script>` ends the block early and everything after it is parsed as HTML,
+    which is how a filename becomes script injection. A browse path arrives
+    from a query string and a filename can legally contain a quote, so both go
+    through here. (`ensure_ascii` already takes care of U+2028/U+2029, which
+    are legal JSON but illegal inside a JS string literal.)
+    """
+    return (
+        json.dumps(value, ensure_ascii=True)
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("&", "\\u0026")
+    )
 
 
 def build_identity() -> dict[str, Any]:
@@ -146,6 +177,16 @@ class Settings(BaseSettings):
     #: receipt is still recognised as the echo of that send rather than as him
     #: typing at the keyboard.
     echo_window_s: float = 60.0
+
+    #: The folders the file browser may see, and nothing else. Read-only: the
+    #: hub never writes inside them (`POST /share` copies *out*, into the
+    #: dropzone inbox).
+    collab_cad: Path = files_mod.DEFAULT_ROOTS["CAD"]
+    collab_photos: Path = files_mod.DEFAULT_ROOTS["Photos"]
+    #: Where `POST /share` puts a file so Claude gets it. Same queue the photo
+    #: bridge feeds -- see README.md, "the inbox contract".
+    inbox: Path = files_mod.DEFAULT_INBOX
+    thumb_cache: Path = files_mod.DEFAULT_THUMB_CACHE
 
     log_level: str = "info"
 
@@ -304,6 +345,17 @@ class ArchiveRequest(BaseModel):
     archived: bool = True
 
 
+class ShareRequest(BaseModel):
+    """Hand a browsed file to Claude.
+
+    `path` is a browse path (`CAD/estack/drum_lh.step`), never a filesystem
+    path -- see `files.resolve`. The file is *copied* into the dropzone inbox;
+    nothing in the shared folders is ever moved or changed.
+    """
+
+    path: str = Field(min_length=1, max_length=1024)
+
+
 class PresenceRequest(BaseModel):
     """What a client says about where the user is.
 
@@ -458,6 +510,29 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
         creds: HTTPAuthorizationCredentials | None = Depends(bearer),
     ) -> None:
         supplied = creds.credentials if creds else ""
+        if not supplied or not secrets.compare_digest(supplied, token):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="bearer token required",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+    async def require_auth_flex(
+        creds: HTTPAuthorizationCredentials | None = Depends(bearer),
+        token_q: str | None = Query(default=None, alias="token"),
+    ) -> None:
+        """Bearer header **or** `?token=`, for things a browser has to fetch.
+
+        Exactly the concession `/ws` already makes, and for the same reason: a
+        browser cannot put a header on `<img src>`, `<script src>` or a plain
+        navigation, so a file browser that only accepted the header could not
+        show a single thumbnail. The token then appears in the URL bar and in
+        history, which is the cost -- mitigated by `Referrer-Policy:
+        no-referrer` on the pages so it cannot leak to a third party, and by
+        the hub being bound to the tailnet in the first place. Every endpoint
+        that does not need it keeps `require_auth`.
+        """
+        supplied = creds.credentials if creds else (token_q or "")
         if not supplied or not secrets.compare_digest(supplied, token):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -1018,6 +1093,180 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
         if event is None:
             raise HTTPException(404, detail=f"no such event: {event_id}")
         return {"event": event.to_dict()}
+
+    # --------------------------------------------------------------- files
+    #
+    # A read-only window onto ~/Collab/CAD and ~/Collab/Photos, so a part can be
+    # looked at from the arm instead of from the desk, and handed to Claude with
+    # one tap. All the path safety lives in `files.py`; these routes only map
+    # its two exception types onto status codes.
+
+    roots = {"CAD": settings.collab_cad, "Photos": settings.collab_photos}
+
+    def _browse_error(exc: files_mod.BrowseError) -> HTTPException:
+        # 404 for "not there", 400 for "not yours". Never echo a filesystem
+        # path back -- the message is `files.py`'s, which is written to be safe
+        # to show, and confirming where the roots live is free information.
+        if isinstance(exc, files_mod.NotFound):
+            return HTTPException(status.HTTP_404_NOT_FOUND, detail=str(exc))
+        return HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+    def _page(name: str, replacements: dict[str, str]) -> HTMLResponse:
+        """Serve one of the `web/` pages with its placeholders filled in.
+
+        ⚠️ Substituted values land inside a JS string literal, so they go
+        through `_js_literal` -- a filename may legally contain a quote, and
+        the model path arrives from a query string. `no-referrer` stops the
+        `?token=` in the URL from being handed to anything the page links to.
+        """
+        html = (WEB_DIR / name).read_text(encoding="utf-8")
+        for placeholder, value in replacements.items():
+            html = html.replace(placeholder, value)
+        return HTMLResponse(
+            html,
+            headers={
+                "Referrer-Policy": "no-referrer",
+                "Cache-Control": "no-store",
+            },
+        )
+
+    @app.get("/files", tags=["files"], dependencies=[Depends(require_auth_flex)])
+    async def list_files(path: str = Query("", max_length=1024)) -> dict[str, Any]:
+        """One directory. An empty `path` lists the roots themselves."""
+        try:
+            return await run_in_threadpool(files_mod.listdir, path, roots)
+        except files_mod.BrowseError as exc:
+            raise _browse_error(exc) from exc
+
+    @app.get(
+        "/files/raw", tags=["files"], dependencies=[Depends(require_auth_flex)]
+    )
+    async def raw_file(path: str = Query(..., max_length=1024)) -> FileResponse:
+        """The file itself -- the `<img>` target, the STL the viewer loads."""
+        try:
+            target = await run_in_threadpool(files_mod.resolve_file, path, roots)
+        except files_mod.BrowseError as exc:
+            raise _browse_error(exc) from exc
+        return FileResponse(
+            target,
+            filename=target.name,
+            content_disposition_type="inline",
+            headers={"Referrer-Policy": "no-referrer"},
+        )
+
+    @app.get(
+        "/files/thumb", tags=["files"], dependencies=[Depends(require_auth_flex)]
+    )
+    async def thumb_file(
+        path: str = Query(..., max_length=1024),
+        size: int = Query(320, ge=48, le=1024),
+    ) -> FileResponse:
+        """A small JPEG for the grid, falling back to the original.
+
+        A 2 MB phone photo per tile is a real cost over a tailnet link to a
+        Pixel 1, so this shells out to `sips` and caches. If that is not
+        available the page still works -- it is just heavier.
+        """
+        try:
+            target = await run_in_threadpool(files_mod.resolve_file, path, roots)
+        except files_mod.BrowseError as exc:
+            raise _browse_error(exc) from exc
+        small = await run_in_threadpool(
+            files_mod.thumbnail, target, size, settings.thumb_cache
+        )
+        return FileResponse(
+            small or target,
+            content_disposition_type="inline",
+            headers={"Referrer-Policy": "no-referrer"},
+        )
+
+    @app.post("/share", tags=["files"], dependencies=[Depends(require_auth_flex)])
+    async def share_file(payload: ShareRequest) -> dict[str, Any]:
+        """Copy a browsed file into `~/.claude/dropzone/inbox/`.
+
+        ★ The same door the shared-album photos come through. Claude does not
+        watch the filesystem; the `UserPromptSubmit` hook moves the inbox into
+        the dropzone and *names* each file, and that naming is what makes it
+        visible. So "shared" here means "will be in front of Claude on his next
+        prompt", not "is on disk somewhere" -- which is the honest thing for
+        the button to promise.
+        """
+        try:
+            landed = await run_in_threadpool(
+                files_mod.share, payload.path, roots, settings.inbox
+            )
+        except files_mod.BrowseError as exc:
+            raise _browse_error(exc) from exc
+        except OSError as exc:
+            raise HTTPException(
+                status.HTTP_507_INSUFFICIENT_STORAGE, detail=f"could not copy: {exc}"
+            ) from exc
+        log.info("shared %s -> %s", payload.path, landed)
+        return {
+            "ok": True,
+            "path": payload.path,
+            "name": landed.name,
+            "inbox": str(landed),
+            "note": "reaches Claude on the next prompt, via the dropzone hook",
+        }
+
+    @app.get(
+        "/browse",
+        tags=["files"],
+        dependencies=[Depends(require_auth_flex)],
+        response_class=HTMLResponse,
+    )
+    async def browse_page() -> HTMLResponse:
+        """The file browser, for a phone browser. See `web/browse.html`."""
+        return _page("browse.html", {'"__ROAM_TOKEN__"': _js_literal(token)})
+
+    @app.get(
+        "/view/stl",
+        tags=["files"],
+        dependencies=[Depends(require_auth_flex)],
+        response_class=HTMLResponse,
+    )
+    async def stl_page(path: str = Query(..., max_length=1024)) -> HTMLResponse:
+        """The STL viewer. ⚠️ **STL only** -- see `web/stl.html` for why.
+
+        The path is resolved before the page is served, so a bad one is a 404
+        here rather than a viewer that loads, spins and fails.
+        """
+        try:
+            target = await run_in_threadpool(files_mod.resolve_file, path, roots)
+        except files_mod.BrowseError as exc:
+            raise _browse_error(exc) from exc
+        if files_mod.classify(target) != "mesh":
+            raise HTTPException(
+                status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                detail=f"only STL can be rendered, not {target.suffix or 'that'}",
+            )
+        return _page(
+            "stl.html",
+            {
+                '"__ROAM_TOKEN__"': _js_literal(token),
+                '"__MODEL_PATH__"': _js_literal(path),
+                "__VENDOR__": "/web/vendor",
+            },
+        )
+
+    @app.get("/web/vendor/{name}", tags=["files"], include_in_schema=False)
+    async def vendor_asset(name: str = PathParam(...)) -> FileResponse:
+        """The vendored three.js. Unauthenticated **on purpose**.
+
+        It is public MIT library code with nothing of his in it, and the
+        alternative -- a `?token=` on every `<script src>` -- would scatter the
+        token through more URLs to protect a file anyone can download from
+        unpkg. An explicit allow-list, so this can never become "serve any file
+        under web/".
+        """
+        if name not in VENDOR_ASSETS:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="no such asset")
+        return FileResponse(
+            WEB_DIR / "vendor" / name,
+            media_type="application/javascript",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
 
     # ----------------------------------------------------------- websocket
 

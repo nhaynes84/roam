@@ -62,6 +62,15 @@ class BrowseError(ValueError):
     """A path that is not allowed. The message is safe to show a client."""
 
 
+class NotFound(BrowseError):
+    """A well-formed path to something that is not there.
+
+    Split from `BrowseError` so the API can answer 404 for a typo and 400 for
+    an attempt to leave the shared folders -- "no such file" and "stop that"
+    are different answers and should not share a status code.
+    """
+
+
 def _clean_segments(rel: str) -> list[str]:
     if "\x00" in rel:
         raise BrowseError("nul byte in path")
@@ -93,7 +102,7 @@ def resolve(rel: str, roots: dict[str, Path] | None = None) -> tuple[str, Path]:
     name, rest = segments[0], segments[1:]
     base_raw = roots.get(name)
     if base_raw is None:
-        raise BrowseError(f"no such root: {name!r}")
+        raise NotFound(f"no such root: {name!r}")
     base = Path(os.path.realpath(base_raw))
     target = Path(os.path.realpath(base.joinpath(*rest))) if rest else base
     if target != base and base not in target.parents:
@@ -170,12 +179,12 @@ def listdir(rel: str, roots: dict[str, Path] | None = None) -> dict[str, Any]:
 
     root, target = resolve(rel, roots)
     if not target.is_dir():
-        raise BrowseError(f"not a directory: {rel}")
+        raise NotFound(f"not a directory: {rel}")
     entries: list[dict[str, Any]] = []
     try:
         children: Iterable[Path] = sorted(target.iterdir())
     except OSError as exc:
-        raise BrowseError(f"cannot read directory: {exc}") from exc
+        raise NotFound(f"cannot read directory: {exc}") from exc
     for child in children:
         if child.name.startswith("."):
             continue
@@ -199,7 +208,7 @@ def resolve_file(rel: str, roots: dict[str, Path] | None = None) -> Path:
     """
     _root, target = resolve(rel, roots)
     if not target.is_file():
-        raise BrowseError(f"not a file: {rel}")
+        raise NotFound(f"not a file: {rel}")
     return target
 
 

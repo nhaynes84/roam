@@ -1,6 +1,21 @@
 """
 ROAM Touch — the functional build of his concept. STEP 1: the phone housing.
 
+★★ THE DEVICE IS A BOAT — his convention, the same one that stopped the eStack
+orientation errors. Two anchors, everything else falls out of them:
+
+    STERN      Y = 0        the USB / cap end          -> points at the WRIST
+    BOW        Y = OUT_L    the jack end               -> points at the ELBOW
+    STARBOARD  +X           buttons, rail, mic pod     -> toward the body midline
+    PORT       -X           the pack tube              -> outboard, away from him
+    UP         +Z           out of the screen, away from the arm
+
+⚠️ It is self-consistent, not just a naming: facing the bow (+Y) with +Z up, the
+right-hand rule puts starboard at +X — which is where the buttons already are. So
+"USB is stern, buttons are starboard" fixes every other direction with no room to
+argue. WORN ON THE RIGHT FOREARM, ON TOP, so starboard is the inboard flank and
+his eye is over it; port is the deep outboard flank the pack tube hangs off.
+
 ★ This is a NEW model, not a fork of bracer.py, and the reason is structural.
 `bracer.py` makes the housing conform to the arm — the tilted arm cut, the hull
 skirt, the belt, the strap slots, the tessellated flanks. **A flush half-circle
