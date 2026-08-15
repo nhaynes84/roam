@@ -926,6 +926,7 @@ def pack_bore() -> Part:
 # ★ the mounting plane IS the rail top — the flat band the probe found running
 # X −36..+34 at this Z, which is the only continuous flat on the underside.
 MOUNT_Z = RAIL_TOP
+MOUNT_BAND = 55.0
 # ★★ THE SLEEVE IS A TILTED CONE, NOT A CYLINDER. His call: *"i don't want something
 # too tight and arms naturally taper"*. A constant radius binds at the elbow end and
 # gaps at the wrist, and over 144 mm of forearm the taper is real — several mm of radius.
@@ -951,7 +952,7 @@ SLEEVE_Y0, SLEEVE_Y1 = 8.0, 152.0
 # ★ Yaw is about Z, so it costs nothing geometrically: the cone stays tangent to the
 # mounting plane at exactly the same height, and every horizontal cut below still lands
 # where it did. Only the crown LINE swings.
-SLEEVE_YAW = 20.0
+SLEEVE_YAW = -20.0
 SLEEVE_Z_C = MOUNT_Z - ARM_R_WRIST   # crown on the mounting plane at the wrist end
 STRAP_W, STRAP_T = 26.0, 4.0  # 25 mm webbing through a 26 x 4 slot
 STRAP_AT = (0.12, 0.83)       # two straps, as a fraction ALONG the sleeve axis
@@ -977,20 +978,44 @@ STRAP_FRAC = 0.35             # slot height above the axis, as a fraction of the
 # instead of intersecting it. Loft those sections along the arm, subtract the arm, then
 # subtract the housing. What is left grew out of the housing's own silhouette.
 ORGANIC = True
+# ★★ SCREEN TILT. His call: ~10 deg from port to starboard so the screen faces him at
+# rest. It is built as THICKNESS IN THE PORT SIDE of the cuff, not as a rotation of the
+# housing — the housing's mounting face stays flat and horizontal in this file, and the
+# ARM sits offset to starboard underneath it. Wedge on port, thin on starboard.
+# ⚠️ Offsetting the arm to STARBOARD is what thickens PORT. Getting that backwards gives
+# a cuff that tilts the screen away from him, which looks identical in a render.
+SCREEN_TILT = 10.0
 
 
 def _organic(a: Vector, b: Vector) -> Part:
+    """★ The cuff FLARES into the housing's underside; it does not envelop it.
+
+    ⚠️ The first version hulled the arm circle with the PACK TUBE's circle, which made
+    the cuff wrap around the tube — "nothing should cover the fronts of the housing".
+    It also had to cut into the housing to keep a clean semi-cylinder, which is the same
+    fault seen from the other side. Now the hull is the arm circle with a THIN BAR at the
+    mounting plane, the width of the flat band the housing actually sits on. That gives a
+    section round at the bottom and flared to the housing's width at the top — it meets
+    the bottom and flows, and never rises past it.
+    """
     secs = []
-    n = 5
+    n = 7
     for i in range(n):
         t = i / (n - 1)
         c = a + (b - a) * t
         r = ARM_R_WRIST + t * (ARM_R_ELBOW - ARM_R_WRIST) + SLEEVE_WALL
-        pl = Plane(origin=Vector(c.X, c.Y, c.Z), z_dir=(b - a).normalized())
-        # the arm, and the pack tube where it runs alongside on PORT
+        # ⚠️ PIN THE PLANE'S LOCAL AXES. Plane(z_dir=...) alone lets build123d choose its
+        # own x/y, so "up" in the section is not global Z — the flare was being placed
+        # sideways and changing its width did nothing at all. x_dir horizontal and
+        # perpendicular to the arm makes local Y point (near enough) up.
+        ax = (b - a).normalized()
+        xd = Vector(0, 0, 1).cross(ax).normalized()
+        pl = Plane(origin=Vector(c.X, c.Y, c.Z), z_dir=ax, x_dir=xd)
         arm = pl * Circle(r)
-        tube = pl * Pos((TUBE_X - c.X) * 0.55, (TUBE_Z - c.Z) * 0.55) * Circle(TUBE_R + 1.0)
-        secs.append(make_hull((arm + tube).edges()))
+        # the flare: a thin bar up at the mounting plane, as wide as the flat band
+        lift = MOUNT_Z - c.Z
+        flare = pl * Pos(0, lift - 1.0) * Rectangle(MOUNT_BAND, 2.0)
+        secs.append(make_hull((arm + flare).edges()))
     body = loft(secs)
     # hollow it: the arm bore, then everything above the crown, then the housing itself
     inner = []
@@ -1025,8 +1050,10 @@ def sleeve() -> Part:
         py = (SLEEVE_Y0 + SLEEVE_Y1) / 2
         dx, dy = v.X, v.Y - py
         return Vector(dx * c - dy * sn, py + dx * sn + dy * c, v.Z)
-    a = _yaw(Vector(0, SLEEVE_Y0, MOUNT_Z - ARM_R_WRIST))
-    b = _yaw(Vector(0, SLEEVE_Y1, MOUNT_Z - ARM_R_ELBOW))
+    dx_w = ARM_R_WRIST * math.sin(math.radians(SCREEN_TILT))
+    dx_e = ARM_R_ELBOW * math.sin(math.radians(SCREEN_TILT))
+    a = _yaw(Vector(dx_w, SLEEVE_Y0, MOUNT_Z - ARM_R_WRIST * math.cos(math.radians(SCREEN_TILT))))
+    b = _yaw(Vector(dx_e, SLEEVE_Y1, MOUNT_Z - ARM_R_ELBOW * math.cos(math.radians(SCREEN_TILT))))
     if ORGANIC:
         return _organic(a, b)
     axis = (b - a).normalized()
