@@ -34,6 +34,18 @@ import kotlinx.coroutines.Dispatchers
 object Roam {
     lateinit var settings: Settings
         private set
+
+    /**
+     * ★ Where the hub is and how we prove we may talk to it — the one instance, exposed
+     * rather than copied.
+     *
+     * ⚠️ It is read by the shelf's in-app browser, which needs the same bearer token the
+     * REST client and the socket already use. Rebuilding a `HubConfig` there from
+     * `BuildConfig` would be a second copy of a shared secret and a second place to change
+     * the address; both would then be free to drift from this one.
+     */
+    lateinit var hub: HubConfig
+        private set
     lateinit var repository: HubRepository
         private set
     lateinit var device: DeviceStateMonitor
@@ -85,6 +97,7 @@ object Roam {
             port = BuildConfig.HUB_PORT,
             token = BuildConfig.HUB_TOKEN,
         )
+        hub = config
         val client = HubApi.defaultClient()
         val api = HubApi(config, client)
         repository = HubRepository(api, HubSocket(config, client), settings)

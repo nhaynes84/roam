@@ -34,6 +34,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.roam.touch.apps.AppShelf
 import com.roam.touch.channels.Roam
 import com.roam.touch.channels.controls.ControlAction
 import com.roam.touch.channels.controls.ControlSurface
@@ -65,7 +66,21 @@ fun installChannelsUi(activity: ComponentActivity) {
  * [BackToChannelsBar] and [NavRail]. There is no nav stack and no navigation library,
  * because there are three destinations and a wearer who must never be lost in one of them.
  */
-enum class Screen { Channels, Apps, HomeAssistant, Controls }
+enum class Screen {
+    Channels,
+    Apps,
+    HomeAssistant,
+    Controls,
+
+    /**
+     * ★ The hub's own pages, drawn in-app — see [HubBrowserScreen].
+     *
+     * ⚠️ Not on the rail, and that is deliberate: it is not a destination, it is what a
+     * shelf tile opens. It is reached from [Apps] and returns there, which is why it is the
+     * one screen [Nav.back] treats separately.
+     */
+    HubBrowser,
+}
 
 /**
  * ★★ The panel: a nav rail, and beside it the thing he is reading.
@@ -97,6 +112,13 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
     var screen by rememberSaveable { mutableStateOf(Screen.Channels) }
     var openPane by rememberSaveable { mutableStateOf<String?>(null) }
     var toast by remember { mutableStateOf<Toast?>(null) }
+
+    // ★ Which hub page the browser is showing, as a URL and a label.
+    //
+    // ⚠️ Saveable, for the same reason `screen` is: a configuration change must not drop
+    // him out of a folder he is reading. Only the address is kept — the token is never
+    // part of it, so nothing here can end up in a saved instance state bundle.
+    var hubPage by rememberSaveable { mutableStateOf<Pair<String, String>?>(null) }
 
     // ★★ The message he is reading in full, by id.
     //
@@ -185,6 +207,11 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
         // of having both. The precedence itself lives in [Nav.back].
         when (Nav.back(readingEventId != null, screen, openPane != null)) {
             Back.CloseReader -> readingEventId = null
+            // ⚠️ Back to the shelf he tapped the tile on, not to Channels. In practice
+            // [HubBrowserScreen] installs its own handler and walks the page's history
+            // first, so this fires only once there is nowhere left to go back to — or if
+            // the WebView never came up at all, which is exactly when a way out matters.
+            Back.CloseHubBrowser -> { hubPage = null; screen = Screen.Apps }
             Back.CloseDetour -> screen = Screen.Channels
             Back.CloseThread -> { openPane = null; vm.stopSpeaking(); vm.pttCancel() }
             null -> Unit
@@ -356,8 +383,32 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
                 Screen.Apps -> AppsScreen(
                     onBack = { screen = Screen.Channels },
                     onOpenHomeAssistant = { screen = Screen.HomeAssistant },
+                    onOpenHub = { url, label ->
+                        hubPage = url to label
+                        screen = Screen.HubBrowser
+                    },
                     onMessage = { vm.notify(it) },
                 )
+
+                // ★ The hub's pages, in-app, with the token on the request rather than in
+                // the URL. `base` and `token` both come from the one hub configuration
+                // built in [Roam.init]; there is no second copy of either.
+                Screen.HubBrowser -> {
+                    val page = hubPage
+                    if (page == null) {
+                        // Nothing to show means nothing was opened — go back rather than
+                        // draw an empty frame he has to work out how to leave.
+                        LaunchedEffect(Unit) { screen = Screen.Apps }
+                    } else {
+                        HubBrowserScreen(
+                            url = page.first,
+                            title = page.second,
+                            token = Roam.hub.token,
+                            base = AppShelf.HUB_BASE,
+                            onBack = { hubPage = null; screen = Screen.Apps },
+                        )
+                    }
+                }
 
                 Screen.HomeAssistant -> HomeAssistantScreen(
                     home = haHome,

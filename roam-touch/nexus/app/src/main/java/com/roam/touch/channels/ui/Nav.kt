@@ -33,6 +33,17 @@ enum class Pane {
 /** What a Back press should do next. `null` means nothing is stacked — leave it to the system. */
 enum class Back {
     CloseReader,
+
+    /**
+     * ★ The hub browser unwinds to the **shelf**, not to Channels.
+     *
+     * ⚠️ It is the one detour that was opened from another detour, so the general rule
+     * would put him two steps back in one press — he tapped Files from the shelf and would
+     * land in Channels, with no indication that the shelf was ever there. Everything else
+     * is reached from the rail, which is on screen everywhere, so for those one step out
+     * *is* the way he came in.
+     */
+    CloseHubBrowser,
     CloseDetour,
     CloseThread,
 }
@@ -62,6 +73,10 @@ object Nav {
      */
     fun back(reading: Boolean, screen: Screen, hasOpenPane: Boolean): Back? = when {
         reading -> Back.CloseReader
+        // ⚠️ Above the general detour rule, not folded into it: the browser is the only
+        // screen reached *from* another screen, so it is the only one whose one step back
+        // is not Channels. See [Back.CloseHubBrowser].
+        screen == Screen.HubBrowser -> Back.CloseHubBrowser
         screen != Screen.Channels -> Back.CloseDetour
         hasOpenPane -> Back.CloseThread
         else -> null

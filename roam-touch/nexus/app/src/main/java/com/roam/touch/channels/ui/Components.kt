@@ -158,6 +158,13 @@ fun BackToChannelsBar(
     title: String,
     onBack: () -> Unit,
     trailing: @Composable (() -> Unit)? = null,
+    /**
+     * ⚠️ Where Back actually goes, and it must be the truth. Every screen but one returns
+     * to Channels, so that is the default; the hub browser is opened from the shelf and
+     * returns to the shelf, and a button that names a destination it does not go to is
+     * worse than a bare chevron on a device strapped to an arm.
+     */
+    backLabel: String = "CHANNELS",
 ) {
     Row(
         Modifier
@@ -179,12 +186,12 @@ fun BackToChannelsBar(
         ) {
             Icon(
                 imageVector = Icons.Filled.ArrowBack,
-                contentDescription = "back to channels",
+                contentDescription = "back to ${backLabel.lowercase()}",
                 tint = RoamColors.Attention,
                 modifier = Modifier.size(19.dp),
             )
             Text(
-                "CHANNELS",
+                backLabel,
                 style = androidx.compose.material3.MaterialTheme.typography.labelMedium,
                 color = RoamColors.Attention,
             )
