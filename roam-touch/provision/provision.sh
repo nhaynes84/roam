@@ -627,6 +627,19 @@ step_settings() {
   # infinite, because the bracer will get bumped and left face-up.
   set_system screen_off_timeout 1800000 "30 min screen timeout"
 
+  # ★★ LOCK THE WHOLE DEVICE TO reverseLandscape. Nexus locks its own activity
+  # (screenOrientation="reverseLandscape" in the manifest), but that only holds while
+  # you are IN Nexus — the moment a tile launches Chrome or Settings, the accelerometer
+  # takes over and a device strapped to a forearm ends up sideways. Found 2026-08-14
+  # when the app-tray tiles shipped: "chrome works, same issue, need locked to landscape
+  # for everything".
+  # ⚠️ This is a DEVICE setting, not something the app enforces — so if the orientation
+  # ever comes unstuck, the cause is here and not in Kotlin. 3 = ROTATION_270, which is
+  # what reverseLandscape resolves to; it must match the manifest or the device and the
+  # app will disagree by 180 degrees.
+  set_system accelerometer_rotation 0 "no auto-rotate: it is worn, not held"
+  set_system user_rotation 3 "reverseLandscape (270), matching Nexus's manifest"
+
   # Sanity, not configuration: these should already be true and it costs nothing
   # to notice if a reflash left them otherwise.
   [ "$(gset global adb_enabled)" = "1" ] || bad "adb_enabled is not 1 (how are we even talking?)"
