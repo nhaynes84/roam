@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<!--
+  ROAM Touch hub -- file browser.
+
+  ⚠️ THE CLIENT IS CHROME 74 (2019) ON A PIXEL 1, signature-pinned with no Play
+  Store on the device: it cannot be updated, ever. So, in this file and stl.html:
+    * no optional chaining (?.), no nullish coalescing (??) -- both Chrome 80
+    * no class fields, no top-level await, no String.replaceAll, no Array.at
+    * no :has(), no container queries, and NO `gap` in flexbox (Chrome 84).
+      `grid-gap` on a grid is fine (Chrome 66) and is what is used below.
+  Verified by parsing the script blocks with acorn at ecmaVersion 2019, which
+  rejects all of the above -- see tests/test_files_api.py. Do not "modernise".
+
+  Touch targets are 44px+ because this is read at arm's length on a wrist.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<title>Collab</title>
+<style>
+  :root {
+    --bg: #101215;
+    --panel: #191d22;
+    --line: #2a3037;
+    --ink: #e6e9ed;
+    --dim: #8b949e;
+    --accent: #58a6ff;
+    --ok: #3fb950;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: rgba(88,166,255,.2); }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.45 -apple-system, "Roboto", "Helvetica Neue", Arial, sans-serif;
+    padding-bottom: 72px;
+  }
+  header {
+    position: sticky; top: 0; z-index: 5; background: var(--panel);
+    border-bottom: 1px solid var(--line); padding: 10px 12px;
+  }
+  h1 { margin: 0 0 6px; font-size: 15px; font-weight: 600; letter-spacing: .01em; }
+  .crumbs { font-size: 13px; color: var(--dim); word-break: break-all; }
+  .crumbs a { color: var(--accent); text-decoration: none; }
+  .crumbs span.sep { color: var(--line); margin: 0 4px; }
+  main { padding: 10px; }
+  .grid {
+    display: grid; grid-gap: 10px;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  }
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    overflow: hidden; display: block;
+  }
+  .hit {
+    display: block; min-height: 44px; padding: 10px; color: inherit;
+    text-decoration: none;
+  }
+  .thumb {
+    width: 100%; height: 108px; background: #0b0d10 center/cover no-repeat;
+    display: block; border-bottom: 1px solid var(--line);
+  }
+  .glyph {
+    width: 100%; height: 108px; display: flex; align-items: center;
+    justify-content: center; font-size: 34px; color: var(--dim);
+    background: #0b0d10; border-bottom: 1px solid var(--line);
+  }
+  .name { font-size: 13px; word-break: break-all; }
+  .meta { font-size: 11px; color: var(--dim); margin-top: 3px; }
+  .row { display: flex; border-top: 1px solid var(--line); }
+  .row button, .row a.btn {
+    flex: 1 1 0; min-height: 44px; border: 0; background: transparent;
+    color: var(--accent); font: inherit; font-size: 13px; cursor: pointer;
+    text-align: center; text-decoration: none; padding: 12px 4px;
+  }
+  .row button + button, .row button + a.btn, .row a.btn + button {
+    border-left: 1px solid var(--line);
+  }
+  .row button[disabled] { color: var(--dim); }
+  .empty { color: var(--dim); padding: 24px 6px; text-align: center; }
+  #toast {
+    position: fixed; left: 12px; right: 12px; bottom: 12px; z-index: 10;
+    background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--ok);
+    border-radius: 8px; padding: 12px 14px; font-size: 13px;
+    transform: translateY(140%); transition: transform .18s ease-out;
+  }
+  #toast.show { transform: translateY(0); }
+  #toast.bad { border-left-color: #f85149; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Collab</h1>
+  <div class="crumbs" id="crumbs"></div>
+</header>
+<main>
+  <div class="grid" id="grid"></div>
+  <div class="empty" id="empty" hidden>Nothing here.</div>
+</main>
+<div id="toast"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  var TOKEN = "__ROAM_TOKEN__";
+  var q = function (name, value) {
+    return encodeURIComponent(name) + "=" + encodeURIComponent(value);
+  };
+  var api = function (path, params) {
+    var url = path + "?" + q("token", TOKEN);
+    for (var key in params) {
+      if (Object.prototype.hasOwnProperty.call(params, key)) {
+        url += "&" + q(key, params[key]);
+      }
+    }
+    return url;
+  };
+
+  var grid = document.getElementById("grid");
+  var crumbs = document.getElementById("crumbs");
+  var empty = document.getElementById("empty");
+  var toastEl = document.getElementById("toast");
+  var toastTimer = 0;
+
+  function toast(message, bad) {
+    toastEl.textContent = message;
+    toastEl.className = bad ? "show bad" : "show";
+    if (toastTimer) { clearTimeout(toastTimer); }
+    toastTimer = setTimeout(function () { toastEl.className = ""; }, 3200);
+  }
+
+  function humanSize(bytes) {
+    if (!bytes) { return ""; }
+    var units = ["B", "KB", "MB", "GB"];
+    var i = 0;
+    var n = bytes;
+    while (n >= 1024 && i < units.length - 1) { n = n / 1024; i++; }
+    return (i === 0 ? n : n.toFixed(1)) + " " + units[i];
+  }
+
+  var GLYPHS = { dir: "▶", image: "▣", mesh: "⬡", cad: "◇", file: "—" };
+
+  function currentPath() {
+    // No URLSearchParams gymnastics: the hash is the whole state, so back and
+    // forward work and a folder can be bookmarked.
+    var raw = window.location.hash.replace(/^#/, "");
+    try { return decodeURIComponent(raw); } catch (e) { return ""; }
+  }
+
+  function go(path) {
+    window.location.hash = encodeURIComponent(path);
+  }
+
+  function renderCrumbs(path) {
+    crumbs.innerHTML = "";
+    var parts = path ? path.split("/") : [];
+    var link = document.createElement("a");
+    link.href = "#";
+    link.textContent = "Collab";
+    crumbs.appendChild(link);
+    var acc = "";
+    for (var i = 0; i < parts.length; i++) {
+      acc = acc ? acc + "/" + parts[i] : parts[i];
+      var sep = document.createElement("span");
+      sep.className = "sep";
+      sep.textContent = "/";
+      crumbs.appendChild(sep);
+      var a = document.createElement("a");
+      a.href = "#" + encodeURIComponent(acc);
+      a.textContent = parts[i];
+      crumbs.appendChild(a);
+    }
+  }
+
+  function shareFile(path, button) {
+    button.disabled = true;
+    var original = button.textContent;
+    button.textContent = "Sharing…";
+    fetch("/share", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + TOKEN },
+      body: JSON.stringify({ path: path })
+    }).then(function (response) {
+      return response.json().then(function (body) {
+        return { ok: response.ok, body: body };
+      });
+    }).then(function (result) {
+      if (result.ok) {
+        toast("Sent to Claude: " + result.body.name, false);
+        button.textContent = "Sent ✓";
+      } else {
+        toast(result.body.detail || "Share failed", true);
+        button.textContent = original;
+        button.disabled = false;
+      }
+    }).catch(function () {
+      toast("Share failed", true);
+      button.textContent = original;
+      button.disabled = false;
+    });
+  }
+
+  function makeCard(entry) {
+    var card = document.createElement("div");
+    card.className = "card";
+
+    var head;
+    if (entry.kind === "dir") {
+      head = document.createElement("a");
+      head.href = "#" + encodeURIComponent(entry.path);
+    } else {
+      head = document.createElement("div");
+    }
+
+    if (entry.kind === "image") {
+      var thumb = document.createElement("a");
+      thumb.className = "thumb";
+      thumb.href = api("/files/raw", { path: entry.path });
+      thumb.style.backgroundImage =
+        "url('" + api("/files/thumb", { path: entry.path }) + "')";
+      card.appendChild(thumb);
+    } else {
+      var glyph = document.createElement("div");
+      glyph.className = "glyph";
+      glyph.textContent = GLYPHS[entry.kind] || GLYPHS.file;
+      if (entry.kind === "dir") {
+        var wrap = document.createElement("a");
+        wrap.href = "#" + encodeURIComponent(entry.path);
+        wrap.appendChild(glyph);
+        card.appendChild(wrap);
+      } else {
+        card.appendChild(glyph);
+      }
+    }
+
+    head.className = "hit";
+    var name = document.createElement("div");
+    name.className = "name";
+    name.textContent = entry.name;
+    head.appendChild(name);
+    var meta = document.createElement("div");
+    meta.className = "meta";
+    if (entry.missing) {
+      meta.textContent = "missing on disk";
+    } else if (entry.kind === "dir") {
+      meta.textContent = "folder";
+    } else {
+      meta.textContent = humanSize(entry.size);
+      if (entry.kind === "cad" && !entry.mesh_path) {
+        meta.textContent += " · no mesh";
+      }
+    }
+    head.appendChild(meta);
+    card.appendChild(head);
+
+    if (entry.kind !== "dir" && !entry.missing) {
+      var row = document.createElement("div");
+      row.className = "row";
+      // ★ STL only. A .step needs a real CAD kernel to tessellate, so what is
+      // offered is the .stl the build pipeline drops beside it -- and when
+      // there is not one, nothing is offered rather than a button that fails.
+      var meshPath = entry.kind === "mesh" ? entry.path : entry.mesh_path;
+      if (meshPath) {
+        var view = document.createElement("a");
+        view.className = "btn";
+        view.href = api("/view/stl", { path: meshPath });
+        view.textContent = "3D";
+        row.appendChild(view);
+      }
+      var share = document.createElement("button");
+      share.type = "button";
+      share.textContent = "Share";
+      share.addEventListener("click", function () { shareFile(entry.path, share); });
+      row.appendChild(share);
+      card.appendChild(row);
+    }
+    return card;
+  }
+
+  function load() {
+    var path = currentPath();
+    renderCrumbs(path);
+    grid.innerHTML = "";
+    empty.hidden = true;
+    fetch(api("/files", { path: path }), {
+      headers: { "Authorization": "Bearer " + TOKEN }
+    }).then(function (response) {
+      if (!response.ok) { throw new Error("HTTP " + response.status); }
+      return response.json();
+    }).then(function (data) {
+      var entries = data.entries || [];
+      if (!entries.length) { empty.hidden = false; return; }
+      for (var i = 0; i < entries.length; i++) {
+        grid.appendChild(makeCard(entries[i]));
+      }
+    }).catch(function (err) {
+      empty.hidden = false;
+      empty.textContent = "Could not list that folder (" + err.message + ").";
+    });
+  }
+
+  window.addEventListener("hashchange", load);
+  load();
+})();
+</script>
+</body>
+</html>

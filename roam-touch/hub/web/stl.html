@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<!--
+  ROAM Touch hub -- STL viewer.
+
+  ⚠️ CHROME 74 (2019), PIXEL 1, cannot be updated. See browse.html for the full
+  list; the short version is no ?. / ?? / class fields, and no `gap` in flexbox.
+  three.js is pinned at **r112** (Jan 2020) for the same reason: the modern
+  builds are ES2020 modules this engine cannot even parse. The r112 UMD build,
+  STLLoader and OrbitControls are all vendored in web/vendor/ and verified to
+  parse at ecmaVersion 2019 by tests/test_files_api.py.
+
+  ★ STL only, deliberately. The CAD folders are mostly .step -- a b-rep format
+  that needs an OCCT-class kernel to tessellate, which is not something to
+  attempt in a phone browser. The build pipeline emits an .stl beside each
+  .step; that is what this renders.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<title>STL</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: rgba(88,166,255,.2); }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: #101215; color: #e6e9ed; overflow: hidden;
+    font: 14px/1.4 -apple-system, "Roboto", "Helvetica Neue", Arial, sans-serif;
+  }
+  #stage { position: absolute; top: 0; left: 0; right: 0; bottom: 0; }
+  #stage canvas { display: block; touch-action: none; }
+  header {
+    position: absolute; top: 0; left: 0; right: 0; z-index: 3;
+    background: rgba(16,18,21,.86); border-bottom: 1px solid #2a3037;
+    padding: 9px 12px; display: flex; align-items: center;
+  }
+  header a {
+    color: #58a6ff; text-decoration: none; font-size: 20px; line-height: 1;
+    min-width: 44px; min-height: 44px; display: flex; align-items: center;
+  }
+  header .title {
+    flex: 1 1 auto; font-size: 13px; word-break: break-all; margin-right: 8px;
+  }
+  header .sub { color: #8b949e; font-size: 11px; }
+  #status {
+    position: absolute; left: 0; right: 0; top: 50%; z-index: 2;
+    transform: translateY(-50%); text-align: center; color: #8b949e;
+    padding: 0 24px;
+  }
+  #status.bad { color: #f85149; }
+  footer {
+    position: absolute; left: 0; right: 0; bottom: 0; z-index: 3;
+    background: rgba(16,18,21,.86); border-top: 1px solid #2a3037;
+    display: flex;
+  }
+  footer button {
+    flex: 1 1 0; min-height: 48px; border: 0; border-right: 1px solid #2a3037;
+    background: transparent; color: #58a6ff; font: inherit; font-size: 13px;
+  }
+  footer button:last-child { border-right: 0; }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<header>
+  <a id="back" href="#" title="Back">‹</a>
+  <div class="title"><div id="name">—</div><div class="sub" id="sub"></div></div>
+</header>
+<div id="status">Loading…</div>
+<footer>
+  <button type="button" id="reset">Reset view</button>
+  <button type="button" id="wire">Wireframe</button>
+  <button type="button" id="share">Share</button>
+</footer>
+
+<script src="__VENDOR__/three.min.js"></script>
+<script src="__VENDOR__/STLLoader.js"></script>
+<script src="__VENDOR__/OrbitControls.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  var TOKEN = "__ROAM_TOKEN__";
+  var PATH = "__MODEL_PATH__";
+
+  var statusEl = document.getElementById("status");
+  var stage = document.getElementById("stage");
+
+  function fail(message) {
+    statusEl.className = "bad";
+    statusEl.textContent = message;
+  }
+
+  document.getElementById("name").textContent =
+    PATH.split("/").pop() || PATH;
+  document.getElementById("back").href =
+    "/browse?token=" + encodeURIComponent(TOKEN) +
+    "#" + encodeURIComponent(PATH.replace(/\/[^\/]*$/, ""));
+
+  if (typeof THREE === "undefined") {
+    fail("3D library did not load.");
+    return;
+  }
+  // A Pixel 1 has WebGL 1; r112 asks for that anyway. Say so plainly rather
+  // than throwing a black rectangle at him.
+  var probe = document.createElement("canvas");
+  var supported = !!(probe.getContext("webgl") || probe.getContext("experimental-webgl"));
+  if (!supported) {
+    fail("This browser has no WebGL, so the model cannot be drawn.");
+    return;
+  }
+
+  var renderer = new THREE.WebGLRenderer({ antialias: false });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  stage.appendChild(renderer.domElement);
+
+  var scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x101215);
+
+  var camera = new THREE.PerspectiveCamera(
+    45, window.innerWidth / Math.max(window.innerHeight, 1), 0.1, 100000
+  );
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.45));
+  var key = new THREE.DirectionalLight(0xffffff, 0.75);
+  key.position.set(1, 1.4, 1);
+  scene.add(key);
+  var fill = new THREE.DirectionalLight(0x8899bb, 0.35);
+  fill.position.set(-1, -0.6, -0.8);
+  scene.add(fill);
+
+  var controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.12;
+  controls.rotateSpeed = 0.6;
+
+  var material = new THREE.MeshPhongMaterial({
+    color: 0xb9c4d0, specular: 0x222222, shininess: 24,
+    side: THREE.DoubleSide
+  });
+  var mesh = null;
+  var home = { position: new THREE.Vector3(), target: new THREE.Vector3() };
+
+  function frameObject(object) {
+    // Fit the camera to the bounding sphere, then remember it as "home" so
+    // Reset always means the view he first saw, whatever he did since.
+    var box = new THREE.Box3().setFromObject(object);
+    var size = box.getSize(new THREE.Vector3());
+    var centre = box.getCenter(new THREE.Vector3());
+    var radius = Math.max(size.x, size.y, size.z) * 0.5 || 1;
+    var distance = radius / Math.sin((camera.fov * Math.PI / 180) / 2) * 1.35;
+
+    camera.near = Math.max(radius / 1000, 0.01);
+    camera.far = distance + radius * 12;
+    camera.updateProjectionMatrix();
+    camera.position.set(
+      centre.x + distance * 0.72,
+      centre.y - distance * 0.62,
+      centre.z + distance * 0.55
+    );
+    camera.up.set(0, 0, 1);          // CAD is Z-up; the default Y-up looks wrong
+    controls.target.copy(centre);
+    controls.update();
+    home.position.copy(camera.position);
+    home.target.copy(centre);
+
+    document.getElementById("sub").textContent =
+      size.x.toFixed(1) + " × " + size.y.toFixed(1) + " × " + size.z.toFixed(1) + " mm";
+  }
+
+  var loader = new THREE.STLLoader();
+  var url = "/files/raw?path=" + encodeURIComponent(PATH) +
+            "&token=" + encodeURIComponent(TOKEN);
+
+  loader.load(url, function (geometry) {
+    if (!geometry.attributes || !geometry.attributes.normal) {
+      geometry.computeVertexNormals();
+    }
+    mesh = new THREE.Mesh(geometry, material);
+    scene.add(mesh);
+    frameObject(mesh);
+    statusEl.textContent = "";
+    statusEl.style.display = "none";
+  }, function (progress) {
+    if (progress && progress.lengthComputable && progress.total) {
+      var pct = Math.round(progress.loaded / progress.total * 100);
+      statusEl.textContent = "Loading… " + pct + "%";
+    }
+  }, function () {
+    fail("Could not load that STL.");
+  });
+
+  document.getElementById("reset").addEventListener("click", function () {
+    camera.position.copy(home.position);
+    controls.target.copy(home.target);
+    controls.update();
+  });
+
+  var wireframe = false;
+  document.getElementById("wire").addEventListener("click", function () {
+    wireframe = !wireframe;
+    material.wireframe = wireframe;
+  });
+
+  document.getElementById("share").addEventListener("click", function () {
+    var button = this;
+    button.disabled = true;
+    button.textContent = "Sharing…";
+    fetch("/share", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + TOKEN },
+      body: JSON.stringify({ path: PATH })
+    }).then(function (response) {
+      button.textContent = response.ok ? "Sent ✓" : "Failed";
+      button.disabled = !response.ok;
+    }).catch(function () {
+      button.textContent = "Failed";
+      button.disabled = false;
+    });
+  });
+
+  window.addEventListener("resize", function () {
+    camera.aspect = window.innerWidth / Math.max(window.innerHeight, 1);
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  (function animate() {
+    requestAnimationFrame(animate);
+    controls.update();
+    renderer.render(scene, camera);
+  })();
+})();
+</script>
+</body>
+</html>

@@ -911,25 +911,67 @@ def pack_bore() -> Part:
 # ★ the mounting plane IS the rail top — the flat band the probe found running
 # X −36..+34 at this Z, which is the only continuous flat on the underside.
 MOUNT_Z = RAIL_TOP
-ARM_R = 45.0                  # inner radius: forearm + the comfort layer he adds
+# ★★ THE SLEEVE IS A TILTED CONE, NOT A CYLINDER. His call: *"i don't want something
+# too tight and arms naturally taper"*. A constant radius binds at the elbow end and
+# gaps at the wrist, and over 144 mm of forearm the taper is real — several mm of radius.
+# ⚠️ AND THE AXIS HAS TO SLOPE. The arm's crown stays against the mounting plane for the
+# whole length (that is what buys zero standoff), so as the radius grows toward the elbow
+# the arm's CENTRE drops further below that plane. Axis from (MOUNT_Z − R_WRIST) at Y0 to
+# (MOUNT_Z − R_ELBOW) at Y1. A horizontal axis would lift the crown off the plane at one
+# end and bury it at the other.
+# ⚠️⚠️ THESE TWO NUMBERS ARE PLACEHOLDERS — deliberately generous, not measured. Owner:
+# *"that's a fitment dance we can do later."* They are the ONLY things to change when it
+# happens; everything below is derived. Sized loose on purpose: include the comfort layer
+# he adds under the velcro, and err large — a sleeve that is slightly loose is strapped
+# down, one that is tight is a reprint.
+ARM_R_WRIST = 40.0            # Y0 end — points at the WRIST (USB/cap end)
+ARM_R_ELBOW = 50.0            # Y1 end — points at the ELBOW (jack end)
+ARM_R = ARM_R_WRIST           # kept for anything that wants one number
 SLEEVE_WALL = 3.0
 SLEEVE_Y0, SLEEVE_Y1 = 8.0, 152.0
-SLEEVE_Z_C = MOUNT_Z - ARM_R  # arm crown touches the mounting plane -> zero standoff
+SLEEVE_Z_C = MOUNT_Z - ARM_R_WRIST   # crown on the mounting plane at the wrist end
 STRAP_W, STRAP_T = 26.0, 4.0  # 25 mm webbing through a 26 x 4 slot
 STRAP_Y = (24.0, 128.0)       # two straps, one near each end
-STRAP_Z = 30.0                # slot height above the arm centre — near the open edge
+# ★★ HOW FAR ROUND THE SLEEVE WRAPS — the one real shape decision, exposed as a number.
+# The inner cone is TANGENT to the mounting plane (that is what gives zero standoff), so
+# where you cut decides everything:
+# ⚠️ IT KEEPS THE TOP HALF — it is a HOOD OVER the arm, not a trough under it. The arm
+# comes UP into it from below and the straps close underneath. I built it the other way
+# first and then could not explain why the part floated 40 mm below the housing held by
+# nothing: keeping the lower half puts the material where the arm has to pass.
+#   0.0  cut at the crown -> nothing left
+#   1.0  cut at the axis  -> a true 180° hood, meeting the housing along the crown
+# Anything less than 1.0 is a partial hood that grips further round the arm.
+SLEEVE_OPEN = 1.0
+STRAP_FRAC = 0.35             # slot height above the axis, as a fraction of the local radius
 
 
 def sleeve() -> Part:
     """★ Half-circle arm sleeve, cut against the housing so it mates flush."""
-    ln = SLEEVE_Y1 - SLEEVE_Y0
-    shell = (Pos(0, SLEEVE_Y0, SLEEVE_Z_C) * Rot(-90, 0, 0)
-             * Cylinder(ARM_R + SLEEVE_WALL, ln, align=(Align.CENTER, Align.CENTER, Align.MIN)))
-    shell -= (Pos(0, SLEEVE_Y0 - EPS, SLEEVE_Z_C) * Rot(-90, 0, 0)
-              * Cylinder(ARM_R, ln + 2 * EPS, align=(Align.CENTER, Align.CENTER, Align.MIN)))
-    # ★ everything above the arm's crown is the housing's job, not the sleeve's
-    shell -= Pos(0, SLEEVE_Y0 - EPS, MOUNT_Z) * Box(
-        400, ln + 2 * EPS, 100, align=(Align.CENTER, Align.MIN, Align.MIN))
+    # ★ axis defined by its two END POINTS, so the crown rides the mounting plane the
+    # whole way — same technique as the eStack drum's angled anchor, for the same reason:
+    # a rotation I have to derive is a rotation I get wrong.
+    a = Vector(0, SLEEVE_Y0, MOUNT_Z - ARM_R_WRIST)
+    b = Vector(0, SLEEVE_Y1, MOUNT_Z - ARM_R_ELBOW)
+    axis = (b - a).normalized()
+    ln = (b - a).length
+    pl = Plane(origin=a, z_dir=axis)
+    shell = pl * Cone(ARM_R_WRIST + SLEEVE_WALL, ARM_R_ELBOW + SLEEVE_WALL, ln,
+                      align=(Align.CENTER, Align.CENTER, Align.MIN))
+    shell -= (Plane(origin=a - axis * EPS, z_dir=axis)
+              * Cone(ARM_R_WRIST, ARM_R_ELBOW, ln + 2 * EPS,
+                     align=(Align.CENTER, Align.CENTER, Align.MIN)))
+    # ★ open the sleeve to SLEEVE_OPEN. ⚠️ The box must span Y generously: once the axis
+    # slopes, the cone reaches past SLEEVE_Y1, and a box sized to the nominal length left
+    # a 0.0 cm³ sliver stranded above the plane — two solids, and invisible in a volume.
+    # ★ take the BOTTOM off, not the top: everything below the cut line goes, so what is
+    # left hangs from the housing and is open underneath for the arm.
+    cut_z = MOUNT_Z - SLEEVE_OPEN * ARM_R_WRIST
+    shell -= Pos(0, SLEEVE_Y0 - 60, cut_z - 200) * Box(
+        400, (SLEEVE_Y1 - SLEEVE_Y0) + 160, 200, align=(Align.CENTER, Align.MIN, Align.MIN))
+    # and the wall still pokes above the crown, where the housing lives
+    shell -= Pos(0, SLEEVE_Y0 - 60, MOUNT_Z) * Box(
+        400, (SLEEVE_Y1 - SLEEVE_Y0) + 160, 200, align=(Align.CENTER, Align.MIN, Align.MIN))
     # ★★ cut against the REAL housing — the sleeve conforms to the tube and the rail
     # wherever they intrude, instead of me assuming a flat underside that is not there.
     shell -= build()
@@ -937,10 +979,18 @@ def sleeve() -> Part:
     # around the arm, in the other, and velcros to itself. ⚠️ NOT an annular cut: a band
     # taken right round removes the whole wall and severs the sleeve into three pieces,
     # which is exactly what the first attempt did.
+    # ⚠️ Slots must follow the SLOPED axis and the LOCAL radius. Placed off the wrist
+    # radius alone they miss the wall entirely at the elbow end, where the axis has
+    # already dropped 10 mm and the wall moved 10 mm outboard.
     for sy in STRAP_Y:
+        t = (sy - SLEEVE_Y0) / (SLEEVE_Y1 - SLEEVE_Y0)
+        rl = ARM_R_WRIST + t * (ARM_R_ELBOW - ARM_R_WRIST)
+        zc = MOUNT_Z - rl
+        zs = zc + STRAP_FRAC * rl
+        xw = math.sqrt(max(0.0, rl * rl - (zs - zc) ** 2))   # wall's X at that height
         for sx in (-1, 1):
-            shell -= Pos(sx * (ARM_R + SLEEVE_WALL / 2), sy, SLEEVE_Z_C + STRAP_Z) * Box(
-                2 * SLEEVE_WALL + 8, STRAP_W, STRAP_T,
+            shell -= Pos(sx * xw, sy, zs) * Box(
+                2 * SLEEVE_WALL + 10, STRAP_W, STRAP_T,
                 align=(Align.CENTER, Align.CENTER, Align.CENTER))
     return shell
 

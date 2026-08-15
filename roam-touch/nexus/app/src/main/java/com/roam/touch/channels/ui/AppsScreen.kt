@@ -22,6 +22,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -38,13 +39,14 @@ import androidx.core.graphics.drawable.toBitmap
 import com.roam.touch.apps.AppCatalog
 import com.roam.touch.apps.AppShelf
 import com.roam.touch.apps.AppTile
+import com.roam.touch.apps.TileKind
 
 /**
  * ★ The only route off the home screen.
  *
  * Nexus is the pinned home activity, so before this screen existed there was no way to
- * reach anything else on the phone: press Home, get Channels, forever. Four tiles fix
- * that. It is not an app drawer and must not become one — see [AppShelf].
+ * reach anything else on the phone: press Home, get Channels, forever. A handful of
+ * tiles fix that. It is not an app drawer and must not become one — see [AppShelf].
  */
 @Composable
 fun AppsScreen(
@@ -75,9 +77,12 @@ fun AppsScreen(
                 LauncherTile(
                     tile = tile,
                     onClick = {
+                        // The internal screen is a nav event, not an intent, so it is
+                        // routed here; everything else — package or URL — goes through
+                        // AppCatalog, which never throws back at the home screen.
                         if (tile.id == AppShelf.HOME_ASSISTANT) {
                             onOpenHomeAssistant()
-                        } else if (!AppCatalog.launch(context, tile.id)) {
+                        } else if (!AppCatalog.open(context, tile)) {
                             onMessage("could not start ${tile.label}")
                         }
                     },
@@ -86,7 +91,7 @@ fun AppsScreen(
         }
 
         Text(
-            "installed apps only — this is an appliance, not a phone",
+            "a curated shelf, not an app drawer — this is an appliance, not a phone",
             style = MaterialTheme.typography.bodySmall,
             color = RoamColors.TextSecondary.copy(alpha = 0.6f),
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
@@ -106,8 +111,10 @@ fun AppsScreen(
 @Composable
 private fun LauncherTile(tile: AppTile, onClick: () -> Unit) {
     val context = LocalContext.current
+    // ⚠️ Only a package tile has a package icon. A URL tile's id is a URL, so asking
+    // PackageManager for it would be a guaranteed miss on every recomposition.
     val icon = remember(tile.id) {
-        if (tile.internal) null
+        if (tile.kind != TileKind.PACKAGE) null
         else runCatching {
             AppCatalog.icon(context, tile.id)?.toBitmap(96, 96)?.asImageBitmap()
         }.getOrNull()
@@ -135,7 +142,7 @@ private fun LauncherTile(tile: AppTile, onClick: () -> Unit) {
                         Image(icon, contentDescription = null, modifier = Modifier.size(38.dp))
                     } else {
                         Icon(
-                            Icons.Filled.Home,
+                            if (tile.kind == TileKind.URL) Icons.Filled.Link else Icons.Filled.Home,
                             contentDescription = null,
                             tint = RoamColors.Attention,
                             modifier = Modifier.size(30.dp),
@@ -163,8 +170,15 @@ private fun LauncherTile(tile: AppTile, onClick: () -> Unit) {
             )
         }
         tile.note?.let { note ->
+            // A caution (note without `broken`) must not wear the broken colour: red and
+            // filled is "this will not work", and Chrome's 2019 engine is a warning, not
+            // a failure. Amber and outlined reads as "know this first" instead.
             Spacer(Modifier.height(8.dp))
-            StateChip(note.chip, RoamColors.Alarm, filled = true)
+            StateChip(
+                note.chip,
+                if (note.broken) RoamColors.Alarm else RoamColors.Quiet,
+                filled = note.broken,
+            )
             Spacer(Modifier.height(5.dp))
             Text(
                 note.detail,

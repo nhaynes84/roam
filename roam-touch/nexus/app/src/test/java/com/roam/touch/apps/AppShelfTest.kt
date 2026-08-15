@@ -33,22 +33,36 @@ class AppShelfTest {
     fun `the native home assistant tile is always first`() {
         assertEquals(AppShelf.HOME_ASSISTANT, AppShelf.build(sailfish).first().id)
         // Even on a device with nothing else installed at all.
-        assertEquals(listOf(AppShelf.HOME_ASSISTANT), ids(emptyList()))
+        assertEquals(AppShelf.HOME_ASSISTANT, AppShelf.build(emptyList()).first().id)
     }
 
     @Test
     fun `it is a shelf, not a drawer`() {
         val shelf = AppShelf.build(sailfish)
-        // Chrome, Clock, Phone, Termux:Boot and Nexus itself are all installed and all
-        // stay off. Growth here is a product decision, never an accident.
-        assertTrue("shelf grew to ${shelf.size}", shelf.size <= 6)
+        // Clock, Phone, Termux:Boot and Nexus itself are all installed and all stay off.
+        // Growth here is a product decision, never an accident: this ceiling exists to
+        // make an accidental tile fail the build rather than appear on his wrist.
+        assertTrue("shelf grew to ${shelf.size}", shelf.size <= 9)
         val ids = shelf.map { it.id }
-        assertFalse(ids.contains("com.android.chrome"))
         assertFalse(ids.contains("com.google.android.deskclock"))
+        assertFalse(ids.contains("com.google.android.dialer"))
         assertFalse(ids.contains("com.termux.boot"))
         // ⚠️ Nexus IS the home screen. A tile that re-launches it would look like a way
         // out and be a way back to where you already are.
         assertFalse(ids.contains("com.roam.touch"))
+
+        // ★ The real invariant behind the count: every package tile was named on
+        // purpose. Nothing reaches the shelf just because it is installed.
+        val curated = setOf(
+            "com.termux",
+            "com.tailscale.ipn",
+            "com.android.settings",
+            "com.android.chrome",
+            "io.homeassistant.companion.android",
+            "io.homeassistant.companion.android.minimal",
+        )
+        val fromPackages = shelf.filter { it.kind == TileKind.PACKAGE }.map { it.id }
+        assertTrue("uncurated tile: $fromPackages", curated.containsAll(fromPackages))
     }
 
     @Test
@@ -100,6 +114,10 @@ class AppShelfTest {
                 "com.termux",
                 "com.tailscale.ipn",
                 "com.android.settings",
+                "com.android.chrome",
+                "${AppShelf.HUB_BASE}/browse",
+                "${AppShelf.HUB_BASE}/browse/photos",
+                "${AppShelf.HUB_BASE}/browse/cad",
                 "io.homeassistant.companion.android.minimal",
             ),
             ids,
@@ -110,6 +128,7 @@ class AppShelfTest {
     fun `the native tile launches no package`() {
         val native = AppShelf.build(sailfish).first()
         assertTrue(native.internal)
+        assertEquals(TileKind.INTERNAL, native.kind)
         assertNull(native.note)
     }
 
@@ -121,5 +140,97 @@ class AppShelfTest {
         }
         val tile = AppShelf.build(renamed).single { it.id == "com.tailscale.ipn" }
         assertEquals("Tailscale VPN", tile.label)
+    }
+
+    // ---- Chrome -------------------------------------------------------------------
+
+    @Test
+    fun `chrome warns about its 2019 engine before the tap, but is not broken`() {
+        val chrome = AppShelf.build(sailfish).single { it.id == "com.android.chrome" }
+        val note = chrome.note!!
+
+        // ★ It works — it just cannot render every site. A caution must not be dressed
+        // as a failure, or the one thing that means "do not bother" stops meaning it.
+        assertFalse(note.broken)
+        assertFalse(chrome.broken)
+        assertTrue("reason was: ${note.detail}", note.detail.contains("2019"))
+        assertTrue(note.chip.isNotBlank())
+        assertEquals("search", chrome.subtitle)
+    }
+
+    @Test
+    fun `a caution note does not sink a tile to the bottom`() {
+        val shelf = AppShelf.build(sailfish)
+        val chrome = shelf.indexOfFirst { it.id == "com.android.chrome" }
+        val companion = shelf.indexOfFirst { it.id.startsWith("io.homeassistant.companion") }
+        assertTrue("chrome sank below the broken tile", chrome < companion)
+    }
+
+    // ---- URL tiles ----------------------------------------------------------------
+
+    @Test
+    fun `the hub links are present, in order, with their subtitles`() {
+        val links = AppShelf.build(sailfish).filter { it.kind == TileKind.URL }
+        assertEquals(listOf("Files", "Photos", "CAD"), links.map { it.label })
+        assertEquals(
+            listOf("network drive", "shared album", "models"),
+            links.map { it.subtitle },
+        )
+        assertEquals(
+            listOf(
+                "${AppShelf.HUB_BASE}/browse",
+                "${AppShelf.HUB_BASE}/browse/photos",
+                "${AppShelf.HUB_BASE}/browse/cad",
+            ),
+            links.map { it.id },
+        )
+    }
+
+    @Test
+    fun `the hub address lives in one place and every link is built from it`() {
+        // ★ Change the hub host in build.gradle and all three tiles must follow. If a
+        // literal address is ever pasted into a tile, this fails.
+        val links = AppShelf.build(sailfish).filter { it.kind == TileKind.URL }
+        assertTrue(links.isNotEmpty())
+        assertTrue(links.all { it.id.startsWith("${AppShelf.HUB_BASE}/") })
+        assertFalse("base must not end in a slash", AppShelf.HUB_BASE.endsWith("/"))
+        assertTrue(isLaunchableUrl(AppShelf.HUB_BASE))
+    }
+
+    @Test
+    fun `a link tile is not a package tile and never claims one`() {
+        val links = AppShelf.build(sailfish).filter { it.kind == TileKind.URL }
+        // The id IS the URL, so nothing can ask PackageManager for it by accident and
+        // there is no such thing as a URL tile with a missing URL.
+        assertTrue(links.all { isLaunchableUrl(it.id) })
+        assertTrue(links.none { it.internal })
+        assertTrue(links.none { it.broken })
+    }
+
+    @Test
+    fun `the links are there even on a bare device, because the hub is not the phone`() {
+        // A tile that vanishes when the hub is down changes the shape of the only screen
+        // he can reach from Home. A 404 is a page; a missing tile is a mystery.
+        val bare = AppShelf.build(emptyList())
+        assertEquals(3, bare.count { it.kind == TileKind.URL })
+    }
+
+    @Test
+    fun `only http urls are launchable, so a bad tile cannot fire an arbitrary intent`() {
+        assertTrue(isLaunchableUrl("http://100.67.237.109:8787/browse"))
+        assertTrue(isLaunchableUrl("https://example.org"))
+        // Anything else is refused before it becomes an Intent — the home screen is the
+        // one place where an ActivityNotFoundException costs the device its whole UI.
+        assertFalse(isLaunchableUrl(""))
+        assertFalse(isLaunchableUrl("100.67.237.109:8787/browse"))
+        assertFalse(isLaunchableUrl("file:///sdcard/secret"))
+        assertFalse(isLaunchableUrl("intent://evil#Intent;end"))
+        assertFalse(isLaunchableUrl(AppShelf.HOME_ASSISTANT))
+    }
+
+    @Test
+    fun `every tile id is unique, because the grid keys on it`() {
+        val ids = ids(sailfish)
+        assertEquals(ids.size, ids.toSet().size)
     }
 }

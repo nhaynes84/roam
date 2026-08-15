@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.drawable.Drawable
+import android.net.Uri
 import android.util.Log
 
 /** Same tag the rest of Nexus logs under, so `roam-emu logcat` catches it unchanged. */
@@ -59,5 +60,44 @@ object AppCatalog {
         return runCatching { context.startActivity(intent); true }
             .onFailure { Log.w(TAG, "launch failed: $packageId", it) }
             .getOrDefault(false)
+    }
+
+    /**
+     * Open a URL — the third way a tile can act, alongside a package and an internal
+     * screen.
+     *
+     * ⚠️ No `setPackage("com.android.chrome")`, for the same reason nothing here records
+     * a ComponentName: the browser on this phone is whatever is installed at the time,
+     * and pinning one turns "the shortcut opened somewhere else" into "the shortcut is
+     * dead". ACTION_VIEW asks the system, and the system is never out of date.
+     *
+     * Returns false rather than throwing, and for the same reason [launch] does: with no
+     * browser installed this is an ActivityNotFoundException on the home screen, which
+     * would leave a device-owner phone with no UI at all. Non-http schemes are refused
+     * outright ([isLaunchableUrl]) so a malformed tile cannot fire an arbitrary intent.
+     */
+    fun openUrl(context: Context, url: String): Boolean {
+        if (!isLaunchableUrl(url)) {
+            Log.w(TAG, "refusing to open non-http url: $url")
+            return false
+        }
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return runCatching { context.startActivity(intent); true }
+            .onFailure { Log.w(TAG, "no handler for $url", it) }
+            .getOrDefault(false)
+    }
+
+    /**
+     * Fire a tile. The one place that knows how each [TileKind] is opened.
+     *
+     * [TileKind.INTERNAL] is not handled here — an internal screen is a navigation event
+     * inside this app, not an intent, so the caller owns it. Returning false for it would
+     * read as a failure; it is simply not this object's job.
+     */
+    fun open(context: Context, tile: AppTile): Boolean = when (tile.kind) {
+        TileKind.PACKAGE -> launch(context, tile.id)
+        TileKind.URL -> openUrl(context, tile.id)
+        TileKind.INTERNAL -> false
     }
 }
