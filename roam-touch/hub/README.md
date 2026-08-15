@@ -121,6 +121,41 @@ tail -f ~/Library/Logs/roam-bridge.log
   current latest id, because nobody wants a week of old outcomes on their arm at
   startup.
 
+## The photo bridge (shared album → Claude)
+
+`photo_bridge.py` turns **one Google Photos shared album into Claude's inbox**.
+Put the share link in `photo-album.txt` (gitignored; see `photo-album.txt.example`)
+and anything added to that album lands in `~/.claude/dropzone/inbox/`. The album
+*is* the permission boundary — no per-photo decision, no upload step, and no
+Google account anywhere near this machine.
+
+```bash
+./.venv/bin/python photo_bridge.py --verbose     # one pass, logs to stderr too
+cp com.talos.roam-photos.plist ~/Library/LaunchAgents/   # every 5 min, NOT loaded yet
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.talos.roam-photos.plist
+```
+
+* **Not the Library API.** Google revoked the library-read scopes in March 2025;
+  an OAuth app can only see media it created itself. The public share page needs
+  no credentials at all, which is the whole point. Do not "fix" this back.
+* **How it reads the page**: the item list is in the initial HTML, inside
+  Google's own `AF_initDataCallback({... data:[...] ...})` hydration payload.
+  Plain HTTP and a string-aware bracket scan — no browser, no JS engine.
+* ⚠️ **Never follow the `photos.app.goo.gl` link with a browser User-Agent.** It
+  is a Firebase Dynamic Links interstitial and answers a desktop UA with a 200
+  JS shell that does not contain the destination anywhere. A **HEAD with
+  redirects disabled** answers a clean 302 whose `Location` is the real album.
+* **First run marks only.** Otherwise switching this on drags the whole album
+  into the inbox. An *empty* album is a normal state and still primes; a login
+  wall or an error page is not, and leaves the mark untouched so the next real
+  photo is not skipped.
+* **Dedupe on the media id**, not the URL — the base URLs look rotatable.
+  Full resolution is the base URL plus `=d`.
+* **A file in the dropzone is not context.** The `clip-fetch` prompt hook is
+  what moves `inbox/` into `dropzone/` and names the files to Claude.
+* ⚠️ **EXIF, including GPS and the device model, arrives intact.** Nothing here
+  strips it — that is the owner's call, not a silent default.
+
 ## Where a reply goes
 
 **Reply where the last message came from.** Per channel, exactly like any

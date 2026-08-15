@@ -1,0 +1,19 @@
+# ROAM photo bridge -- the Google Photos album Claude may read.
+#
+# Copy this file to `photo-album.txt` (gitignored) and put ONE shared-album link
+# on a line of its own. Blank lines and `#` comments are ignored; with no URL
+# the bridge exits 0 and does nothing at all.
+#
+# To get the link: Google Photos -> the album -> Share -> Create link -> Copy.
+# Either form works; the short link redirects to the long one:
+#
+#   https://photos.app.goo.gl/XXXXXXXXXXXXXXXXX
+#   https://photos.google.com/share/AF1Qip.../?key=...
+#
+# ⚠️ This link is a capability: anyone who has it can read the album, so it is
+# gitignored and must stay out of commits, issues and pastes. Anything added to
+# the album is, by definition, something you are handing to Claude -- the album
+# IS the permission boundary, so do not point this at your main library.
+#
+# First run records what is already there and downloads nothing. After that,
+# every new item lands in ~/.claude/dropzone/inbox/ within about five minutes.

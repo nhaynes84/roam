@@ -22,3 +22,8 @@ roam-touch/hub/*.sqlite-shm
 
 # Per-agent worktrees (EnterWorktree / manual `git worktree add`)
 .claude/worktrees/
+
+# Photo bridge: the share link is a capability URL (anyone holding it can read
+# the album), and the state file is this machine's high-water mark.
+roam-touch/hub/photo-album.txt
+roam-touch/hub/photo-state.json

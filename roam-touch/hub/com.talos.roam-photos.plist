@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- ROAM photo bridge: a Google Photos shared album -> ~/.claude/dropzone/inbox.
+     Single shot every 5 minutes; the job is expected to exit 0 immediately when
+     no album is configured, so KeepAlive is deliberately absent.
+
+     ⚠️ NOT LOADED. Install it yourself when the album exists:
+       cp com.talos.roam-photos.plist ~/Library/LaunchAgents/
+       launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.talos.roam-photos.plist
+     Needs no network at boot and no tailnet -- it only talks to photos.google.com. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.talos.roam-photos</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/talos/Projects/roam/roam-touch/hub/.venv/bin/python</string>
+    <string>/Users/talos/Projects/roam/roam-touch/hub/photo_bridge.py</string>
+  </array>
+  <key>WorkingDirectory</key><string>/Users/talos/Projects/roam/roam-touch/hub</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>StartInterval</key><integer>300</integer>
+  <key>ProcessType</key><string>Background</string>
+  <key>LowPriorityIO</key><true/>
+  <key>StandardOutPath</key><string>/Users/talos/Library/Logs/roam-photos.out</string>
+  <key>StandardErrorPath</key><string>/Users/talos/Library/Logs/roam-photos.err</string>
+</dict>
+</plist>
