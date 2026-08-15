@@ -944,9 +944,17 @@ ARM_R_ELBOW = 50.0            # Y1 end — points at the ELBOW (jack end)
 ARM_R = ARM_R_WRIST           # kept for anything that wants one number
 SLEEVE_WALL = 3.0
 SLEEVE_Y0, SLEEVE_Y1 = 8.0, 152.0
+# ★★ THE HOUSING SITS CANTED ON THE ARM. His call: rotate ~-30°, stern (USB/wrist end)
+# swinging toward STARBOARD. Expressed here as the ARM being yawed within the housing's
+# frame, because every other dimension in this file is housing-relative and re-basing
+# them all would be the larger change.
+# ★ Yaw is about Z, so it costs nothing geometrically: the cone stays tangent to the
+# mounting plane at exactly the same height, and every horizontal cut below still lands
+# where it did. Only the crown LINE swings.
+SLEEVE_YAW = -20.0
 SLEEVE_Z_C = MOUNT_Z - ARM_R_WRIST   # crown on the mounting plane at the wrist end
 STRAP_W, STRAP_T = 26.0, 4.0  # 25 mm webbing through a 26 x 4 slot
-STRAP_Y = (24.0, 128.0)       # two straps, one near each end
+STRAP_AT = (0.12, 0.83)       # two straps, as a fraction ALONG the sleeve axis
 # ★★ HOW FAR ROUND THE SLEEVE WRAPS — the one real shape decision, exposed as a number.
 # The inner cone is TANGENT to the mounting plane (that is what gives zero standoff), so
 # where you cut decides everything:
@@ -966,8 +974,15 @@ def sleeve() -> Part:
     # ★ axis defined by its two END POINTS, so the crown rides the mounting plane the
     # whole way — same technique as the eStack drum's angled anchor, for the same reason:
     # a rotation I have to derive is a rotation I get wrong.
-    a = Vector(0, SLEEVE_Y0, MOUNT_Z - ARM_R_WRIST)
-    b = Vector(0, SLEEVE_Y1, MOUNT_Z - ARM_R_ELBOW)
+    # yaw the axis end points about the housing's mid-length, so the cant pivots about
+    # the middle of the device rather than swinging one end out into space
+    def _yaw(v):
+        c = math.cos(math.radians(SLEEVE_YAW)); sn = math.sin(math.radians(SLEEVE_YAW))
+        py = (SLEEVE_Y0 + SLEEVE_Y1) / 2
+        dx, dy = v.X, v.Y - py
+        return Vector(dx * c - dy * sn, py + dx * sn + dy * c, v.Z)
+    a = _yaw(Vector(0, SLEEVE_Y0, MOUNT_Z - ARM_R_WRIST))
+    b = _yaw(Vector(0, SLEEVE_Y1, MOUNT_Z - ARM_R_ELBOW))
     axis = (b - a).normalized()
     ln = (b - a).length
     pl = Plane(origin=a, z_dir=axis)
@@ -997,17 +1012,31 @@ def sleeve() -> Part:
     # ⚠️ Slots must follow the SLOPED axis and the LOCAL radius. Placed off the wrist
     # radius alone they miss the wall entirely at the elbow end, where the axis has
     # already dropped 10 mm and the wall moved 10 mm outboard.
-    for sy in STRAP_Y:
-        t = (sy - SLEEVE_Y0) / (SLEEVE_Y1 - SLEEVE_Y0)
+    # ⚠️ Slots ride the AXIS, not absolute Y — once the sleeve is yawed, a slot pinned to
+    # a Y value walks off the side of the part.
+    for t in STRAP_AT:
         rl = ARM_R_WRIST + t * (ARM_R_ELBOW - ARM_R_WRIST)
-        zc = MOUNT_Z - rl
-        zs = zc + STRAP_FRAC * rl
-        xw = math.sqrt(max(0.0, rl * rl - (zs - zc) ** 2))   # wall's X at that height
+        ctr = a + (b - a) * t
+        zs = ctr.Z + STRAP_FRAC * rl
+        xw = math.sqrt(max(0.0, rl * rl - (zs - ctr.Z) ** 2))
+        side = Vector(math.cos(math.radians(SLEEVE_YAW)),
+                      math.sin(math.radians(SLEEVE_YAW)), 0)   # across the arm
         for sx in (-1, 1):
-            shell -= Pos(sx * xw, sy, zs) * Box(
-                2 * SLEEVE_WALL + 10, STRAP_W, STRAP_T,
-                align=(Align.CENTER, Align.CENTER, Align.CENTER))
-    return shell
+            pt = ctr + side * (sx * xw)
+            shell -= (Plane(origin=Vector(pt.X, pt.Y, zs), z_dir=Vector(0, 0, 1),
+                            x_dir=side)
+                      * Box(2 * SLEEVE_WALL + 10, STRAP_W, STRAP_T,
+                            align=(Align.CENTER, Align.CENTER, Align.CENTER)))
+    # ⚠️ KEEP ONLY THE LARGEST SOLID. The hood is ~43 mm wide either side of its crown,
+    # so its flank always runs under the pack tube and the rail wherever those dip below
+    # the mounting plane — and cutting against the housing therefore strands a crumb or
+    # two (0.0–1.3 cm³) that nobody would print. Checking that the CROWN clears the tube
+    # is not enough; the flank is what fouls. Reported, not silently dropped.
+    solids = sorted(shell.solids(), key=lambda q: q.volume, reverse=True)
+    if len(solids) > 1:
+        dropped = sum(q.volume for q in solids[1:]) / 1000
+        print(f"  sleeve: dropped {len(solids)-1} stranded fragment(s), {dropped:.2f} cm3")
+    return Part() + solids[0]
 
 
 def build() -> Part:
@@ -1133,7 +1162,7 @@ if __name__ == "__main__":
           f"{slv.volume/1000:.0f} cm3 ~= {slv.volume/1000*1.27:.0f} g PETG")
     print(f"             arm r{ARM_R:.1f} inside, crown AT the mounting plane Z {MOUNT_Z:.1f} "
           f"-> ZERO standoff, which is the whole point")
-    print(f"             {2*len(STRAP_Y)} strap slots {STRAP_W:.0f} x {STRAP_T:.0f} at Y {STRAP_Y}")
+    print(f"             {2*len(STRAP_AT)} strap slots {STRAP_W:.0f} x {STRAP_T:.0f}, yaw {SLEEVE_YAW:.0f} deg")
     print(f"             ⚠️ ARM_R IS A GUESS (bracer.py nominal) — measure the forearm")
     print(f"  screen ap. {sx1 - sx0:.1f} x {sy1 - sy0:.1f} "
           f"(margins L/R {fx(SCREEN_SVG[0]) + PH_W / 2:.2f} / "
