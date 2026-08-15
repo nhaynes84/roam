@@ -4,7 +4,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.drawable.Drawable
-import android.net.Uri
 import android.util.Log
 
 /** Same tag the rest of Nexus logs under, so `roam-emu logcat` catches it unchanged. */
@@ -36,8 +35,12 @@ object AppCatalog {
         }.distinctBy { it.packageId }
     }
 
-    /** The shelf, resolved against this device. */
-    fun shelf(context: Context): List<AppTile> = AppShelf.build(installed(context))
+    /**
+     * The shelf, resolved against this device — what is installed, and what the hardware
+     * can actually do. Both questions are asked of the system; neither is assumed.
+     */
+    fun shelf(context: Context): List<AppTile> =
+        AppShelf.build(installed(context), hasTorch = Torch.available(context))
 
     fun icon(context: Context, packageId: String): Drawable? =
         runCatching { context.packageManager.getApplicationIcon(packageId) }.getOrNull()
@@ -63,41 +66,24 @@ object AppCatalog {
     }
 
     /**
-     * Open a URL — the third way a tile can act, alongside a package and an internal
-     * screen.
+     * Fire a tile. The one place that knows how each [TileKind] is opened — and by now it
+     * knows about exactly one of them.
      *
-     * ⚠️ No `setPackage("com.android.chrome")`, for the same reason nothing here records
-     * a ComponentName: the browser on this phone is whatever is installed at the time,
-     * and pinning one turns "the shortcut opened somewhere else" into "the shortcut is
-     * dead". ACTION_VIEW asks the system, and the system is never out of date.
+     * ⚠️⚠️ **There is deliberately no "open a URL" function here any more.** It fired
+     * `ACTION_VIEW` and let the system hand the URL to Chrome, which is how the Files tile
+     * came back *"bearer token required"*: the hub wants a bearer token and the only way
+     * to give an external browser one is to write it into the URL, where it lands in
+     * history, in the omnibox and in logs — and that token opens every endpoint on the
+     * hub. [TileKind.HUB] tiles are now drawn by this app, which can put the token in a
+     * header. Removing the function rather than leaving it unused is the point: an
+     * ACTION_VIEW that does not exist cannot be reached for by the next tile.
      *
-     * Returns false rather than throwing, and for the same reason [launch] does: with no
-     * browser installed this is an ActivityNotFoundException on the home screen, which
-     * would leave a device-owner phone with no UI at all. Non-http schemes are refused
-     * outright ([isLaunchableUrl]) so a malformed tile cannot fire an arbitrary intent.
-     */
-    fun openUrl(context: Context, url: String): Boolean {
-        if (!isLaunchableUrl(url)) {
-            Log.w(TAG, "refusing to open non-http url: $url")
-            return false
-        }
-        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        return runCatching { context.startActivity(intent); true }
-            .onFailure { Log.w(TAG, "no handler for $url", it) }
-            .getOrDefault(false)
-    }
-
-    /**
-     * Fire a tile. The one place that knows how each [TileKind] is opened.
-     *
-     * [TileKind.INTERNAL] is not handled here — an internal screen is a navigation event
-     * inside this app, not an intent, so the caller owns it. Returning false for it would
-     * read as a failure; it is simply not this object's job.
+     * [TileKind.INTERNAL] and [TileKind.HUB] are both events inside this app rather than
+     * intents, so the caller owns them. Returning false for them would read as a failure;
+     * it is simply not this object's job.
      */
     fun open(context: Context, tile: AppTile): Boolean = when (tile.kind) {
         TileKind.PACKAGE -> launch(context, tile.id)
-        TileKind.URL -> openUrl(context, tile.id)
-        TileKind.INTERNAL -> false
+        TileKind.INTERNAL, TileKind.HUB -> false
     }
 }

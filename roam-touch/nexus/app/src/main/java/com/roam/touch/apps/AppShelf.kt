@@ -6,20 +6,30 @@ import com.roam.touch.BuildConfig
  * How a tile is opened. The UI dispatches on this and on nothing else.
  *
  * ⚠️ Deliberately about *mechanism*, not about content: [PACKAGE] means "ask the system
- * for this package's launch intent", [URL] means "fire ACTION_VIEW and let the system
- * pick the handler", [INTERNAL] means "a screen this app draws itself". Adding a kind is
- * adding a way to open something, which is why there are only three.
+ * for this package's launch intent", [HUB] means "open in this app's own WebView, with
+ * the hub's bearer token on the request", [INTERNAL] means "a screen or a switch this app
+ * owns". Adding a kind is adding a way to open something, which is why there are only
+ * three.
+ *
+ * ⚠️⚠️ [HUB] replaced an earlier `URL` kind that fired `ACTION_VIEW` and let the system
+ * pick a browser, and the replacement is the whole point rather than a refactor. The hub
+ * refuses `/browse` without a bearer token, so the tile answered *"bearer token
+ * required"*; the only way to authenticate an `ACTION_VIEW` is `?token=` in the URL, and
+ * that token authenticates every endpoint on the hub — it must not be written into
+ * another app's history, omnibox suggestions or logs. A WebView takes the token as a
+ * request *header*, so there is no URL to leak. There is deliberately no general "open
+ * any URL" mechanism left: it cannot be used wrongly if it does not exist.
  */
-enum class TileKind { PACKAGE, INTERNAL, URL }
+enum class TileKind { PACKAGE, INTERNAL, HUB }
 
 /**
  * What a launchable thing looks like to the panel.
  *
- * [id] is the package name for anything the system launches, a `roam:` id for a screen
- * this app owns, or — for a [TileKind.URL] tile — the URL itself. A link tile carries no
- * second `url` field on purpose: one field means there is no such thing as a URL tile
- * with a missing URL, and the grid key stays unique for free. The UI never branches on
- * the label.
+ * [id] is the package name for anything the system launches, a `roam:` id for a screen or
+ * a switch this app owns, or — for a [TileKind.HUB] tile — the URL itself. A hub tile
+ * carries no second `url` field on purpose: one field means there is no such thing as a
+ * hub tile with a missing URL, and the grid key stays unique for free. The UI never
+ * branches on the label.
  */
 data class AppTile(
     val id: String,
@@ -50,11 +60,14 @@ data class TileNote(val chip: String, val detail: String, val broken: Boolean = 
 data class InstalledApp(val packageId: String, val label: String)
 
 /**
- * ★ Whether a link tile can be fired at all, decided without touching Android.
+ * ★ Whether a hub tile addresses something we are willing to load at all, decided
+ * without touching Android.
  *
- * Kept pure so the "a bad URL returns false instead of throwing" rule is covered by a
- * plain JVM test — the home screen is the one place where an ActivityNotFoundException
- * costs the whole device its UI, so that rule cannot be left to Robolectric.
+ * Kept pure so the "a bad URL is refused rather than followed" rule is covered by a plain
+ * JVM test. It is no longer guarding against an ActivityNotFoundException — nothing here
+ * fires an intent any more — but it still guards the WebView against a tile whose id is a
+ * `file://` or `intent://` URL, and it is what keeps a `roam:` id from ever being
+ * mistaken for something to load.
  */
 fun isLaunchableUrl(url: String): Boolean =
     url.startsWith("http://") || url.startsWith("https://")
@@ -77,6 +90,17 @@ object AppShelf {
 
     /** The internal tile id for the native Home Assistant screen. */
     const val HOME_ASSISTANT = "roam:ha"
+
+    /**
+     * The internal tile id for the torch.
+     *
+     * ⚠️ There is no flashlight *app* on Android and never was — on this phone it is a
+     * quick-settings tile (`sysui_qs_tiles` lists `flashlight`), which is a SystemUI
+     * control and not something a launcher can start. So it cannot be a [TileKind.PACKAGE]
+     * tile however much it looks like one; it is this app calling
+     * `CameraManager.setTorchMode`. See [Torch].
+     */
+    const val TORCH = Torch.TILE_ID
 
     /**
      * ★ The hub's address lives in exactly one place, and this is not it.
@@ -126,6 +150,16 @@ object AppShelf {
     )
 
     private val CANDIDATES = listOf(
+        // ★ First, with the torch, because this is worn in a workshop and outdoors and
+        // both are reached for without thinking. Everything below is a tool you go
+        // looking for; these two are reflexes.
+        //
+        // ⚠️ The Pixel camera is `com.google.android.GoogleCamera`, which is not the
+        // package name anything else on the phone uses, and it is absent from the API 29
+        // emulator image. That is the shelf working: the tile resolves at runtime, so it
+        // simply does not appear on a device without it. Do not "fix" that by hard-coding
+        // the tile in.
+        Candidate(listOf("com.google.android.GoogleCamera"), subtitle = "photos"),
         Candidate(listOf("com.termux"), subtitle = "shell"),
         Candidate(listOf("com.tailscale.ipn"), subtitle = "tailnet"),
         Candidate(listOf("com.android.settings"), subtitle = "system"),
@@ -147,19 +181,30 @@ object AppShelf {
     /**
      * The hub's file browser, as three tiles.
      *
-     * ⚠️ These name a path, never a browser. The tap becomes an ACTION_VIEW intent and
-     * the system decides who handles it — same reason [AppCatalog] refuses to record a
-     * ComponentName. In practice that is Chrome, so read [CHROME_NOTE]: these pages have
-     * to render on a 2019 engine.
+     * ⚠️⚠️ **The folder is in the FRAGMENT, not the path, and that is a fact about the
+     * hub rather than a style choice.** `GET /browse` is the only browse route the hub
+     * has; `web/browse.html` then keeps the whole of its navigation state in
+     * `window.location.hash` ("the hash is the whole state, so back and forward work and a
+     * folder can be bookmarked"). The folder names are the keys of `files.DEFAULT_ROOTS`
+     * and are case-sensitive.
      *
-     * They are always present, even if the endpoint is not up yet. A link that 404s is a
-     * page saying so; a tile that vanishes when the hub is down is a shelf that changes
-     * shape under him, which is worse on the only screen he can reach from Home.
+     * These tiles used to say `/browse/photos` and `/browse/cad`. Verified against the
+     * live hub 2026-08-14: **both are 404** — there is no such route and there never was,
+     * so two of the three tiles could not have worked even with the auth fixed. The
+     * fragment form is what the page's own breadcrumbs and folder cards emit.
+     *
+     * ⚠️ These name a path, never a browser: the tap opens [HubBrowserScreen] inside this
+     * app. That is what lets the token travel as a header — see [TileKind.HUB] — and it is
+     * still a 2019 WebView underneath, which is why the hub's pages are written for one.
+     *
+     * They are always present, even if the hub is not up. An unreachable hub is a page
+     * saying so; a tile that vanishes when the hub is down is a shelf that changes shape
+     * under him, which is worse on the only screen he can reach from Home.
      */
     private val LINKS = listOf(
-        AppTile("$HUB_BASE/browse", "Files", "network drive", kind = TileKind.URL),
-        AppTile("$HUB_BASE/browse/photos", "Photos", "shared album", kind = TileKind.URL),
-        AppTile("$HUB_BASE/browse/cad", "CAD", "models", kind = TileKind.URL),
+        AppTile("$HUB_BASE/browse", "Files", "network drive", kind = TileKind.HUB),
+        AppTile("$HUB_BASE/browse#Photos", "Photos", "shared album", kind = TileKind.HUB),
+        AppTile("$HUB_BASE/browse#CAD", "CAD", "models", kind = TileKind.HUB),
     )
 
     /** The native Home Assistant screen. Always present; it needs no package. */
@@ -171,15 +216,37 @@ object AppShelf {
     )
 
     /**
-     * Build the shelf from whatever is actually installed.
+     * ★ The torch. A switch, not a launch — the only tile that is already doing something
+     * when he looks at it.
+     *
+     * Present only where there is a flash to drive, which the caller answers from
+     * `PackageManager.hasSystemFeature(FEATURE_CAMERA_FLASH)`. Same rule as an uninstalled
+     * package: a capability the device does not have is a tile that is simply not there,
+     * never a tile that fails when pressed.
+     */
+    private val TORCH_TILE = AppTile(
+        id = TORCH,
+        label = "Flashlight",
+        subtitle = "torch — tap to toggle",
+        kind = TileKind.INTERNAL,
+    )
+
+    /**
+     * Build the shelf from whatever is actually installed, and whatever this device can
+     * actually do.
      *
      * Order is fixed and meaningful: the native HA screen first because it is the one
-     * that works and the device is a smart-home controller; then the installed tools in
+     * that works and the device is a smart-home controller, then the torch beside it
+     * because both are instant and neither leaves the app; then the installed tools in
      * declaration order; then the hub links; then anything known-broken, last, so a tile
      * that cannot do its job never sits above one that can. A caution note ([CHROME_NOTE])
      * does not sink a tile — only `broken` does.
+     *
+     * @param hasTorch whether the device reports a camera flash. The default is the
+     *   convenient answer for tests; the real caller ([AppCatalog.shelf]) always asks
+     *   PackageManager rather than assuming.
      */
-    fun build(installed: List<InstalledApp>): List<AppTile> {
+    fun build(installed: List<InstalledApp>, hasTorch: Boolean = true): List<AppTile> {
         val byPackage = installed.associateBy { it.packageId }
         val resolved = CANDIDATES.mapNotNull { candidate ->
             val app = candidate.packages.firstNotNullOfOrNull { byPackage[it] } ?: return@mapNotNull null
@@ -191,6 +258,7 @@ object AppShelf {
             )
         }
         val (broken, working) = (resolved + LINKS).partition { it.broken }
-        return listOf(NATIVE_HA) + working + broken
+        val native = listOfNotNull(NATIVE_HA, TORCH_TILE.takeIf { hasTorch })
+        return native + working + broken
     }
 }

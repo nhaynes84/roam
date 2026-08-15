@@ -83,16 +83,27 @@ class NavTest {
         )
     }
 
-    /** ⚠️ Every branch of [Nav.back] must mirror [Nav.pane], in every state. */
+    /**
+     * ⚠️ Every branch of [Nav.back] must mirror [Nav.pane], in every state.
+     *
+     * ★ Exhaustive over `Screen.values()` rather than a hand-written list, so adding a
+     * destination cannot quietly go untested — that is exactly how the hub browser would
+     * have shipped with Back walking two steps out in one press.
+     */
     @Test
     fun `back always closes whatever pane is on top`() {
-        val screens = listOf(Screen.Channels, Screen.HomeAssistant, Screen.Apps, Screen.Controls)
         for (reading in listOf(false, true)) {
-            for (screen in screens) {
+            for (screen in Screen.values()) {
                 for (open in listOf(false, true)) {
                     val expected = when (Nav.pane(reading, screen, open)) {
                         Pane.Reader -> Back.CloseReader
-                        Pane.Detour -> Back.CloseDetour
+                        // ⚠️ The one documented exception to the mirror, and it is about
+                        // *how far* back rather than about what is on top: the browser is
+                        // a detour opened from another detour, so it unwinds to the shelf
+                        // rather than all the way to Channels. See Back.CloseHubBrowser.
+                        Pane.Detour ->
+                            if (screen == Screen.HubBrowser) Back.CloseHubBrowser
+                            else Back.CloseDetour
                         Pane.Thread -> Back.CloseThread
                         Pane.List -> null
                     }
@@ -104,6 +115,57 @@ class NavTest {
                 }
             }
         }
+    }
+
+    // ---- the hub browser -------------------------------------------------------------
+
+    /**
+     * ★★ He tapped Files on the shelf; Back has to put him back on the shelf.
+     *
+     * ⚠️ The general detour rule would send him to Channels, which is two steps out in one
+     * press and leaves no sign the shelf was ever there — on a screen that is the only
+     * route off the home screen, "where did the apps go" is a real way to be lost.
+     */
+    @Test
+    fun `back out of the hub browser lands on the shelf, not on channels`() {
+        assertEquals(
+            Back.CloseHubBrowser,
+            Nav.back(reading = false, screen = Screen.HubBrowser, hasOpenPane = false),
+        )
+        // …and an open conversation behind it does not change that. It is still there
+        // afterwards; the shelf is simply what he was looking at a moment ago.
+        assertEquals(
+            Back.CloseHubBrowser,
+            Nav.back(reading = false, screen = Screen.HubBrowser, hasOpenPane = true),
+        )
+    }
+
+    /** The reader still outranks it, like everything else. */
+    @Test
+    fun `the reader outranks the hub browser`() {
+        assertEquals(
+            Back.CloseReader,
+            Nav.back(reading = true, screen = Screen.HubBrowser, hasOpenPane = true),
+        )
+    }
+
+    /**
+     * ⚠️⚠️ Presence. Reading his own files is *not* being in a conversation, so nothing
+     * is covered and any channel may still buzz his arm — the same rule that applies to
+     * the other detours, and the one that silenced his arm all evening when it was wrong.
+     */
+    @Test
+    fun `browsing the hub covers no channel`() {
+        assertEquals(Pane.Detour, Nav.pane(reading = false, screen = Screen.HubBrowser, hasChannel = true))
+        assertEquals(
+            null,
+            Nav.covered(
+                reading = false,
+                screen = Screen.HubBrowser,
+                openPane = "%3",
+                hasChannel = true,
+            ),
+        )
     }
 
     /** Nothing stacked: Back is the system's, not ours. */
