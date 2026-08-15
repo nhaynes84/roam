@@ -156,6 +156,27 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.talos.roam-photos.pl
 * ⚠️ **EXIF, including GPS and the device model, arrives intact.** Nothing here
   strips it — that is the owner's call, not a silent default.
 
+### The inbox contract (for anything that wants to hand Claude a file)
+
+`~/.claude/dropzone/inbox/` is a **queue, not an archive**. The `UserPromptSubmit`
+hook at `~/.claude/hooks/clip-fetch.sh` (wired in `~/.claude/settings.json`, and
+*not* in this repo) moves everything in it up into `~/.claude/dropzone/` and names
+each file in its `additionalContext`. That naming is the whole point: **a file
+that merely appears in the dropzone is invisible** — only the `fetched` list makes
+it exist as far as Claude is concerned.
+
+So, to hand Claude a file: write it into `inbox/` and stop. Two rules for
+producers, both of which `photo_bridge.py` and `POST /share` follow:
+
+* **Write `name.ext.part` and rename.** The hook skips `*.part`, and a rename
+  within a filesystem is atomic, so a half-written file can never be picked up
+  mid-write.
+* **Expect it to be moved out from under you.** The move is the high-water
+  mark; there is no second bookkeeping file to get out of sync.
+
+⚠️ When globbing that directory, match on the **basename**. A `case "$f" in */.*)`
+against the full path matches the `/.claude/` in it and silently skips every file.
+
 ## Where a reply goes
 
 **Reply where the last message came from.** Per channel, exactly like any
