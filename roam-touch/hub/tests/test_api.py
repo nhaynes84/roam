@@ -932,6 +932,16 @@ def test_create_channel_spawns_a_detached_window(client, auth, fake_tmux):
     assert argv[argv.index("-c") + 1] == os.path.expanduser("~")
     # Named while we know what it is for -- unnamed panes all read as "talos".
     assert fake_tmux.argv_for("select-pane")
+    # ★ And stored where the agent cannot rename it: Claude stamps its own
+    # summary over the pane title within seconds, so the title alone lost the
+    # owner's label to the latest message.
+    pane_id = ch["pane_id"]
+    assert fake_tmux.pane_options[pane_id]["@roam_label"] == "TEST spawn"
+    # The label survives a hostile title change.
+    fake_tmux.retitle(pane_id, "whatever claude renamed it to")
+    listed = client.get("/channels", headers=auth).json()["channels"]
+    mine = next(c for c in listed if c["pane_id"] == pane_id)
+    assert mine["label"] == "TEST spawn"
 
 
 def test_create_channel_records_opened_once(client, auth, fake_tmux):

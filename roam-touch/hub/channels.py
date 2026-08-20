@@ -32,6 +32,7 @@ _FMT = "\t".join(
         "#{pane_index}",
         "#{pane_current_command}",
         "#{pane_title}",
+        "#{@roam_label}",
     )
 )
 
@@ -48,16 +49,26 @@ class Channel:
     index: int
     command: str
     title: str
+    #: The @roam_label pane option -- the name the OWNER gave the session at
+    #: spawn. A custom option because the pane TITLE is a battlefield: Claude
+    #: overwrites it with its own summary within seconds, which is how a
+    #: freshly labelled channel ended up named after its latest message.
+    roam_label: str = ""
 
     @property
     def label(self) -> str:
         """Human name for the panel.
 
-        The pane title if the pane actually set one -- for a Claude pane that
-        is the session summary, which is exactly what the wearer should see.
-        A title equal to the session name or to the host's default title means
-        nothing was set, so fall back to `session:window.pane`.
+        The owner's spawn label wins -- he said what the session is for, and
+        no agent gets to rename it. Otherwise the pane title if the pane
+        actually set one (for a Claude pane that is the session summary, which
+        is exactly what the wearer should see). A title equal to the session
+        name or to the host's default title means nothing was set, so fall
+        back to `session:window.pane`.
         """
+        given = self.roam_label.strip()
+        if given:
+            return given
         title = self.title.strip()
         if title and title != self.session and title.lower() != _DEFAULT_TITLE:
             return title
@@ -111,6 +122,7 @@ def list_channels() -> list[Channel]:
                 index=int(index),
                 command=command,
                 title=rest[0] if rest else "",
+                roam_label=rest[1] if len(rest) > 1 else "",
             )
         )
     return channels
@@ -241,8 +253,11 @@ def spawn(
     args += ["zsh", "-ic", command]
     pane_id = _tmux(*args).strip()
     if label:
-        # The default pane title is the hostname, which reads as "talos" for
-        # every unnamed pane -- name it while we know what it is for.
+        # ★ A custom pane option, not (only) the title: the title is overwritten
+        # by the agent within seconds (Claude stamps its session summary), so a
+        # label stored there dies immediately. @roam_label is invisible to the
+        # pane's process and survives; list_channels() prefers it.
+        _tmux("set-option", "-p", "-t", pane_id, "@roam_label", label)
         _tmux("select-pane", "-t", pane_id, "-T", label)
     return pane_id
 

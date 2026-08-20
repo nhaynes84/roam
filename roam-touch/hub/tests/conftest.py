@@ -28,6 +28,7 @@ class FakeTmux:
             ("%0", "main", 0, 0, "node", "◑ Roam Touch rebuild discussion"),
             ("%1", "augment", 1, 0, "node", "✳ Augment things"),
         ]
+        self.pane_options: dict[str, dict[str, str]] = {}
         self.calls: list[tuple[tuple[str, ...], str | None]] = []
         self.pane_output: dict[str, str] = {}
         self.server_running = True
@@ -66,7 +67,10 @@ class FakeTmux:
             if not self.server_running:
                 raise channels_mod.TmuxError("no server running on /tmp/tmux-501/default")
             return "".join(
-                "\t".join((pid, sess, str(win), str(idx), cmd, title)) + "\n"
+                "\t".join((
+                    pid, sess, str(win), str(idx), cmd, title,
+                    self.pane_options.get(pid, {}).get("@roam_label", ""),
+                )) + "\n"
                 for pid, sess, win, idx, cmd, title in self.panes
             )
         if sub == "capture-pane":
@@ -93,6 +97,10 @@ class FakeTmux:
             return f"{new_id}\n"
         if sub == "kill-pane":
             self.kill_pane(args[args.index("-t") + 1])
+            return ""
+        if sub == "set-option":
+            pane_id = args[args.index("-t") + 1]
+            self.pane_options.setdefault(pane_id, {})[args[-2]] = args[-1]
             return ""
         if sub == "select-pane":
             if "-T" in args:
