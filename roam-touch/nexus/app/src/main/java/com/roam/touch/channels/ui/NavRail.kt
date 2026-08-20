@@ -777,7 +777,9 @@ private fun RailNewSession(shell: Shell, onClick: () -> Unit) {
  * command is an implementation detail nobody types.
  */
 enum class SessionAgent(val label: String, val command: String) {
-    CLAUDE("CLAUDE", "claude"),
+    // Opus, not the settings default (Fable) — owner: "fable is too heavy
+    // handed for most things". /model <alias> in a thread switches later.
+    CLAUDE("CLAUDE", "claude --model opus"),
     CODEX("CODEX", "codex"),
 }
 
@@ -824,7 +826,7 @@ fun NewSessionDialog(
                             .background(if (on) RoamColors.Surface else Color.Transparent)
                             .clickable(enabled = !creating) { agent = a }
                             .padding(horizontal = 14.dp, vertical = 8.dp)
-                            .testTag("$NEW_SESSION_AGENT-${a.command}"),
+                            .testTag("$NEW_SESSION_AGENT-${a.name.lowercase()}"),
                     )
                 }
             }
