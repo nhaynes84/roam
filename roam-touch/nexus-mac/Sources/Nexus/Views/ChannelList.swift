@@ -14,7 +14,10 @@ struct ChannelList: View {
         List(store.channels, selection: $store.selectedPane) { channel in
             ChannelRow(channel: channel,
                        liveness: store.liveness(channel),
-                       unread: store.unreadCount(channel.paneId))
+                       unread: store.unreadCount(channel.paneId),
+                       onDismiss: channel.live ? nil : {
+                           run { try await store.archiveChannel(channel.paneId) }
+                       })
                 .tag(channel.paneId)
                 .contextMenu { menu(for: channel) }
         }
@@ -75,6 +78,8 @@ struct ChannelRow: View {
     var channel: Channel
     var liveness: Liveness
     var unread: Int
+    /// Present only on dead channels: archive it — the thread is over.
+    var onDismiss: (() -> Void)?
 
     var body: some View {
         HStack(spacing: 8) {
@@ -106,6 +111,14 @@ struct ChannelRow: View {
                     .padding(.horizontal, 7).padding(.vertical, 1)
                     .background(Capsule().fill(.tint))
                     .foregroundStyle(.white)
+            }
+            if let onDismiss {
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Dismiss — archives this dead channel; history stays readable")
             }
         }
         .padding(.vertical, 2)

@@ -1,11 +1,25 @@
 import SwiftUI
 
 /// The "+" popover: spawn a new agent pane on talos.
+/// The agents that exist on the box. The dropdown is the whole surface —
+/// the shell command is an implementation detail the user never sees.
+enum Agent: String, CaseIterable, Identifiable {
+    case claude = "Claude"
+    case codex = "Codex"
+    var id: String { rawValue }
+    var command: String {
+        switch self {
+        case .claude: return "claude"
+        case .codex: return "codex"
+        }
+    }
+}
+
 struct NewSessionSheet: View {
     var store: HubStore
     @Environment(\.dismiss) private var dismiss
     @State private var label = ""
-    @State private var command = "claude"
+    @State private var agent: Agent = .claude
     @State private var cwd = ""
     @State private var failure: String?
     @State private var creating = false
@@ -13,10 +27,15 @@ struct NewSessionSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("New session").font(.system(size: 15, weight: .semibold))
+            Picker("Agent", selection: $agent) {
+                ForEach(Agent.allCases) { a in
+                    Text(a.rawValue).font(.system(size: 14)).tag(a)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
             TextField("Label — what is this session for?", text: $label)
                 .font(.system(size: 14))
-            TextField("Command", text: $command)
-                .font(.system(size: 14, design: .monospaced))
             TextField("Working directory (optional, e.g. ~/Projects/roam)", text: $cwd)
                 .font(.system(size: 14, design: .monospaced))
             if let failure {
@@ -25,9 +44,9 @@ struct NewSessionSheet: View {
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button(creating ? "Starting…" : "Start") { create() }
+                Button(creating ? "Starting…" : "Start \(agent.rawValue)") { create() }
                     .keyboardShortcut(.defaultAction)
-                    .disabled(creating || command.trimmed.isEmpty)
+                    .disabled(creating)
             }
         }
         .padding(16)
@@ -39,7 +58,7 @@ struct NewSessionSheet: View {
         failure = nil
         Task {
             do {
-                try await store.createSession(command: command.trimmed,
+                try await store.createSession(command: agent.command,
                                               label: label.trimmed.isEmpty ? nil : label.trimmed,
                                               cwd: cwd.trimmed.isEmpty ? nil : cwd.trimmed)
                 dismiss()
