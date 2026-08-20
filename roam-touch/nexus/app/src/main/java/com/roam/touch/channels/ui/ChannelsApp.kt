@@ -114,6 +114,7 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
     val pttState by vm.pttState.collectAsStateWithLifecycle()
     val draft by vm.draft.collectAsStateWithLifecycle()
     val outbox by vm.outbox.collectAsStateWithLifecycle()
+    val creating by vm.creating.collectAsStateWithLifecycle()
     val nowMs = rememberTicker()
     val requestMic = rememberMicPermission(vm)
     val shell = rememberShell()
@@ -130,6 +131,11 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
     var screen by rememberSaveable { mutableStateOf(Screen.Channels) }
     var openPane by rememberSaveable { mutableStateOf<String?>(null) }
     var toast by remember { mutableStateOf<Toast?>(null) }
+
+    // ★ The new-session dialog. Plain `remember`: a half-typed label is not a place he
+    // was, and resurrecting a dialog after a rotation-and-process-death is not worth
+    // carrying dialog state in the saved instance bundle.
+    var newSession by remember { mutableStateOf(false) }
 
     // ★ Which hub page the browser is showing, as a URL and a label.
     //
@@ -363,6 +369,7 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
                 vm.openThread(it.paneId)
                 screen = Screen.Channels
             },
+            onNewSession = { newSession = true },
             onHome = {
                 readingEventId = null
                 if (openPane != null) { openPane = null; vm.stopSpeaking(); vm.pttCancel() }
@@ -562,6 +569,26 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
                     onDismiss = controls::dismissIntro,
                 )
             }
+        }
+
+        // ★ New session: one label, and the command is always `claude`. On success the
+        // new thread opens directly — the queue would list it anyway, but he asked for
+        // it by name a second ago. On failure the dialog stays, label intact, and the
+        // toast says why.
+        if (newSession) {
+            NewSessionDialog(
+                creating = creating,
+                onDismiss = { newSession = false },
+                onStart = { label ->
+                    vm.createSession(label) { pane ->
+                        newSession = false
+                        readingEventId = null
+                        openPane = pane
+                        vm.openThread(pane)
+                        screen = Screen.Channels
+                    }
+                },
+            )
         }
 
         toast?.let { t ->

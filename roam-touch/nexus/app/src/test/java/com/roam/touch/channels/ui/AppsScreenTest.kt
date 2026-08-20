@@ -59,6 +59,7 @@ class AppsScreenTest {
                         sending = false,
                         collapsed = false,
                         onToggleCollapse = {},
+                        onNewSession = {},
                         onOpenChannel = {},
                         onHome = {},
                         onOpenApps = {},

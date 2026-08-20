@@ -51,6 +51,7 @@ class NavRailTest {
     private val dead = Fx.channel(pane = "%1", label = "dead one", live = false)
 
     private var opened: Channel? = null
+    private var newSessions = 0
     private var voicePresses = 0
     private var quickSent: String? = null
     private var wentTo: Screen? = null
@@ -65,7 +66,8 @@ class NavRailTest {
         battery: BatteryState = BatteryState(percent = 72),
         collapsed: Boolean = false,
     ) {
-        opened = null; voicePresses = 0; quickSent = null; wentTo = null; folds = 0
+        opened = null; newSessions = 0; voicePresses = 0; quickSent = null; wentTo = null
+        folds = 0
         compose.setContent {
             RoamTheme {
                 // ⚠️ The fold is state the rail's own control drives, not a fixed flag:
@@ -84,6 +86,7 @@ class NavRailTest {
                         collapsed = folded,
                         onToggleCollapse = { folds++; folded = !folded },
                         onOpenChannel = { opened = it },
+                        onNewSession = { newSessions++ },
                         onHome = {},
                         onOpenApps = { wentTo = Screen.Apps },
                         onOpenSettings = { wentTo = Screen.Settings },
@@ -490,6 +493,42 @@ class NavRailTest {
         render(Shell.Wide, collapsed = true)
         compose.onNodeWithTag(RAIL_STATUS).assertIsDisplayed()
         compose.onNodeWithText(Format.clock(Fx.NOW_MS)).assertIsDisplayed()
+    }
+
+    // --- the door to a new session ---------------------------------------------
+
+    /** ★ The rail's one write: spawn a session. A door, named, in both shapes. */
+    @Test
+    fun `the rail offers a new session in Wide and it presses`() {
+        render(Shell.Wide)
+        compose.onNodeWithContentDescription("new session").assertIsDisplayed()
+        compose.onNodeWithTag(RAIL_NEW).performClick()
+        assertEquals(1, newSessions)
+    }
+
+    @Test
+    fun `the rail offers a new session in Narrow too`() {
+        render(Shell.Narrow)
+        compose.onNodeWithContentDescription("new session").assertIsDisplayed()
+        compose.onNodeWithTag(RAIL_NEW).performClick()
+        assertEquals(1, newSessions)
+    }
+
+    /** ⚠️ TALK's rule: an open thread's rail spends its height on the queue instead. */
+    @Test
+    fun `the new-session door yields to an open thread, like TALK does`() {
+        render(Shell.Wide, openPane = "%2")
+        assertTrue(compose.onAllNodesWithTag(RAIL_NEW).fetchSemanticsNodes().isEmpty())
+    }
+
+    /**
+     * ⚠️ Folded drops it with the queue it belongs to — the same rule as [RAIL_TALK],
+     * and for the same reason: the folded column is his spec, and this is not in it.
+     */
+    @Test
+    fun `the folded rail drops the new-session door with the list`() {
+        render(Shell.Wide, collapsed = true)
+        assertTrue(compose.onAllNodesWithTag(RAIL_NEW).fetchSemanticsNodes().isEmpty())
     }
 
     private fun withOneUnread() = ChannelReducer.applyEvent(

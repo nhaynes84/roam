@@ -585,6 +585,9 @@ internal fun kindLabel(event: Event): String =
         EventKind.OPENED -> "OPENED"
         EventKind.CLOSED -> "CLOSED"
         EventKind.NOTE -> "NOTE"
+        // Only reached for an action controlKey does not know; the known ones — escape,
+        // interrupt, kill — took the `?:` branch above with their own word.
+        EventKind.CONTROL -> "CONTROL"
         EventKind.ERROR -> "FAILED"
         // The contract says treat the kind list as open and render an unknown kind as a
         // plain note rather than dropping it. Showing the raw string beats hiding it.
@@ -762,9 +765,10 @@ private fun Composer(
  * ★ Two different things, and the difference matters.
  *
  * ESC stops the current turn and leaves the session alive — the usual answer when
- * `idle_s` has been climbing. Ctrl-C twice exits Claude Code, and the session with it.
- * A single "kill" button would conflate them and destroy sessions he only wanted to
- * nudge.
+ * `idle_s` has been climbing. KILL ends the pane itself (`POST /channels/{pane}/kill`);
+ * the channel and its history stay readable, exactly as for a pane that died any other
+ * way. A single "kill" button would conflate them and destroy sessions he only wanted
+ * to nudge.
  */
 @Composable
 private fun StopDialog(
@@ -791,7 +795,7 @@ private fun StopDialog(
                     color = RoamColors.TextSecondary,
                 )
                 Text(
-                    "KILL sends Ctrl-C twice — exits the agent in that pane.",
+                    "KILL ends the pane — the thread stays.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = RoamColors.Alarm,
                 )

@@ -73,6 +73,7 @@ class LandscapeLayoutTest {
                         sending = false,
                         collapsed = folded,
                         onToggleCollapse = { folded = !folded },
+                        onNewSession = {},
                         onOpenChannel = {},
                         onHome = {},
                         onOpenApps = {},

@@ -3,6 +3,7 @@ package com.roam.touch.channels.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.roam.touch.channels.ChannelsState
+import com.roam.touch.channels.CreateResult
 import com.roam.touch.channels.HubLink
 import com.roam.touch.channels.HubRepository
 import com.roam.touch.channels.RailCollapseStore
@@ -320,6 +321,37 @@ class ChannelsViewModel(
                     if (!ptt.sendFailed(result.message)) {
                         toasts.send(Toast("not sent — ${result.message}", bad = true))
                     }
+            }
+        }
+    }
+
+    // --- new session ----------------------------------------------------------
+
+    private val _creating = MutableStateFlow(false)
+
+    /** True while `POST /channels` is with the hub. The dialog's START button obeys it. */
+    val creating: StateFlow<Boolean> = _creating.asStateFlow()
+
+    /**
+     * Spawn a new agent pane on talos. The command is always `claude` for now — the
+     * label is the only thing he types, and it becomes the pane title. [onOpened] runs
+     * with the new pane id on success so the caller can open the thread he just asked
+     * for; a failure stays in the dialog's hands via [creating] and a toast that says
+     * why.
+     */
+    fun createSession(label: String, onOpened: (String) -> Unit) {
+        val title = label.trim()
+        if (title.isBlank() || _creating.value) return
+        _creating.value = true
+        viewModelScope.launch {
+            try {
+                when (val result = repo.createSession(title)) {
+                    is CreateResult.Created -> onOpened(result.channel.paneId)
+                    is CreateResult.Failed ->
+                        toasts.send(Toast("not started — ${result.message}", bad = true))
+                }
+            } finally {
+                _creating.value = false
             }
         }
     }

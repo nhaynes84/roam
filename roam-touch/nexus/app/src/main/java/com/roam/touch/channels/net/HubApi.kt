@@ -3,11 +3,14 @@ package com.roam.touch.channels.net
 import com.roam.touch.channels.model.Channel
 import com.roam.touch.channels.model.ChannelResponse
 import com.roam.touch.channels.model.ChannelsResponse
+import com.roam.touch.channels.model.CreateChannelRequest
 import com.roam.touch.channels.model.ErrorResponse
 import com.roam.touch.channels.model.Event
 import com.roam.touch.channels.model.EventResponse
 import com.roam.touch.channels.model.HistoryResponse
 import com.roam.touch.channels.model.HubJson
+import com.roam.touch.channels.model.InterruptRequest
+import com.roam.touch.channels.model.KillRequest
 import com.roam.touch.channels.model.Presence
 import com.roam.touch.channels.model.PresenceRequest
 import com.roam.touch.channels.model.SendRequest
@@ -199,8 +202,8 @@ class HubApi(
     /**
      * Type [text] into the pane.
      *
-     * ⚠️ `enter = false` is not a nicety — it is how a control byte (interrupt/kill) is
-     * delivered without also submitting a stray empty prompt behind it.
+     * ⚠️ Since hub 1.5.0 this REJECTS C0 control characters with 400. Stopping a
+     * session is [interrupt] or [kill], never a byte through here.
      */
     suspend fun send(paneId: String, text: String, enter: Boolean = true): SendResponse {
         val body = HubJson.encodeToString(
@@ -211,6 +214,53 @@ class HubApi(
                 .auth().post(body.toRequestBody(jsonMedia)).build(),
             deadlineMs = SEND_DEADLINE_MS,
         )
+    }
+
+    /**
+     * `POST /channels/{pane}/interrupt` — a key press, recorded as a `control` event
+     * rather than as something he said. [action] is the hub's allow-list: `escape`
+     * stops an agent mid-response, `interrupt` is C-c to the foreground process.
+     */
+    suspend fun interrupt(paneId: String, action: String = "escape"): SendResponse {
+        val body = HubJson.encodeToString(
+            InterruptRequest.serializer(), InterruptRequest(action = action)
+        )
+        return call(
+            Request.Builder().url(url("channels", paneKey(paneId), "interrupt"))
+                .auth().post(body.toRequestBody(jsonMedia)).build(),
+            deadlineMs = SEND_DEADLINE_MS,
+        )
+    }
+
+    /**
+     * `POST /channels/{pane}/kill` — end the pane and whatever runs in it. The channel
+     * outlives the pane: history stays readable, and the poller's canonical `closed`
+     * event follows within a poll cycle.
+     */
+    suspend fun kill(paneId: String): SendResponse {
+        val body = HubJson.encodeToString(KillRequest.serializer(), KillRequest())
+        return call(
+            Request.Builder().url(url("channels", paneKey(paneId), "kill"))
+                .auth().post(body.toRequestBody(jsonMedia)).build(),
+            deadlineMs = SEND_DEADLINE_MS,
+        )
+    }
+
+    /**
+     * `POST /channels` — spawn a new agent pane. `201` with the channel, live
+     * immediately. Every client also gets it via a `channels` frame plus an `opened`
+     * event, so applying the response is a head start, not the source of truth.
+     */
+    suspend fun createChannel(command: String, label: String): Channel {
+        val body = HubJson.encodeToString(
+            CreateChannelRequest.serializer(),
+            CreateChannelRequest(command = command, label = label),
+        )
+        return call<ChannelResponse>(
+            Request.Builder().url(url("channels")).auth()
+                .post(body.toRequestBody(jsonMedia)).build(),
+            deadlineMs = SEND_DEADLINE_MS,
+        ).channel
     }
 
     suspend fun presence(): Presence =

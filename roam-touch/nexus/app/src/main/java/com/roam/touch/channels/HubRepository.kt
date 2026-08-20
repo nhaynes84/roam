@@ -1,9 +1,10 @@
 package com.roam.touch.channels
 
 import android.util.Log
-import com.roam.touch.channels.model.ControlKeys
+import com.roam.touch.channels.model.Channel
 import com.roam.touch.channels.model.Event
 import com.roam.touch.channels.model.HubFrame
+import com.roam.touch.channels.model.SendResponse
 import com.roam.touch.channels.net.Backoff
 import com.roam.touch.channels.net.HubApi
 import com.roam.touch.channels.net.HubHttpException
@@ -65,6 +66,12 @@ data class ArrivedEvent(val event: Event, val fromBacklog: Boolean)
 sealed interface SendResult {
     data object Ok : SendResult
     data class Failed(val message: String, val fatal: Boolean) : SendResult
+}
+
+/** Result of spawning a session — the channel on success, the reason otherwise. */
+sealed interface CreateResult {
+    data class Created(val channel: Channel) : CreateResult
+    data class Failed(val message: String) : CreateResult
 }
 
 /**
@@ -298,25 +305,50 @@ class HubRepository(
     // Writes
     // -----------------------------------------------------------------------
 
-    suspend fun send(paneId: String, text: String): SendResult = write(paneId, text, enter = true)
+    suspend fun send(paneId: String, text: String): SendResult =
+        deliver(paneId) { api.send(paneId, text, enter = true) }
 
     /**
-     * ESC — stop the current turn, keep the session. The first thing to reach for when
-     * `idle_s` has been climbing and he decides it is stuck.
+     * ESC over `POST /channels/{pane}/interrupt` — stop the current turn, keep the
+     * session. The first thing to reach for when `idle_s` has been climbing and he
+     * decides it is stuck.
+     *
+     * ⚠️ Not a byte through send() any more: the hub rejects C0 control characters
+     * there with 400 since 1.5.0, and the endpoint records a `control` event instead
+     * of a `sent` he never said.
      */
     suspend fun interrupt(paneId: String): SendResult =
-        write(paneId, ControlKeys.INTERRUPT.bytes, enter = false)
+        deliver(paneId) { api.interrupt(paneId) }
 
     /**
-     * Ctrl-C twice — what actually exits Claude Code. Sent as one payload so the two
-     * bytes cannot be separated by a reconnect, and never with Enter behind it.
+     * `POST /channels/{pane}/kill` — end the pane. The channel and its history
+     * survive it; the poller's canonical `closed` event follows within a poll cycle.
      */
     suspend fun kill(paneId: String): SendResult =
-        write(paneId, ControlKeys.KILL.bytes.repeat(2), enter = false)
+        deliver(paneId) { api.kill(paneId) }
 
-    private suspend fun write(paneId: String, text: String, enter: Boolean): SendResult =
+    /**
+     * `POST /channels` — spawn a new agent pane. The returned channel is upserted
+     * immediately so the new thread can open on it without waiting for the `channels`
+     * frame that follows on the socket.
+     */
+    suspend fun createSession(label: String, command: String = "claude"): CreateResult =
         try {
-            val resp = api.send(paneId, text, enter)
+            val channel = api.createChannel(command = command, label = label)
+            lastContactMs = clock()
+            _state.update { ChannelReducer.applyChannel(it, channel) }
+            CreateResult.Created(channel)
+        } catch (e: HubHttpException) {
+            CreateResult.Failed(e.shortReason())
+        } catch (e: InterruptedIOException) {
+            CreateResult.Failed(TIMED_OUT)
+        } catch (e: IOException) {
+            CreateResult.Failed("hub unreachable")
+        }
+
+    private suspend fun deliver(paneId: String, call: suspend () -> SendResponse): SendResult =
+        try {
+            val resp = call()
             lastContactMs = clock()
             // The hub pushes this back over the socket too; applying it here means the
             // thread updates immediately instead of one round trip later.

@@ -84,6 +84,7 @@ class SettingsScreenTest {
                         sending = false,
                         collapsed = folded,
                         onToggleCollapse = { folded = !folded },
+                        onNewSession = {},
                         onOpenChannel = {},
                         onHome = { screen = Screen.Channels },
                         onOpenApps = { screen = Screen.Apps },

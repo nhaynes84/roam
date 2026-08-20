@@ -83,6 +83,7 @@ class ChannelNavigationTest {
                         sending = false,
                         collapsed = folded,
                         onToggleCollapse = { folded = !folded },
+                        onNewSession = {},
                         onOpenChannel = { openPane = it.paneId; screen = Screen.Channels },
                         onHome = { openPane = null; screen = Screen.Channels },
                         onOpenApps = { screen = Screen.Apps },

@@ -22,17 +22,26 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -91,6 +100,7 @@ fun NavRail(
     collapsed: Boolean,
     onToggleCollapse: () -> Unit,
     onOpenChannel: (Channel) -> Unit,
+    onNewSession: () -> Unit,
     onHome: () -> Unit,
     onOpenApps: () -> Unit,
     onOpenSettings: () -> Unit,
@@ -250,7 +260,15 @@ fun NavRail(
         // ⚠️ Only while there is no channel open. With one open the real microphone is on
         // screen already, in the composer, and a second voice control next to it is the
         // exact confusion the root PTT bar used to cause.
-        if (open == null) RailTalk(shell, VoiceEntry.target(state.channels), onVoice)
+        if (open == null) {
+            RailTalk(shell, VoiceEntry.target(state.channels), onVoice)
+            // ★ The door to a NEW session — one tap, one label, and the command is
+            // always `claude`. Under TALK's rule and for a harder reason: the rail has
+            // a height budget (`the rail spends width, never height`), and with a
+            // thread open these 46 dp would come out of the queue, which is the one
+            // thing in the rail he reads. At list level the height is there to spend.
+            RailNewSession(shell, onNewSession)
+        }
 
         if (shell == Shell.Wide) {
             // One row, three doors: 46 dp instead of 138. In a 411 dp window those 92 dp
@@ -717,9 +735,123 @@ private val WIDE_DP = 224.dp
 private val COLLAPSED_DP = 56.dp
 private val NARROW_DP = 62.dp
 
+/**
+ * ★ The one write the rail can start: a new session on talos. A door in the same shape
+ * as [RailTalk] — icon plus a word in Wide, the icon alone in Narrow — because it opens
+ * a dialog rather than acting on its own; the dialog is where the label is typed.
+ */
+@Composable
+private fun RailNewSession(shell: Shell, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .testTag(RAIL_NEW)
+            .fillMaxWidth()
+            .padding(horizontal = 6.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .heightIn(min = 46.dp)
+            .padding(horizontal = 7.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = if (shell == Shell.Wide) Arrangement.spacedBy(7.dp)
+        else Arrangement.Center,
+    ) {
+        Icon(
+            imageVector = Icons.Filled.Add,
+            contentDescription = "new session",
+            tint = RoamColors.Attention,
+            modifier = Modifier.size(24.dp),
+        )
+        if (shell == Shell.Wide) {
+            Text(
+                "NEW SESSION",
+                style = MaterialTheme.typography.labelMedium,
+                color = RoamColors.Attention,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+/**
+ * ★ One field, one button. The label becomes the pane title — the thing that stops
+ * every new pane reading as the hostname — and the command is always `claude` for now:
+ * the dialog offers what he actually spawns, not a terminal.
+ *
+ * ⚠️ It stays open until the hub answers. START goes dead while the create is in
+ * flight ([creating]) and the caller closes the dialog on success — so a refused spawn
+ * never silently eats the label he typed.
+ */
+@Composable
+fun NewSessionDialog(
+    creating: Boolean,
+    onDismiss: () -> Unit,
+    onStart: (String) -> Unit,
+) {
+    var label by rememberSaveable { mutableStateOf("") }
+    val canStart = !creating && label.isNotBlank()
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = RoamColors.SurfaceRaised,
+        title = {
+            Text(
+                "New session",
+                style = MaterialTheme.typography.titleMedium,
+                color = RoamColors.TextPrimary,
+            )
+        },
+        text = {
+            OutlinedTextField(
+                value = label,
+                onValueChange = { label = it },
+                enabled = !creating,
+                placeholder = {
+                    Text(
+                        "what it is for",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = RoamColors.TextSecondary.copy(alpha = 0.6f),
+                    )
+                },
+                textStyle = MaterialTheme.typography.bodyMedium,
+                singleLine = true,
+                shape = RoundedCornerShape(11.dp),
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = RoamColors.Surface,
+                    unfocusedContainerColor = RoamColors.Surface,
+                    disabledContainerColor = RoamColors.Surface,
+                    focusedTextColor = RoamColors.TextPrimary,
+                    unfocusedTextColor = RoamColors.TextPrimary,
+                    focusedIndicatorColor = RoamColors.Attention.copy(alpha = 0.6f),
+                    unfocusedIndicatorColor = dividerColor(),
+                ),
+                modifier = Modifier.fillMaxWidth().testTag(NEW_SESSION_LABEL),
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { onStart(label) }, enabled = canStart) {
+                Text(
+                    if (creating) "STARTING…" else "START",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = if (canStart) RoamColors.Attention else RoamColors.Dead,
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(
+                    "CANCEL",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = RoamColors.TextSecondary,
+                )
+            }
+        },
+    )
+}
+
 const val RAIL = "nav-rail"
 const val RAIL_QUEUE = "rail-queue"
 const val RAIL_FOLD = "rail-fold"
 const val RAIL_COUNT = "rail-count"
 const val RAIL_TALK = "rail-talk"
+const val RAIL_NEW = "rail-new-session"
+const val NEW_SESSION_LABEL = "new-session-label"
 const val RAIL_STATUS = "rail-status"

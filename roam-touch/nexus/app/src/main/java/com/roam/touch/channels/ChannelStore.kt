@@ -377,6 +377,10 @@ object ChannelReducer {
         .withServerTime(serverTime, localNowMs)
         .copy(channels = channels, cursor = maxOf(state.cursor, latestEventId))
 
+    /** Upsert one channel — a `POST /channels` response, ahead of the `channels` frame. */
+    fun applyChannel(state: ChannelsState, channel: Channel): ChannelsState =
+        state.copy(channels = upsert(state.channels, channel))
+
     fun applyFullBody(state: ChannelsState, id: Long, body: String): ChannelsState =
         state.copy(fullBodies = state.fullBodies + (id to body))
 

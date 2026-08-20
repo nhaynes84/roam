@@ -18,6 +18,7 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -341,6 +342,124 @@ class HubRepositoryTest {
         assertTrue(result is SendResult.Failed)
         assertEquals("not sent — pane is gone", "not sent — ${(result as SendResult.Failed).message}")
         assertTrue("a dead pane is not going to recover on a retry", result.fatal)
+    }
+
+    /**
+     * ⚠️ Interrupt and kill go over their own endpoints since hub 1.5.0 — `/send` now
+     * answers 400 to a control byte, which is exactly what these used to type. The
+     * hub's `control` event is applied on the response, same as a send's `sent`.
+     */
+    @Test
+    fun `a kill hits the kill endpoint and its control event lands in the thread`() =
+        runBlocking {
+            server.enqueue(channelsResponse("%0" to "working", latest = 1))
+            server.enqueue(socketUpgrade())
+            start()
+            awaitOnline()
+
+            server.enqueue(
+                MockResponse().setBody(
+                    """{"event":{"id":2,"pane_id":"%0","kind":"control","body":"kill",
+                    "summary":"kill","meta":{},"ts":9.0},
+                    "channel":{"pane_id":"%0","status":"working","live":true}}"""
+                )
+            )
+            assertEquals(SendResult.Ok, repo.kill("%0"))
+
+            val req = takeUntil { it.path == "/channels/0/kill" }
+            assertEquals("POST", req.method)
+            val body = req.body.readUtf8()
+            assertTrue(body, body.contains("\"origin\":\"roam-app\""))
+            assertFalse("never a control byte through send", body.contains("\\u0003"))
+
+            val event = repo.state.value.thread("%0").single()
+            assertEquals("control", event.kind)
+            assertEquals("kill", event.body)
+        }
+
+    @Test
+    fun `an interrupt hits the interrupt endpoint with the escape action`() = runBlocking {
+        server.enqueue(channelsResponse("%0" to "working", latest = 1))
+        server.enqueue(socketUpgrade())
+        start()
+        awaitOnline()
+
+        server.enqueue(
+            MockResponse().setBody(
+                """{"event":{"id":2,"pane_id":"%0","kind":"control","body":"escape",
+                "summary":"escape","meta":{},"ts":9.0},
+                "channel":{"pane_id":"%0","status":"working","live":true}}"""
+            )
+        )
+        assertEquals(SendResult.Ok, repo.interrupt("%0"))
+
+        val req = takeUntil { it.path == "/channels/0/interrupt" }
+        val body = req.body.readUtf8()
+        assertTrue(body, body.contains("\"action\":\"escape\""))
+        assertFalse("never a control byte through send", body.contains("\\u001b"))
+        assertEquals(1, repo.state.value.thread("%0").size)
+    }
+
+    /** The 404 mapping survives the move off /send: a gone pane is fatal, not a retry. */
+    @Test
+    fun `a kill on a pane that is already gone says so and is fatal`() = runBlocking {
+        server.enqueue(channelsResponse("%0" to "dead", latest = 1))
+        server.enqueue(socketUpgrade())
+        start()
+        awaitOnline()
+
+        server.enqueue(
+            MockResponse().setResponseCode(404)
+                .setBody("""{"detail":"channel %0 is not live; nothing to kill"}""")
+        )
+        val result = repo.kill("%0")
+        assertTrue(result is SendResult.Failed)
+        assertEquals("pane is gone", (result as SendResult.Failed).message)
+        assertTrue("a dead pane cannot be killed deader on a retry", result.fatal)
+    }
+
+    // -- new session ----------------------------------------------------------
+
+    /** The 201 channel is upserted at once — the thread must be openable on the spot. */
+    @Test
+    fun `a created session is in the channel list before any socket frame mentions it`() =
+        runBlocking {
+            server.enqueue(channelsResponse("%0" to "idle", latest = 1))
+            server.enqueue(socketUpgrade())
+            start()
+            awaitOnline()
+
+            server.enqueue(
+                MockResponse().setResponseCode(201).setBody(
+                    """{"channel":{"pane_id":"%9","label":"TEST android probe",
+                    "status":"idle","live":true,"command":"claude"}}"""
+                )
+            )
+            val result = repo.createSession("TEST android probe")
+
+            assertTrue(result is CreateResult.Created)
+            assertEquals("%9", (result as CreateResult.Created).channel.paneId)
+            assertNotNull(repo.state.value.channel("%9"))
+
+            val req = takeUntil { it.path == "/channels" && it.method == "POST" }
+            val body = req.body.readUtf8()
+            assertTrue(body, body.contains("\"command\":\"claude\""))
+            assertTrue(body, body.contains("\"label\":\"TEST android probe\""))
+        }
+
+    @Test
+    fun `a session that cannot spawn reports why instead of pretending`() = runBlocking {
+        server.enqueue(channelsResponse("%0" to "idle", latest = 1))
+        server.enqueue(socketUpgrade())
+        start()
+        awaitOnline()
+
+        server.enqueue(
+            MockResponse().setResponseCode(502).setBody("""{"detail":"tmux refused"}""")
+        )
+        val result = repo.createSession("TEST doomed")
+        assertTrue(result is CreateResult.Failed)
+        assertEquals("tmux refused", (result as CreateResult.Failed).message)
     }
 
     @Test

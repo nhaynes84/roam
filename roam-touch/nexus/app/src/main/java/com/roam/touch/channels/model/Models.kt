@@ -33,6 +33,7 @@ enum class EventKind(val wire: String) {
     OPENED("opened"),
     CLOSED("closed"),
     NOTE("note"),
+    CONTROL("control"),
     ERROR("error"),
     OTHER("");
 
@@ -121,9 +122,10 @@ data class Event(
     val attempted: String? get() = metaString("attempted")
 
     /**
-     * A `sent` event whose whole payload is a control byte is a keystroke, not a
-     * message. The hub has no concept of this (see [ControlKeys]), so the client
-     * renders it as an action rather than as text the wearer "said".
+     * The action this event records, or null for an ordinary message. A `control`
+     * event from the hub, or — in pre-1.5.0 history — a `sent` whose whole payload was
+     * a control byte. Either way it renders as an action, never as text the wearer
+     * "said". See [ControlKeys].
      */
     val controlKey: ControlKeys.Key? get() = ControlKeys.classify(this)
 
@@ -289,6 +291,27 @@ data class SendRequest(
     val origin: String = "roam-app",
 )
 
+/** `POST /channels/{pane}/interrupt` — a key press, recorded as an action, not a message. */
+@Serializable
+data class InterruptRequest(
+    /** `escape` (stop the turn) or `interrupt` (C-c). An allow-list on the hub, not a passthrough. */
+    val action: String = "escape",
+    val origin: String = "roam-app",
+)
+
+/** `POST /channels/{pane}/kill` — end the pane. The channel and its history survive it. */
+@Serializable
+data class KillRequest(val origin: String = "roam-app")
+
+/** `POST /channels` — spawn a new agent pane. Always a new window, never a split. */
+@Serializable
+data class CreateChannelRequest(
+    val command: String,
+    /** The pane title. Always set: unnamed panes all read as the hostname. */
+    val label: String,
+    val origin: String = "roam-app",
+)
+
 @Serializable
 data class PresenceRequest(
     val source: String,
@@ -426,28 +449,44 @@ object FrameParser {
 }
 
 /**
- * Control bytes the panel can type into a pane.
+ * Control actions in a thread — rendered as chips, never as text the wearer "said".
  *
- * ⚠️ The hub has no interrupt endpoint — `POST /send` types text literally, which is
- * exactly what makes this work: a lone `0x03` reaches the pane's tty and the line
- * discipline raises SIGINT. Verified against a live tmux pane on 2026-08-12.
- * `enter` must be false; an Enter after the control byte would submit a stray prompt.
+ * ⚠️ Interrupt and kill go over their own endpoints now (`/interrupt`, `/kill`), which
+ * record a `control` event whose body names the action. Raw bytes through `/send` are
+ * HISTORY, not a path: the hub rejects C0 control characters there with 400 since
+ * 1.5.0. The byte forms below stay only so the `sent` events already in the ledger
+ * keep rendering as the actions they were.
  */
 object ControlKeys {
     enum class Key(val bytes: String, val label: String) {
         ESC("\u001B", "INTERRUPT"),
         CTRL_C("\u0003", "STOP"),
+
+        /** `control`/`kill` — the hub ends the pane itself; there is no byte form. */
+        KILL_PANE("", "KILL"),
     }
 
     /** ESC stops a Claude turn but keeps the session alive. The first thing to try. */
     val INTERRUPT = Key.ESC
 
-    /** SIGINT. Twice in a row exits Claude Code entirely — that is the kill. */
+    /** SIGINT — kept for classifying the old two-Ctrl-C kills in stored history. */
     val KILL = Key.CTRL_C
 
-    fun classify(event: Event): Key? {
-        if (EventKind.from(event.kind) != EventKind.SENT) return null
-        val b = event.body
-        return Key.entries.firstOrNull { b == it.bytes || b == it.bytes + it.bytes }
+    fun classify(event: Event): Key? = when (EventKind.from(event.kind)) {
+        // Pre-1.5.0 history: a `sent` whose whole payload was a control byte.
+        EventKind.SENT -> Key.entries.firstOrNull {
+            it.bytes.isNotEmpty() &&
+                (event.body == it.bytes || event.body == it.bytes + it.bytes)
+        }
+
+        // The hub's own record of an interrupt or kill; the body names the action.
+        EventKind.CONTROL -> when (event.body) {
+            "escape" -> Key.ESC
+            "interrupt" -> Key.CTRL_C
+            "kill" -> Key.KILL_PANE
+            else -> null
+        }
+
+        else -> null
     }
 }

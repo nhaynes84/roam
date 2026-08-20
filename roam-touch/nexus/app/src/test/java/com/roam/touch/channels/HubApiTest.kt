@@ -1,6 +1,5 @@
 package com.roam.touch.channels
 
-import com.roam.touch.channels.model.ControlKeys
 import com.roam.touch.channels.net.HubApi
 import com.roam.touch.channels.net.HubConfig
 import com.roam.touch.channels.net.HubHttpException
@@ -154,26 +153,65 @@ class HubApiTest {
         assertTrue(body.contains("\"origin\":\"roam-app\""))
     }
 
+    // -- interrupt and kill: endpoints, never control bytes through send -----
+
+    /**
+     * ⚠️ These used to be raw bytes through `/send` (`enter:false`), and the hub stored
+     * them as `sent` events he "said". Since 1.5.0 `/send` REJECTS C0 control characters
+     * with 400, and the real endpoints record a `control` event instead.
+     */
     @Test
-    fun `an interrupt is a literal control byte with no Enter behind it`() = runBlocking {
-        // ⚠️ The hub has no interrupt endpoint. This works precisely because /send types
-        // literally: a lone 0x1B reaches the pane's tty. An Enter after it would submit
-        // a stray empty prompt into the session he was trying to quieten.
-        json("""{"event":{"id":1,"pane_id":"%3","kind":"sent","body":""}}""")
-        api.send("%3", ControlKeys.INTERRUPT.bytes, enter = false)
-        val body = server.takeRequest().body.readUtf8()
-        assertTrue("escaped as \\u001b on the wire", body.contains("\\u001b"))
-        assertTrue(body.contains("\"enter\":false"))
+    fun `an interrupt is its own endpoint, not a control byte through send`() = runBlocking {
+        json(
+            """{"event":{"id":1,"pane_id":"%3","kind":"control","body":"escape"},
+            "channel":{"pane_id":"%3","status":"idle","live":true}}"""
+        )
+        api.interrupt("%3")
+        val req = server.takeRequest()
+        assertEquals("/channels/3/interrupt", req.path)
+        assertEquals("POST", req.method)
+        val body = req.body.readUtf8()
+        assertTrue(body, body.contains("\"action\":\"escape\""))
+        assertTrue(body, body.contains("\"origin\":\"roam-app\""))
+        assertFalse("no control byte anywhere near the wire", body.contains("\\u001b"))
     }
 
     @Test
-    fun `the kill is two Ctrl-Cs in one payload`() = runBlocking {
-        // One payload, so a reconnect cannot separate them into two half-kills.
-        json("""{"event":{"id":1,"pane_id":"%3","kind":"sent","body":"x"}}""")
-        api.send("%3", ControlKeys.KILL.bytes.repeat(2), enter = false)
-        val body = server.takeRequest().body.readUtf8()
-        assertEquals(2, Regex("\\\\u0003").findAll(body).count())
+    fun `the kill is the kill endpoint, and carries only its origin`() = runBlocking {
+        json(
+            """{"event":{"id":1,"pane_id":"%3","kind":"control","body":"kill"},
+            "channel":{"pane_id":"%3","status":"dead","live":false}}"""
+        )
+        api.kill("%3")
+        val req = server.takeRequest()
+        assertEquals("/channels/3/kill", req.path)
+        assertEquals("POST", req.method)
+        val body = req.body.readUtf8()
+        assertTrue(body, body.contains("\"origin\":\"roam-app\""))
+        assertFalse("the two Ctrl-Cs are history, not a payload", body.contains("\\u0003"))
     }
+
+    // -- new session ----------------------------------------------------------
+
+    @Test
+    fun `creating a session posts the command and label and decodes the 201 channel`() =
+        runBlocking {
+            json(
+                """{"channel":{"pane_id":"%9","label":"refactor the parser",
+                "status":"idle","live":true,"command":"claude"}}""",
+                code = 201,
+            )
+            val ch = api.createChannel(command = "claude", label = "refactor the parser")
+            val req = server.takeRequest()
+            assertEquals("/channels", req.path)
+            assertEquals("POST", req.method)
+            val body = req.body.readUtf8()
+            assertTrue(body, body.contains("\"command\":\"claude\""))
+            assertTrue(body, body.contains("\"label\":\"refactor the parser\""))
+            assertTrue(body, body.contains("\"origin\":\"roam-app\""))
+            assertEquals("%9", ch.paneId)
+            assertTrue(ch.live)
+        }
 
     // -- catch-up and expansion --------------------------------------------
 

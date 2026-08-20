@@ -212,6 +212,18 @@ class WireTest {
         assertEquals("STOP", kill.displaySummary())
     }
 
+    /** Since hub 1.5.0 an interrupt/kill is a `control` event whose body names it. */
+    @Test
+    fun `a control event renders as the action it records`() {
+        val esc = Fx.event(id = 10, kind = "control", body = "escape", summary = "escape")
+        assertEquals(ControlKeys.Key.ESC, esc.controlKey)
+        assertEquals("INTERRUPT", esc.displaySummary())
+
+        val kill = Fx.event(id = 11, kind = "control", body = "kill", summary = "kill")
+        assertEquals(ControlKeys.Key.KILL_PANE, kill.controlKey)
+        assertEquals("KILL", kill.displaySummary())
+    }
+
     @Test
     fun `ordinary text is never mistaken for a control key`() {
         assertNull(Fx.event(id = 9, kind = "sent", body = "continue").controlKey)
