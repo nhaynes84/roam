@@ -158,7 +158,31 @@ def main() -> int:
     try:
         urllib.request.urlopen(request, timeout=TIMEOUT_S).read()
     except (urllib.error.URLError, OSError, ValueError):
-        pass  # the hub being down must never disturb the session
+        # The hub being down must never disturb the session -- but the answer
+        # must not be lost either. Hub RESTARTS are routine (every deploy), and
+        # a Stop that fired inside one silently ate the outcome: the channel
+        # sat "working" -> "quiet" until someone read the raw pane. Same
+        # fallback as roam-msg: write the row straight into the ledger,
+        # pending=1; the hub adopts and pushes it on its next poll, a few
+        # seconds late instead of never.
+        try:
+            sys.path.insert(0, str(HERE))
+            from store import Store, EventKind
+
+            db_path = Path(os.environ.get("ROAM_HUB_DB_PATH", HERE / "hub.sqlite"))
+            store = Store(db_path)
+            if store.get_channel(pane) is None:
+                store.remember_channel(pane, pane, socket.gethostname().split(".")[0])
+            store.append(
+                pane,
+                EventKind(kind),
+                body,
+                {**meta, "offline": True},
+                pending=True,
+            )
+            store.close()
+        except Exception:
+            pass  # both paths down: nothing more a hook may do
     return 0
 
 

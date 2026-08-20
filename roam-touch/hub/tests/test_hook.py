@@ -309,3 +309,45 @@ def test_a_terminal_stdin_is_not_read(monkeypatch, hook_env, posted):
     monkeypatch.setattr(sys, "stdin", Tty())
     assert hook.main() == 0
     assert posted[0]["body"]["body"] == "manual"
+
+
+# ------------------------------------------------- the hub being down/restarting
+
+
+def test_a_dead_hub_spools_the_event_instead_of_eating_it(monkeypatch, hook_env, tmp_path):
+    """Hub restarts are routine; a Stop that fires inside one must not lose
+    the answer. The hook writes the row straight into the ledger, pending=1,
+    exactly as roam-msg does — the hub adopts it on its next poll."""
+    def refuse(request, timeout=None):
+        raise urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr(hook.urllib.request, "urlopen", refuse)
+    db = tmp_path / "spool.sqlite"
+    monkeypatch.setenv("ROAM_HUB_DB_PATH", str(db))
+
+    payload = {"session_id": "s1", "prompt_id": "p1",
+               "last_assistant_message": "the answer that must survive"}
+    assert run(monkeypatch, ["outcome"], stdin=json.dumps(payload)) == 0
+
+    from store import Store
+    st = Store(db)
+    try:
+        assert st.pending_count() == 1
+        (orphan,) = st.claim_pending()
+        assert orphan.kind == "outcome"
+        assert orphan.body == "the answer that must survive"
+        assert orphan.meta["offline"] is True
+        assert st.pending_count() == 0  # claimed exactly once
+    finally:
+        st.close()
+
+
+def test_both_paths_down_still_never_disturbs_the_session(monkeypatch, hook_env):
+    def refuse(request, timeout=None):
+        raise urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr(hook.urllib.request, "urlopen", refuse)
+    # An unopenable ledger path: the fallback itself fails.
+    monkeypatch.setenv("ROAM_HUB_DB_PATH", "/nonexistent/nowhere/hub.sqlite")
+    payload = {"last_assistant_message": "x"}
+    assert run(monkeypatch, ["outcome"], stdin=json.dumps(payload)) == 0
