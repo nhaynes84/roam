@@ -7,12 +7,26 @@ enum Agent: String, CaseIterable, Identifiable {
     case claude = "Claude"
     case codex = "Codex"
     var id: String { rawValue }
-    var command: String {
+
+    func command(model: ClaudeModel) -> String {
         switch self {
-        case .claude: return "claude"
+        case .claude: return model == .default ? "claude" : "claude --model \(model.flag)"
         case .codex: return "codex"
         }
     }
+}
+
+/// Model aliases the claude CLI accepts. Default = whatever the box's
+/// settings say (currently Fable 5); mid-session, typing /model <alias>
+/// into the composer switches the running session.
+enum ClaudeModel: String, CaseIterable, Identifiable {
+    case `default` = "Default"
+    case fable = "Fable"
+    case opus = "Opus"
+    case sonnet = "Sonnet"
+    case haiku = "Haiku"
+    var id: String { rawValue }
+    var flag: String { rawValue.lowercased() }
 }
 
 struct NewSessionSheet: View {
@@ -20,6 +34,7 @@ struct NewSessionSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var label = ""
     @State private var agent: Agent = .claude
+    @State private var model: ClaudeModel = .default
     @State private var cwd = ""
     @State private var failure: String?
     @State private var creating = false
@@ -34,6 +49,15 @@ struct NewSessionSheet: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
+            if agent == .claude {
+                Picker("Model", selection: $model) {
+                    ForEach(ClaudeModel.allCases) { m in
+                        Text(m.rawValue).font(.system(size: 14)).tag(m)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            }
             TextField("Label — what is this session for?", text: $label)
                 .font(.system(size: 14))
             TextField("Working directory (optional, e.g. ~/Projects/roam)", text: $cwd)
@@ -58,7 +82,7 @@ struct NewSessionSheet: View {
         failure = nil
         Task {
             do {
-                try await store.createSession(command: agent.command,
+                try await store.createSession(command: agent.command(model: model),
                                               label: label.trimmed.isEmpty ? nil : label.trimmed,
                                               cwd: cwd.trimmed.isEmpty ? nil : cwd.trimmed)
                 dismiss()
