@@ -908,3 +908,74 @@ def test_hub_survives_tmux_going_away(client, auth, fake_tmux):
     fake_tmux.installed = True
     assert client.get("/channels", headers=auth).status_code == 200
     assert client.get("/status", headers=auth).json()["tmux_ok"] is True
+
+
+# ---------------------------------------------------------------- lifecycle
+
+
+def test_create_channel_spawns_a_detached_window(client, auth, fake_tmux):
+    r = client.post("/channels", json={"label": "TEST spawn", "command": "claude"},
+                    headers=auth)
+    assert r.status_code == 201
+    ch = r.json()["channel"]
+    assert ch["live"] is True
+    assert ch["label"] == "TEST spawn"
+    # A new window, detached, never a split of what the owner is looking at.
+    (argv,) = fake_tmux.argv_for("new-window")
+    assert "-d" in argv
+    assert argv[-1] == "claude"
+    # Named while we know what it is for -- unnamed panes all read as "talos".
+    assert fake_tmux.argv_for("select-pane")
+
+
+def test_create_channel_records_opened_once(client, auth, fake_tmux):
+    r = client.post("/channels", json={"label": "TEST once"}, headers=auth)
+    pane_id = r.json()["channel"]["pane_id"]
+    import time as _time
+    _time.sleep(0.15)  # let the poller run; it must not re-open the channel
+    history = client.get(f"/channels/{pane_id.lstrip('%')}/history", headers=auth).json()
+    opened = [e for e in history["events"] if e["kind"] == "opened"]
+    assert len(opened) == 1
+    assert opened[0]["meta"]["spawned"] is True
+
+
+def test_create_channel_with_no_server_starts_a_session(client, auth, fake_tmux):
+    fake_tmux.server_running = False
+    fake_tmux.panes = []
+    r = client.post("/channels", json={"command": "claude"}, headers=auth)
+    assert r.status_code == 201
+    assert fake_tmux.argv_for("new-session")
+    assert r.json()["channel"]["live"] is True
+
+
+def test_create_channel_without_tmux_is_502(client, auth, fake_tmux):
+    fake_tmux.installed = False
+    r = client.post("/channels", json={}, headers=auth)
+    assert r.status_code == 502
+
+
+def test_create_channel_requires_a_token(client):
+    assert client.post("/channels", json={}).status_code == 401
+
+
+def test_kill_ends_the_pane_but_keeps_the_thread(client, auth, fake_tmux):
+    r = client.post("/channels/0/kill", headers=auth)
+    assert r.status_code == 200
+    body = r.json()
+    # Recorded as a control action, not as something he "said".
+    assert body["event"]["kind"] == "control"
+    assert body["event"]["body"] == "kill"
+    assert body["channel"]["live"] is False
+    assert all(p[0] != "%0" for p in fake_tmux.panes)
+    # History is still readable -- the channel outlives the pane.
+    history = client.get("/channels/0/history", headers=auth)
+    assert history.status_code == 200
+
+
+def test_kill_a_dead_pane_is_404(client, auth):
+    assert client.post("/channels/99/kill", headers=auth).status_code == 404
+
+
+def test_kill_at_host_is_404(client, auth):
+    # @host has no pane; killing it would claim the box was stoppable.
+    assert client.post("/channels/@host/kill", headers=auth).status_code == 404

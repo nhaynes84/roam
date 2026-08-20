@@ -206,3 +206,44 @@ def capture(pane_id: str, lines: int = 200) -> str:
         raise TmuxError(f"no such pane: {pane_id}")
     # -p print to stdout, -J join wrapped lines, -S negative = scrollback start
     return _tmux("capture-pane", "-p", "-J", "-t", pane_id, "-S", f"-{lines}")
+
+
+def spawn(
+    command: str = "claude",
+    session: str | None = None,
+    label: str | None = None,
+    cwd: str | None = None,
+) -> str:
+    """Create a pane running `command` and return its pane id.
+
+    A new window, never a split: splitting would carve up whatever the owner
+    is looking at. `-d` keeps focus where it is, so a session created from the
+    arm or the desk app never yanks the tmux client he is typing in. With no
+    session given, the window lands in the first session that exists; with no
+    server at all, a fresh "agents" session is started to hold it.
+    """
+    if session is None:
+        existing = list_channels()
+        session = existing[0].session if existing else None
+    if session is not None:
+        args = ["new-window", "-d", "-P", "-F", "#{pane_id}", "-t", f"{session}:"]
+    else:
+        args = ["new-session", "-d", "-P", "-F", "#{pane_id}", "-s", "agents"]
+    if cwd:
+        args += ["-c", cwd]
+    args.append(command)
+    pane_id = _tmux(*args).strip()
+    if label:
+        # The default pane title is the hostname, which reads as "talos" for
+        # every unnamed pane -- name it while we know what it is for.
+        _tmux("select-pane", "-t", pane_id, "-T", label)
+    return pane_id
+
+
+def kill(pane_id: str) -> None:
+    """Kill the pane and whatever runs in it.
+
+    The channel outlives the pane: history stays readable and the poller
+    emits the canonical `closed` event when it sees the pane gone.
+    """
+    _tmux("kill-pane", "-t", pane_id)

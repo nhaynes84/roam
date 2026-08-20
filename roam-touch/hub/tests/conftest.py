@@ -48,6 +48,10 @@ class FakeTmux:
             for p in self.panes
         ]
 
+    def _next_pane_id(self) -> str:
+        highest = max((int(p[0].lstrip("%")) for p in self.panes), default=-1)
+        return f"%{highest + 1}"
+
     def argv_for(self, subcommand: str) -> list[tuple[str, ...]]:
         return [args for args, _ in self.calls if args and args[0] == subcommand]
 
@@ -71,6 +75,28 @@ class FakeTmux:
         if sub in ("send-keys", "load-buffer", "paste-buffer"):
             if self.fail_send_with:
                 raise channels_mod.TmuxError(self.fail_send_with)
+            return ""
+        if sub == "new-window":
+            if not self.server_running:
+                raise channels_mod.TmuxError("no server running on /tmp/tmux-501/default")
+            target = args[args.index("-t") + 1].rstrip(":") if "-t" in args else "main"
+            new_id = self._next_pane_id()
+            self.add_pane(new_id, session=target, window=len(self.panes), index=0,
+                          command=args[-1], title="")
+            return f"{new_id}\n"
+        if sub == "new-session":
+            self.server_running = True
+            session = args[args.index("-s") + 1] if "-s" in args else "agents"
+            new_id = self._next_pane_id()
+            self.add_pane(new_id, session=session, window=0, index=0,
+                          command=args[-1], title="")
+            return f"{new_id}\n"
+        if sub == "kill-pane":
+            self.kill_pane(args[args.index("-t") + 1])
+            return ""
+        if sub == "select-pane":
+            if "-T" in args:
+                self.retitle(args[args.index("-t") + 1], args[args.index("-T") + 1])
             return ""
         return ""
 

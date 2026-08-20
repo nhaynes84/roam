@@ -455,10 +455,36 @@ def test_cap_handles_empty():
 # ------------------------------------------- the real files on this machine
 
 
+def _has_any_assistant_text(path) -> bool:
+    """A session killed before its first text turn has nothing to extract --
+    every assistant record is tool_use/thinking only. Those are not parser
+    failures; skip them rather than asserting text into existence."""
+    import json
+    with open(path, encoding="utf-8") as fh:
+        for line in fh:
+            try:
+                record = json.loads(line)
+            except ValueError:
+                continue
+            if record.get("type") != "assistant":
+                continue
+            content = (record.get("message") or {}).get("content") or []
+            for block in content:
+                if (
+                    isinstance(block, dict)
+                    and block.get("type") == "text"
+                    and (block.get("text") or "").strip()
+                ):
+                    return True
+    return False
+
+
 @pytest.mark.skipif(not REAL_TRANSCRIPTS, reason="no local transcripts")
 @pytest.mark.parametrize("path", REAL_TRANSCRIPTS)
 def test_every_real_transcript_on_this_box_yields_clean_text(path):
     """Fidelity: run against the actual JSONL Claude Code writes here."""
+    if not _has_any_assistant_text(path):
+        pytest.skip("session produced no assistant text at all (interrupted turns only)")
     answer = last_assistant_text(path)
     assert answer, f"no assistant text found in {path}"
     assert '"type"' not in answer, "raw JSON leaked into the answer"

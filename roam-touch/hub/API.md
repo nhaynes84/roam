@@ -1,6 +1,6 @@
 # ROAM Touch hub — client contract
 
-Version `1.3.0`, protocol `1`. This document is the contract the Android client is
+Version `1.5.0`, protocol `1`. This document is the contract the Android client is
 built against. If the code and this file disagree, that is a bug in one of them —
 say so rather than guessing.
 
@@ -406,6 +406,51 @@ Soft-clear. Rows are flagged, never deleted; they remain readable with
 Body `{"archived": true}` (or `false` to restore; body may be omitted, defaults to
 `true`). Hides a channel from `GET /channels` — for dead panes you are done with.
 History is kept. Returns `{"channel": Channel}`.
+
+### `POST /channels` — new session
+
+Spawn a new agent pane; the new channel is live immediately and arrives on
+every client via a `channels` frame plus an `opened` event (`meta.spawned:
+true`).
+
+```json
+{"command": "claude", "label": "refactor the parser", "session": null,
+ "cwd": null, "origin": "client"}
+```
+
+* Everything is optional; an empty body (or none) spawns `claude` in a new
+  window of the first existing tmux session, in the hub's default directory.
+* `command` — what to run. The token holder can already type into any agent
+  pane, so this is not a privilege boundary; it is a convenience.
+* `label` — the pane title. Set it: unnamed panes all read as the hostname.
+* `session` — a tmux session name. Omit to use the first that exists; with no
+  tmux server at all, a fresh `agents` session is created to hold the pane.
+* `cwd` — working directory for the command.
+
+Always a **new window, never a split** — splitting would carve up whatever the
+owner is looking at — and always detached (`-d`), so the tmux client he is
+typing in never has its focus yanked.
+
+Response `201`: `{"channel": Channel}`. `502` if tmux refused.
+
+### `POST /channels/{pane}/kill` — end a session
+
+Kill the pane and whatever runs in it. **The channel outlives the pane**:
+history stays readable, exactly as for a pane that died any other way.
+
+```json
+{"origin": "client"}
+```
+
+Body may be omitted. Returns `{"event": Event, "channel": Channel}` where the
+event is `kind: "control"`, `body: "kill"` — recorded as an action, not as
+something he said. The canonical `closed` event follows from the poller within
+a poll cycle. `404` if the pane is not live (there is nothing to kill —
+including `@host`, which has no pane and never can); `502` if tmux refused.
+
+Clients should treat kill as destructive UI-wise (confirm, or bury it a level
+deeper than send) but it is not destructive of data: nothing in the ledger is
+touched.
 
 ### `GET /channels/{pane}/capture`
 

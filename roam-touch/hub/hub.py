@@ -64,7 +64,7 @@ HUB_DIR = Path(__file__).resolve().parent
 #: HTML and the vendored three.js the file browser serves. See `web/browse.html`
 #: for the browser constraints -- they are not negotiable and not obvious.
 WEB_DIR = HUB_DIR / "web"
-HUB_VERSION = "1.4.0"
+HUB_VERSION = "1.5.0"
 PROTOCOL_VERSION = 1
 
 #: WebSocket frames a subscriber may fall behind by before we cut it loose and
@@ -344,6 +344,20 @@ class InterruptRequest(BaseModel):
         description="escape (stop generating) | interrupt (C-c to the process)",
     )
     origin: str = Field(default="client", description="Who asked, for the log.")
+
+
+class CreateChannelRequest(BaseModel):
+    """POST /channels -- spawn a new agent pane."""
+
+    command: str = Field(default="claude", min_length=1)
+    label: str | None = None
+    session: str | None = None
+    cwd: str | None = None
+    origin: str = "client"
+
+
+class KillRequest(BaseModel):
+    origin: str = "client"
 
 
 class ArchiveRequest(BaseModel):
@@ -777,6 +791,96 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
         if match is None and stored is None:
             raise HTTPException(404, detail=f"unknown channel: {pane_id}")
         return {"channel": channel_view(st, pane_id, match, stored)}
+
+    @app.post(
+        "/channels",
+        tags=["channels"],
+        dependencies=[Depends(require_auth)],
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def create_channel_endpoint(payload: CreateChannelRequest | None = None):
+        """Spawn a new agent pane; the new channel is live immediately.
+
+        The pane is remembered before the poller can see it, so the `opened`
+        event below is the only one -- the poller's first-time check finds the
+        channel already known.
+        """
+        request = payload or CreateChannelRequest()
+        try:
+            pane_id = await run_in_threadpool(
+                channels_mod.spawn,
+                request.command,
+                request.session,
+                request.label,
+                request.cwd,
+            )
+        except TmuxError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"tmux refused to create the pane: {exc}",
+            ) from exc
+        st = _store()
+        live = await run_in_threadpool(channels_mod.get, pane_id)
+        label = (live.label if live else None) or request.label or pane_id
+        st.remember_channel(pane_id, label, live.session if live else request.session)
+        event = st.append(
+            pane_id,
+            EventKind.OPENED,
+            label,
+            meta={"origin": request.origin, "spawned": True, "command": request.command},
+        )
+        _publish_event(event)
+        all_live = await _live_channels()
+        _publish(
+            {
+                "type": "channels",
+                "channels": build_channel_list(st, all_live),
+                "server_time": time.time(),
+            }
+        )
+        return {"channel": channel_view(st, pane_id, live, st.get_channel(pane_id))}
+
+    @app.post(
+        "/channels/{pane}/kill",
+        tags=["channels"],
+        dependencies=[Depends(require_auth)],
+    )
+    async def kill_channel_endpoint(
+        payload: KillRequest | None = None, pane: str = PathParam(...)
+    ):
+        """End the pane and whatever runs in it. History survives.
+
+        Records a `control` event naming what was asked; the canonical
+        `closed` comes from the poller when it sees the pane gone, exactly as
+        for a pane that died any other way.
+        """
+        pane_id = normalise_pane_id(pane)
+        request = payload or KillRequest()
+        st = _store()
+        live = await run_in_threadpool(channels_mod.get, pane_id)
+        if live is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"channel {pane_id} is not live; nothing to kill",
+            )
+        try:
+            await run_in_threadpool(channels_mod.kill, pane_id)
+        except TmuxError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"tmux refused the kill: {exc}",
+            ) from exc
+        event = st.append(
+            pane_id,
+            EventKind.CONTROL,
+            "kill",
+            meta={"key": "kill-pane", "origin": request.origin},
+        )
+        _publish_event(event)
+        return {
+            "event": event.to_dict(),
+            "channel": channel_view(st, pane_id, None, st.get_channel(pane_id)),
+        }
 
     @app.post(
         "/channels/{pane}/send",
