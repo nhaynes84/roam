@@ -378,7 +378,24 @@ private fun ThreadTopBar(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(7.dp),
             ) {
-                title(Modifier.weight(1f).padding(start = 8.dp))
+                // ★★ **The way out, in landscape too.** It was Narrow-only, on the
+                // reasoning that the rail beside it already held the list — which stopped
+                // being true the day the rail learned to fold. Owner, 2026-08-15: *"lets me
+                // dive into one and has a 'back' button to take me back to the channel list
+                // if i don't want the extra column 'quick channel view' open."*
+                //
+                // ⚠️ This is the assertion `no open channel is ever a dead end` is really
+                // about: a channel open, the rail folded, and no control on screen that
+                // returns to the list is a state he can only leave by unfolding a column he
+                // deliberately put away.
+                IconButton(onClick = onBack) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "back to channels",
+                        tint = RoamColors.TextPrimary,
+                    )
+                }
+                title(Modifier.weight(1f))
                 status()
                 stop()
             }

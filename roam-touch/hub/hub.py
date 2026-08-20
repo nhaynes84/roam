@@ -45,6 +45,7 @@ from starlette.concurrency import run_in_threadpool
 
 import channels as channels_mod
 import files as files_mod
+import radio as radio_mod
 from channels import Channel, TmuxError
 from presence import DEFAULT_TTL_S, UNKNOWN_COVERAGE, Presence
 from store import (
@@ -187,6 +188,10 @@ class Settings(BaseSettings):
     #: bridge feeds -- see README.md, "the inbox contract".
     inbox: Path = files_mod.DEFAULT_INBOX
     thumb_cache: Path = files_mod.DEFAULT_THUMB_CACHE
+
+    #: Where the station directory is cached. The browser never calls
+    #: radio-browser.info itself -- see `radio.py` for why.
+    radio_cache: Path = radio_mod.DEFAULT_CACHE_DIR
 
     log_level: str = "info"
 
@@ -1267,6 +1272,47 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
             media_type="application/javascript",
             headers={"Cache-Control": "public, max-age=86400"},
         )
+
+    # --------------------------------------------------------------- radio
+    # He has no music on the device and no account on it. `GET /radio` is a
+    # station list and a bare `<audio>` tag; `radio.py` is the part that knows
+    # which streams a 2019 engine can actually decode.
+
+    @app.get(
+        "/radio/stations", tags=["radio"], dependencies=[Depends(require_auth_flex)]
+    )
+    async def radio_stations(
+        q: str = Query("", max_length=radio_mod.MAX_QUERY_CHARS),
+    ) -> dict[str, Any]:
+        """The curated list, or a search. Never the browser's own API call.
+
+        `source` says where the answer came from -- `live`, `cache`, `stale`
+        (the directory was unreachable, this is the last good answer) or
+        `builtin` (the baked-in favourites). The page shows the last two as
+        such rather than presenting a possibly-rotted list as current.
+        """
+        try:
+            return await run_in_threadpool(
+                radio_mod.stations, q, settings.radio_cache
+            )
+        except radio_mod.RadioUnavailable as exc:
+            # 502: the hub is fine, the thing behind it is not. A 500 would
+            # send the client looking for a bug on this side.
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        except radio_mod.RadioError as exc:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
+
+    @app.get(
+        "/radio",
+        tags=["radio"],
+        dependencies=[Depends(require_auth_flex)],
+        response_class=HTMLResponse,
+    )
+    async def radio_page() -> HTMLResponse:
+        """The radio, for a phone browser. See `web/radio.html`."""
+        return _page("radio.html", {'"__ROAM_TOKEN__"': _js_literal(token)})
 
     # ----------------------------------------------------------- websocket
 

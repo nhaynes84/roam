@@ -2,10 +2,15 @@ package com.roam.touch.channels.ui
 
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.unit.height
 import androidx.compose.ui.unit.width
@@ -49,9 +54,14 @@ class LandscapeLayoutTest {
     }
 
     /** The whole panel, laid out exactly as [ChannelsApp] lays it out. */
-    private fun renderThread(shell: Shell) {
+    private fun renderThread(shell: Shell, collapsed: Boolean = false) {
         compose.setContent {
             RoamTheme {
+                // ⚠️ Real state, not a fixed flag: Compose allows one `setContent` per
+                // test, so a fold that only exists as a parameter cannot be measured in
+                // both shapes. Here the rail's own control drives it, which is also the
+                // path the wearer takes.
+                var folded by remember { mutableStateOf(collapsed) }
                 Row(Modifier.fillMaxSize()) {
                     NavRail(
                         shell = shell,
@@ -61,11 +71,12 @@ class LandscapeLayoutTest {
                         screen = Screen.Channels,
                         openPane = "%0",
                         sending = false,
+                        collapsed = folded,
+                        onToggleCollapse = { folded = !folded },
                         onOpenChannel = {},
                         onHome = {},
                         onOpenApps = {},
-                        onOpenHomeAssistant = {},
-                        onOpenControls = {},
+                        onOpenSettings = {},
                         onVoice = {},
                         onQuickSend = {},
                     )
@@ -191,11 +202,69 @@ class LandscapeLayoutTest {
         println("RAIL width=${rail.width.value}dp height=${rail.height.value}dp queue=${queue}dp")
         assertTrue("the rail does not start at the top edge", rail.top.value == 0f)
         assertTrue("the rail is not full height", rail.height == root.height)
-        assertTrue("the rail is too wide for a 731dp window", rail.width.value <= 240f)
         assertTrue(
             "the rail footer starved the channel list down to ${queue}dp",
             queue >= 3 * RAIL_ROW_MIN_DP,
         )
+    }
+
+    /**
+     * ★★ **The other number, and what he chose to do about it.** The rail is the channels
+     * pane — in Wide the list lives inside it — so its width is the whole of what he sees
+     * the channels costing, and 224 dp of a 731 dp window is a third of the screen.
+     *
+     * He was offered a narrower rail and turned it down: *"instead of 1/4 on the channels,
+     * let's keep the proportions, but make it collapsible into the left side where it
+     * becomes some icons."* So this asserts the trade he actually took — the expanded rail
+     * keeps the width that fits a channel name, and the fold is what buys the screen back.
+     *
+     * ⚠️ Both halves, because either one alone is satisfiable by the wrong layout: a rail
+     * that never folds passes the first, and a rail permanently narrowed to icons passes
+     * the second.
+     */
+    @Test
+    @Config(qualifiers = "w731dp-h411dp-land")
+    fun `the expanded rail keeps its third, and folding is what gives it back`() {
+        renderThread(Shell.Wide)
+        val root = compose.onRoot().getUnclippedBoundsInRoot().width.value
+        val open = compose.onNodeWithTag(RAIL).getUnclippedBoundsInRoot().width.value
+
+        compose.onNodeWithTag(RAIL_FOLD).performClick()
+        val shut = compose.onNodeWithTag(RAIL).getUnclippedBoundsInRoot().width.value
+
+        println("RAIL open=${open}dp folded=${shut}dp of ${root}dp " +
+            "(${(100 * open / root).toInt()}% -> ${(100 * shut / root).toInt()}%)")
+        assertTrue("the expanded rail was narrowed to ${open}dp", open >= root * 0.28f)
+        assertTrue("the expanded rail grew past a third: ${open}dp", open <= root * 0.33f)
+        // A fold that saves less than half the rail is not worth the control it costs.
+        assertTrue("folding only got it to ${shut}dp", shut <= open * 0.35f)
+    }
+
+    /**
+     * ★★ **The width has to arrive somewhere.** A rail that folds while the content pane
+     * stays where it was is an animation, not a layout — and this is the assertion that
+     * tells the two apart, because nothing in [NavRail] can make it pass on its own.
+     *
+     * ⚠️ Measured on [THREAD_TOP_BAR], which fills the content pane, rather than on the
+     * pane's own `weight(1f)` box — that box has no tag, and giving it one to measure the
+     * thing under test would be measuring the modifier rather than the result.
+     */
+    @Test
+    @Config(qualifiers = "w731dp-h411dp-land")
+    fun `folding the rail hands its width to the content pane`() {
+        renderThread(Shell.Wide)
+        val railOpen = compose.onNodeWithTag(RAIL).getUnclippedBoundsInRoot().width.value
+        val contentOpen = compose.onNodeWithTag(THREAD_TOP_BAR).getUnclippedBoundsInRoot().width.value
+
+        compose.onNodeWithTag(RAIL_FOLD).performClick()
+        val railShut = compose.onNodeWithTag(RAIL).getUnclippedBoundsInRoot().width.value
+        val contentShut = compose.onNodeWithTag(THREAD_TOP_BAR).getUnclippedBoundsInRoot().width.value
+
+        val freed = railOpen - railShut
+        val gained = contentShut - contentOpen
+        println("FOLD freed=${freed}dp content=${contentOpen}dp -> ${contentShut}dp (+${gained}dp)")
+        assertTrue("the content pane gained ${gained}dp of the ${freed}dp the rail gave up",
+            gained == freed)
     }
 
     private companion object {

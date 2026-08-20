@@ -3,7 +3,6 @@ package com.roam.touch.apps
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -61,7 +60,8 @@ class AppShelfTest {
         val shelf = AppShelf.build(sailfish)
         // Growth here is a product decision, never an accident: this ceiling exists to
         // make an accidental tile fail the build rather than appear on his wrist.
-        assertTrue("shelf grew to ${shelf.size}", shelf.size <= 11)
+        // 11 -> 12 on 2026-08-14 for the Radio tile. Deliberate, per the rule above.
+        assertTrue("shelf grew to ${shelf.size}", shelf.size <= 12)
         val ids = shelf.map { it.id }
 
         // ★ Twenty packages are installed and six earn a tile. These are the ones that
@@ -116,7 +116,8 @@ class AppShelfTest {
         }
         val tile = AppShelf.build(full).single { it.id.startsWith("io.homeassistant") }
         assertEquals("io.homeassistant.companion.android", tile.id)
-        assertNotNull(tile.note)
+        // Whichever build is installed, it is the one that cannot render — see `broken`.
+        assertTrue(tile.broken)
     }
 
     @Test
@@ -126,18 +127,24 @@ class AppShelfTest {
         assertTrue(labels.contains("HA Companion"))
     }
 
+    /**
+     * ⚠️⚠️ This used to also assert that the tile carried the *reason* — "needs a newer
+     * WebView…" — and that assertion is gone on purpose, not by neglect. Owner,
+     * 2026-08-15: *"yeah HA companion too, i don't need debug notes on the widget, lol."*
+     * The reason now lives in KDoc on `AppShelf`, where the person who has to maintain the
+     * shelf reads it and the man wearing the phone does not.
+     *
+     * What is left is the part that was never text: it is dimmed, and it is **last**.
+     */
     @Test
-    fun `the companion app is marked broken with a reason, and sinks to the bottom`() {
+    fun `the companion app is marked broken, and sinks to the bottom`() {
         val shelf = AppShelf.build(sailfish)
         val companion = shelf.single { it.id.startsWith("io.homeassistant") }
 
         assertTrue(companion.broken)
         assertEquals(shelf.last(), companion)
-
-        // ★ The reason has to be specific enough that he does not debug it again at 3am.
-        val detail = companion.note!!.detail
-        assertTrue("reason was: $detail", detail.contains("WebView"))
-        assertTrue("reason was: $detail", companion.note!!.chip.isNotBlank())
+        // ★ …and it still says what it *is*, in the same two words every other tile gets.
+        assertEquals("official app", companion.subtitle)
     }
 
     @Test
@@ -155,6 +162,7 @@ class AppShelfTest {
                 "${AppShelf.HUB_BASE}/browse",
                 "${AppShelf.HUB_BASE}/browse#Photos",
                 "${AppShelf.HUB_BASE}/browse#CAD",
+                "${AppShelf.HUB_BASE}/radio",
                 "io.homeassistant.companion.android.minimal",
             ),
             ids,
@@ -166,7 +174,7 @@ class AppShelfTest {
         val native = AppShelf.build(sailfish).first()
         assertTrue(native.internal)
         assertEquals(TileKind.INTERNAL, native.kind)
-        assertNull(native.note)
+        assertFalse(native.broken)
     }
 
     // ---- the torch ------------------------------------------------------------------
@@ -219,7 +227,7 @@ class AppShelfTest {
     fun `the camera is a plain package tile, resolved at runtime`() {
         val camera = AppShelf.build(sailfish).single { it.id == "com.google.android.GoogleCamera" }
         assertEquals(TileKind.PACKAGE, camera.kind)
-        assertNull(camera.note)
+        assertFalse(camera.broken)
         assertEquals("photos", camera.subtitle)
         // ★ The label comes from the system, not from here — see the Tailscale test.
         assertEquals("Camera", camera.label)
@@ -246,22 +254,45 @@ class AppShelfTest {
 
     // ---- Chrome -------------------------------------------------------------------
 
+    /**
+     * ★★ **Chrome is a tile like every other tile.** Owner, 2026-08-15: *"the chrome app
+     * widget is weird, it tells me a bunch of shit about the old engine i don't need on
+     * screen and blows the size out, just leave it as the logo and 'Chrome' label, with
+     * the subtext 'search' so it's consistent with all the other widgets."*
+     *
+     * ⚠️ Chrome still is not `broken`, and that matters more now than it did: `broken` is
+     * the only signal left, so using it to mean "old" would dim a working browser and sink
+     * it below the tiles that cannot work at all.
+     */
     @Test
-    fun `chrome warns about its 2019 engine before the tap, but is not broken`() {
+    fun `chrome is icon, label and subtitle — the same as everything else`() {
         val chrome = AppShelf.build(sailfish).single { it.id == "com.android.chrome" }
-        val note = chrome.note!!
-
-        // ★ It works — it just cannot render every site. A caution must not be dressed
-        // as a failure, or the one thing that means "do not bother" stops meaning it.
-        assertFalse(note.broken)
         assertFalse(chrome.broken)
-        assertTrue("reason was: ${note.detail}", note.detail.contains("2019"))
-        assertTrue(note.chip.isNotBlank())
         assertEquals("search", chrome.subtitle)
+        assertEquals("Chrome", chrome.label)
+    }
+
+    /**
+     * ⚠️⚠️ The mechanism, not the two tiles that used it. Notes were a general facility —
+     * *any* tile could carry a paragraph — so removing them from Chrome and the companion
+     * app while leaving the field in place would just wait for the next tile to grow one.
+     * There is no note type any more, and this is the assertion that keeps it that way:
+     * **every tile on the shelf is icon + label + short subtitle.**
+     */
+    @Test
+    fun `no tile carries prose, and every tile carries a subtitle`() {
+        AppShelf.build(sailfish).forEach { tile ->
+            val subtitle = tile.subtitle
+            assertNotNull("${tile.label} has no subtitle at all", subtitle)
+            assertTrue("${tile.label} has an empty subtitle", subtitle!!.isNotBlank())
+            // Short enough to sit on one line of a tile — the shelf is three abreast in
+            // landscape (`AppsScreenTest`), so a sentence here is a tile of a different size.
+            assertTrue("${tile.label} subtitle is a sentence: $subtitle", subtitle.length <= 24)
+        }
     }
 
     @Test
-    fun `a caution note does not sink a tile to the bottom`() {
+    fun `a working tile never sinks below a broken one`() {
         val shelf = AppShelf.build(sailfish)
         val chrome = shelf.indexOfFirst { it.id == "com.android.chrome" }
         val companion = shelf.indexOfFirst { it.id.startsWith("io.homeassistant.companion") }
@@ -275,9 +306,9 @@ class AppShelfTest {
     @Test
     fun `the hub links are present, in order, with their subtitles`() {
         val links = links()
-        assertEquals(listOf("Files", "Photos", "CAD"), links.map { it.label })
+        assertEquals(listOf("Files", "Photos", "CAD", "Radio"), links.map { it.label })
         assertEquals(
-            listOf("network drive", "shared album", "models"),
+            listOf("network drive", "shared album", "models", "internet stations"),
             links.map { it.subtitle },
         )
         assertEquals(
@@ -285,6 +316,7 @@ class AppShelfTest {
                 "${AppShelf.HUB_BASE}/browse",
                 "${AppShelf.HUB_BASE}/browse#Photos",
                 "${AppShelf.HUB_BASE}/browse#CAD",
+                "${AppShelf.HUB_BASE}/radio",
             ),
             links.map { it.id },
         )
@@ -304,9 +336,13 @@ class AppShelfTest {
         // The folder names are the keys of `files.DEFAULT_ROOTS` and are case-sensitive.
         assertEquals("${AppShelf.HUB_BASE}/browse#Photos", links[1].id)
         assertEquals("${AppShelf.HUB_BASE}/browse#CAD", links[2].id)
-        // Every one of them is the same document, which is why one loaded page with one
-        // authenticated request serves all three.
-        assertTrue(links.all { it.id.substringBefore('#') == "${AppShelf.HUB_BASE}/browse" })
+        // The three BROWSE tiles are the same document, which is why one loaded page with
+        // one authenticated request serves all three. ★ Radio is deliberately NOT one of
+        // them — it is its own page with its own player, so it is excluded here rather
+        // than folded in, and this assertion must never be widened to cover it.
+        val browse = links.filter { it.id.startsWith("${AppShelf.HUB_BASE}/browse") }
+        assertEquals(3, browse.size)
+        assertTrue(browse.all { it.id.substringBefore('#') == "${AppShelf.HUB_BASE}/browse" })
     }
 
     @Test
@@ -346,7 +382,9 @@ class AppShelfTest {
         // A tile that vanishes when the hub is down changes the shape of the only screen
         // he can reach from Home. An error page is a page; a missing tile is a mystery.
         val bare = AppShelf.build(emptyList())
-        assertEquals(3, bare.count { it.kind == TileKind.HUB })
+        // Files, Photos, CAD, Radio — all four are the hub's, so none of them depend on
+        // anything being installed on the phone.
+        assertEquals(4, bare.count { it.kind == TileKind.HUB })
     }
 
     @Test

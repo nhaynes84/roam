@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<!--
+  ROAM Touch hub -- internet radio.
+
+  ⚠️ THE CLIENT IS CHROME 74 (2019) ON A PIXEL 1, signature-pinned with no Play
+  Store on the device: it cannot be updated, ever. So, exactly as in browse.html:
+    * no optional chaining (?.), no nullish coalescing (??) -- both Chrome 80
+    * no class fields, no top-level await, no String.replaceAll, no Array.at
+    * no :has(), no container queries, no CSS nesting, and NO `gap` in flexbox
+      (Chrome 84). `grid-gap` on a grid is fine (Chrome 66) and is used below.
+  Verified by parsing the script block with acorn at ecmaVersion 2019 -- see
+  tests/test_radio_api.py and tests/test_files_api.py. Do not "modernise".
+
+  ★ Playback is a bare <audio> element and nothing else. No HLS, no MSE, no
+  library: the hub only ever offers MP3/AAC stream URLs (see radio.py), which is
+  the one thing this engine can be relied on to decode.
+
+  ★★ TWO CONTRACTS WITH THE NEXUS APP, which draws this page in its own WebView
+  (nexus/.../channels/audio/WebViewPlayback.kt -- read it before changing either):
+    * `window.RoamRadio = {play(v), pause(), setVolume(v)}` is the hook the app
+      prefers over poking `<audio>` elements itself. Defining it is what makes
+      PTT and an incoming call able to interrupt the music properly, rather than
+      the app's fallback resuming an element whose src we deliberately dropped.
+    * `RoamAudio.onPlay()` / `.onPause()` is how the app learns music is wanted,
+      so it holds Android media focus only while it is. Reported for HIS actions
+      only -- reporting our own resume would loop. Absent in a plain browser,
+      hence the guard; nothing here depends on the app being there.
+
+  The screen is LOCKED LANDSCAPE and read at arm's length, so the layout is two
+  columns -- what is playing on the left, what could be on the right -- and every
+  target is at least 44px tall. Nothing here scrolls except the station list.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<title>Radio</title>
+<style>
+  :root {
+    --bg: #101215;
+    --panel: #191d22;
+    --line: #2a3037;
+    --ink: #e6e9ed;
+    --dim: #8b949e;
+    --accent: #58a6ff;
+    --ok: #3fb950;
+    --bad: #f85149;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: rgba(88,166,255,.2); }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.4 -apple-system, "Roboto", "Helvetica Neue", Arial, sans-serif;
+    display: grid; grid-template-columns: 40% 1fr; grid-gap: 0;
+    overflow: hidden;
+  }
+
+  /* ---- left: what is playing ---- */
+  #player {
+    background: var(--panel); border-right: 1px solid var(--line);
+    padding: 10px; display: grid; grid-template-rows: auto 1fr auto;
+    grid-gap: 8px; min-width: 0;
+  }
+  #now { font-size: 19px; font-weight: 600; line-height: 1.2; word-break: break-word; }
+  #detail { font-size: 12px; color: var(--dim); margin-top: 4px; }
+  #state {
+    font-size: 13px; color: var(--dim); align-self: end;
+    border-left: 3px solid var(--line); padding-left: 8px;
+  }
+  #state.on { color: var(--ok); border-left-color: var(--ok); }
+  #state.busy { color: var(--accent); border-left-color: var(--accent); }
+  #state.bad { color: var(--bad); border-left-color: var(--bad); }
+  #play {
+    width: 100%; min-height: 84px; border: 1px solid var(--line);
+    border-radius: 12px; background: #0b0d10; color: var(--accent);
+    font: inherit; font-size: 22px; font-weight: 600; cursor: pointer;
+    letter-spacing: .02em;
+  }
+  #play.playing { color: #0b0d10; background: var(--ok); border-color: var(--ok); }
+  #play[disabled] { color: var(--dim); }
+
+  /* ---- right: what could be ---- */
+  #browser {
+    display: grid; grid-template-rows: auto 1fr; grid-gap: 0; min-width: 0;
+    min-height: 0;
+  }
+  #bar {
+    display: flex; border-bottom: 1px solid var(--line); background: var(--panel);
+  }
+  #bar button {
+    min-height: 46px; border: 0; background: transparent; color: var(--dim);
+    font: inherit; font-size: 14px; cursor: pointer; padding: 0 14px;
+  }
+  #bar button.sel { color: var(--accent); box-shadow: inset 0 -2px 0 var(--accent); }
+  #bar form { flex: 1 1 auto; display: flex; min-width: 0; margin: 0; }
+  #q {
+    flex: 1 1 auto; min-width: 0; min-height: 46px; border: 0;
+    border-left: 1px solid var(--line); background: #0b0d10; color: var(--ink);
+    font: inherit; font-size: 15px; padding: 0 10px;
+  }
+  #go {
+    border-left: 1px solid var(--line); color: var(--accent);
+    background: transparent; min-width: 62px;
+  }
+  #list { overflow-y: auto; -webkit-overflow-scrolling: touch; min-height: 0; }
+  .station {
+    display: block; width: 100%; min-height: 56px; text-align: left;
+    border: 0; border-bottom: 1px solid var(--line); background: transparent;
+    color: var(--ink); font: inherit; padding: 8px 12px; cursor: pointer;
+  }
+  .station.on { background: #12212f; box-shadow: inset 3px 0 0 var(--accent); }
+  .station .n { font-size: 15px; word-break: break-word; }
+  .station .m { font-size: 11px; color: var(--dim); margin-top: 2px; }
+  .note { color: var(--dim); padding: 18px 12px; font-size: 13px; }
+  .note.bad { color: var(--bad); }
+</style>
+</head>
+<body>
+<div id="player">
+  <div>
+    <div id="now">Radio</div>
+    <div id="detail">Pick a station.</div>
+  </div>
+  <div id="state">Stopped</div>
+  <button id="play" type="button" disabled>Play</button>
+</div>
+<div id="browser">
+  <div id="bar">
+    <button id="tab-fav" type="button" class="sel">★ Faves</button>
+    <form id="search-form" action="#">
+      <input id="q" type="search" placeholder="Search stations" autocomplete="off"
+             autocorrect="off" autocapitalize="none" spellcheck="false">
+      <button id="go" type="submit">Go</button>
+    </form>
+  </div>
+  <div id="list"></div>
+</div>
+<audio id="audio" preload="none"></audio>
+
+<script>
+(function () {
+  "use strict";
+
+  var TOKEN = "__ROAM_TOKEN__";
+  var STORE_KEY = "roam.radio.last";
+  // A dropped stream is normal on a phone that just changed cell. Retry a few
+  // times, spaced, and then stop -- an endless reconnect loop on a device with
+  // no volume of its own is worse than silence.
+  var RETRY_LIMIT = 3;
+  var RETRY_DELAY_MS = 4000;
+
+  var audio = document.getElementById("audio");
+  var listEl = document.getElementById("list");
+  var nowEl = document.getElementById("now");
+  var detailEl = document.getElementById("detail");
+  var stateEl = document.getElementById("state");
+  var playEl = document.getElementById("play");
+  var favTab = document.getElementById("tab-fav");
+  var form = document.getElementById("search-form");
+  var qEl = document.getElementById("q");
+
+  var current = null;     // the station object shown on the left
+  var wanted = false;     // he pressed Play and has not pressed Stop
+  // ★ Held is not the opposite of wanted. The app takes the audio away for PTT
+  // and for a call and gives it back; through all of that he still wants the
+  // radio, so `wanted` must survive it -- and the retry logic must not treat
+  // the resulting silence as a dropped stream.
+  var held = false;
+  var retries = 0;
+  var retryTimer = 0;
+
+  function q(name, value) {
+    return encodeURIComponent(name) + "=" + encodeURIComponent(value);
+  }
+  function api(path, params) {
+    var url = path + "?" + q("token", TOKEN);
+    for (var key in params) {
+      if (Object.prototype.hasOwnProperty.call(params, key)) {
+        url += "&" + q(key, params[key]);
+      }
+    }
+    return url;
+  }
+
+  function setState(text, cls) {
+    stateEl.textContent = text;
+    stateEl.className = cls || "";
+  }
+
+  function describe(station) {
+    var bits = [];
+    if (station.codec) { bits.push(station.codec); }
+    if (station.bitrate) { bits.push(station.bitrate + "k"); }
+    if (station.tags) { bits.push(station.tags); }
+    return bits.join(" · ");
+  }
+
+  function markRow() {
+    var rows = listEl.getElementsByClassName("station");
+    for (var i = 0; i < rows.length; i++) {
+      var mine = current && rows[i].getAttribute("data-url") === current.url;
+      rows[i].className = mine ? "station on" : "station";
+    }
+  }
+
+  function show(station) {
+    current = station;
+    nowEl.textContent = station.name;
+    detailEl.textContent = describe(station);
+    playEl.disabled = false;
+    markRow();
+    try {
+      window.localStorage.setItem(STORE_KEY, JSON.stringify(station));
+    } catch (e) { /* private mode, or a full quota. Not worth a message. */ }
+  }
+
+  function cancelRetry() {
+    if (retryTimer) { clearTimeout(retryTimer); retryTimer = 0; }
+  }
+
+  function openStream() {
+    if (!current) { return; }
+    audio.src = current.url;
+    audio.load();
+    var started = audio.play();
+    // Chrome 74 returns a promise here; older engines return undefined. Both
+    // shapes have to work, hence the guard rather than a bare .catch().
+    if (started && started.catch) {
+      started.catch(function () {
+        if (wanted && !held) { setState("Blocked — tap Play again", "bad"); }
+      });
+    }
+  }
+
+  function hangUp() {
+    audio.pause();
+    // ⚠️ Pause alone leaves the connection open and the buffer filling, which
+    // on a phone is a live radio he cannot hear draining the battery. Dropping
+    // the src is what actually hangs up.
+    audio.removeAttribute("src");
+    audio.load();
+  }
+
+  function start() {
+    if (!current) { return; }
+    cancelRetry();
+    wanted = true;
+    held = false;
+    retries = 0;
+    playEl.className = "playing";
+    playEl.textContent = "Stop";
+    setState("Connecting…", "busy");
+    openStream();
+    report("onPlay");
+  }
+
+  function stop(message, cls) {
+    cancelRetry();
+    var wasWanted = wanted;
+    wanted = false;
+    held = false;
+    retries = 0;
+    hangUp();
+    playEl.className = "";
+    playEl.textContent = "Play";
+    setState(message || "Stopped", cls || "");
+    if (wasWanted) { report("onPause"); }
+  }
+
+  function report(name) {
+    // Only inside the Nexus app; a plain browser has no RoamAudio and needs
+    // none. A throw here must never take the player down with it.
+    var bridge = window.RoamAudio;
+    if (bridge && typeof bridge[name] === "function") {
+      try { bridge[name](); } catch (e) { /* the app went away mid-call */ }
+    }
+  }
+
+  function applyVolume(level) {
+    // ⚠️ Android ignores HTMLMediaElement.volume -- the hardware keys are the
+    // only volume there is. Honoured anyway because it costs nothing and is
+    // right everywhere else; a duck that arrives as silence-then-return
+    // instead of quieter is the app's pause/play path, not this.
+    if (typeof level !== "number" || isNaN(level)) { return; }
+    try {
+      audio.volume = Math.max(0, Math.min(1, level));
+    } catch (e) { /* some engines refuse; not worth a message */ }
+  }
+
+  // ★★ The app's handle on this page. See the header comment: without it, the
+  // app falls back to poking every <audio> on the page, and would try to resume
+  // an element whose src we dropped on purpose.
+  window.RoamRadio = {
+    play: function (level) {
+      applyVolume(level);
+      // Not "start playing" -- "you may have the audio back". If he had not
+      // asked for music before the interruption, he is not asking now.
+      if (!wanted) { return; }
+      held = false;
+      cancelRetry();
+      setState("Connecting…", "busy");
+      openStream();
+    },
+    pause: function () {
+      if (!wanted) { return; }
+      held = true;
+      cancelRetry();
+      // ⚠️ Hang up rather than pause: this is live radio, and a resumed buffer
+      // would put him behind the broadcast for as long as he listens.
+      hangUp();
+      setState("Held — PTT or a call", "busy");
+    },
+    setVolume: function (level) { applyVolume(level); }
+  };
+
+  playEl.addEventListener("click", function () {
+    if (wanted) { stop(); } else { start(); }
+  });
+
+  audio.addEventListener("playing", function () {
+    retries = 0;
+    setState("Playing", "on");
+  });
+  audio.addEventListener("waiting", function () {
+    if (wanted) { setState("Buffering…", "busy"); }
+  });
+  audio.addEventListener("stalled", function () {
+    if (wanted) { setState("Stalled…", "busy"); }
+  });
+  audio.addEventListener("error", function () { dropped(); });
+  audio.addEventListener("ended", function () { dropped(); });
+
+  function dropped() {
+    // Ignored when he asked for silence, and while the app is holding the
+    // audio: hanging up clears src, which fires an error of its own, and
+    // retrying into a phone call is exactly the wrong answer.
+    if (!wanted || held) { return; }
+    if (retries >= RETRY_LIMIT) {
+      stop("Stream failed", "bad");
+      return;
+    }
+    retries++;
+    setState("Lost it — retry " + retries + "…", "busy");
+    cancelRetry();
+    retryTimer = setTimeout(function () {
+      if (!wanted || held) { return; }
+      openStream();
+    }, RETRY_DELAY_MS);
+  }
+
+  function note(text, bad) {
+    listEl.innerHTML = "";
+    var div = document.createElement("div");
+    div.className = bad ? "note bad" : "note";
+    div.textContent = text;
+    listEl.appendChild(div);
+  }
+
+  function makeRow(station) {
+    var row = document.createElement("button");
+    row.type = "button";
+    row.className = "station";
+    row.setAttribute("data-url", station.url);
+    var name = document.createElement("div");
+    name.className = "n";
+    name.textContent = station.name;
+    row.appendChild(name);
+    var meta = document.createElement("div");
+    meta.className = "m";
+    meta.textContent = describe(station);
+    row.appendChild(meta);
+    row.addEventListener("click", function () {
+      show(station);
+      start();
+    });
+    return row;
+  }
+
+  function load(query) {
+    favTab.className = query ? "" : "sel";
+    note("Loading…");
+    fetch(api("/radio/stations", { q: query || "" }), {
+      headers: { "Authorization": "Bearer " + TOKEN }
+    }).then(function (response) {
+      return response.json().then(function (body) {
+        return { ok: response.ok, body: body };
+      });
+    }).then(function (result) {
+      if (!result.ok) {
+        note(result.body.detail || "Could not reach the station list.", true);
+        return;
+      }
+      var stations = result.body.stations || [];
+      if (!stations.length) {
+        note("Nothing playable found for that.", false);
+        return;
+      }
+      listEl.innerHTML = "";
+      for (var i = 0; i < stations.length; i++) {
+        listEl.appendChild(makeRow(stations[i]));
+      }
+      if (result.body.source === "stale" || result.body.source === "builtin") {
+        // Say so rather than pretending: some of these URLs may have rotted.
+        var warn = document.createElement("div");
+        warn.className = "note";
+        warn.textContent = "Offline list — the station directory was unreachable.";
+        listEl.appendChild(warn);
+      }
+      markRow();
+    }).catch(function (err) {
+      note("Could not reach the hub (" + err.message + ").", true);
+    });
+  }
+
+  form.addEventListener("submit", function (event) {
+    event.preventDefault();
+    if (qEl.blur) { qEl.blur(); }   // get the on-screen keyboard out of the way
+    load(qEl.value);
+  });
+  favTab.addEventListener("click", function () {
+    qEl.value = "";
+    load("");
+  });
+
+  // Last station, restored but never auto-started: Chrome will not autoplay
+  // without a gesture anyway, and a wrist that starts talking on its own is
+  // a bug, not a feature.
+  try {
+    var saved = JSON.parse(window.localStorage.getItem(STORE_KEY) || "null");
+    if (saved && saved.url && saved.name) {
+      current = saved;
+      nowEl.textContent = saved.name;
+      detailEl.textContent = describe(saved);
+      playEl.disabled = false;
+    }
+  } catch (e) { /* nothing saved, or something else wrote the key */ }
+
+  load("");
+})();
+</script>
+</body>
+</html>

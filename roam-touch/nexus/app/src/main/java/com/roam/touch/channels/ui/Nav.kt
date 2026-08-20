@@ -35,15 +35,20 @@ enum class Back {
     CloseReader,
 
     /**
-     * ★ The hub browser unwinds to the **shelf**, not to Channels.
+     * ★ A screen opened *from another screen* unwinds to its parent, not to Channels.
      *
-     * ⚠️ It is the one detour that was opened from another detour, so the general rule
-     * would put him two steps back in one press — he tapped Files from the shelf and would
-     * land in Channels, with no indication that the shelf was ever there. Everything else
-     * is reached from the rail, which is on screen everywhere, so for those one step out
-     * *is* the way he came in.
+     * ⚠️ The general rule would put him two steps back in one press — he tapped Files on
+     * the shelf and would land in Channels with no sign the shelf was ever there.
+     * Everything else is reached from the rail, which is on screen everywhere, so for
+     * those one step out *is* the way he came in.
+     *
+     * ⚠️⚠️ This used to be `CloseHubBrowser`, singular, above a comment claiming the
+     * browser was *"the one detour opened from another detour"*. It is not any more:
+     * headset controls moved off the rail and into Settings, so it is now reached the same
+     * way the browser is. The exception was generalised rather than duplicated — see
+     * [Nav.parentOf], which is the only place the parent of a screen is written down.
      */
-    CloseHubBrowser,
+    CloseSubScreen,
     CloseDetour,
     CloseThread,
 }
@@ -73,12 +78,29 @@ object Nav {
      */
     fun back(reading: Boolean, screen: Screen, hasOpenPane: Boolean): Back? = when {
         reading -> Back.CloseReader
-        // ⚠️ Above the general detour rule, not folded into it: the browser is the only
-        // screen reached *from* another screen, so it is the only one whose one step back
-        // is not Channels. See [Back.CloseHubBrowser].
-        screen == Screen.HubBrowser -> Back.CloseHubBrowser
+        // ⚠️ Above the general detour rule, not folded into it: a screen with a parent is
+        // one he reached *through* something, so its one step back is that something and
+        // not Channels. See [Back.CloseSubScreen].
+        parentOf(screen) != null -> Back.CloseSubScreen
         screen != Screen.Channels -> Back.CloseDetour
         hasOpenPane -> Back.CloseThread
+        else -> null
+    }
+
+    /**
+     * ★★ Which screen a screen was opened from, or null for the ones the rail reaches
+     * directly. **The only statement of that fact in the app** — [back] asks it, and so
+     * does the handler that carries the answer out.
+     *
+     * ⚠️ [Screen.Controls] is here because the headset moved. Owner, 2026-08-15: *"honestly
+     * the headphones setup is a Setting, we'll need our own settings so might as well just
+     * start making widgets there, of which headphones is one setting."* It is no longer a
+     * rail destination, so Back out of it must land on the Settings screen he opened it
+     * from — the same rule the hub browser has always had.
+     */
+    fun parentOf(screen: Screen): Screen? = when (screen) {
+        Screen.HubBrowser -> Screen.Apps
+        Screen.Controls -> Screen.Settings
         else -> null
     }
 

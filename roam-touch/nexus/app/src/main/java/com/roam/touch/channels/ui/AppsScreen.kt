@@ -39,6 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
@@ -75,13 +76,7 @@ fun AppsScreen(
     ) {
         BackToChannelsBar(title = "APPS", onBack = onBack)
 
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(2),
-            contentPadding = PaddingValues(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            modifier = Modifier.weight(1f),
-        ) {
+        ShelfGrid(Modifier.weight(1f)) {
             items(tiles, key = { it.id }) { tile ->
                 LauncherTile(
                     tile = tile,
@@ -152,17 +147,26 @@ private fun rememberTorchState(): State<Boolean> {
 }
 
 /**
- * One tile.
+ * One tile: an icon, a label, and a two-word subtitle. **Every tile, the same shape.**
  *
- * ⚠️ A known-broken tile is still tappable. It is dimmed and it carries a red chip and
- * the reason, but it is not disabled: the failure is environmental and he may well want
- * to see it with his own eyes, or to try it again after changing something. Blocking the
- * tap would just mean he goes looking for the app another way and hits the same wall
- * with none of the explanation.
+ * ⚠️⚠️ **Nothing here explains itself in prose.** Tiles used to be able to carry a
+ * `TileNote` — a red chip and a line of reason — and two of them did. Owner, 2026-08-15:
+ * *"the chrome app widget is weird, it tells me a bunch of shit about the old engine i
+ * don't need on screen and blows the size out, just leave it as the logo and 'Chrome'
+ * label, with the subtext 'search' so it's consistent with all the other widgets"*, and
+ * then *"yeah HA companion too, i don't need debug notes on the widget, lol."* The
+ * mechanism went with them — see [AppTile.broken] — so there is no way to put a paragraph
+ * on a tile again without deliberately building one.
+ *
+ * ⚠️ A known-broken tile is still tappable, and is still marked: it is dimmed and it sorts
+ * to the end of the shelf. It is not disabled, because the failure is environmental and he
+ * may well want to see it with his own eyes, or to try it again after changing something.
+ * What it no longer does is argue its case in 12 sp type on a wrist.
  *
  * [lit] is a tile that is *doing something right now* — the torch, and only the torch so
  * far. It gets the loudest treatment on the screen deliberately: this is the one state on
- * the shelf that costs battery while he is not looking at it.
+ * the shelf that costs battery while he is not looking at it. ★ It is the one chip left,
+ * and it is live state rather than commentary, which is the line.
  */
 @Composable
 private fun LauncherTile(tile: AppTile, lit: Boolean = false, onClick: () -> Unit) {
@@ -179,6 +183,7 @@ private fun LauncherTile(tile: AppTile, lit: Boolean = false, onClick: () -> Uni
 
     Column(
         Modifier
+            .testTag(APP_TILE)
             .fillMaxWidth()
             .heightIn(min = 132.dp)
             .clip(RoundedCornerShape(12.dp))
@@ -239,22 +244,8 @@ private fun LauncherTile(tile: AppTile, lit: Boolean = false, onClick: () -> Uni
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        tile.note?.let { note ->
-            // A caution (note without `broken`) must not wear the broken colour: red and
-            // filled is "this will not work", and Chrome's 2019 engine is a warning, not
-            // a failure. Amber and outlined reads as "know this first" instead.
-            Spacer(Modifier.height(8.dp))
-            StateChip(
-                note.chip,
-                if (note.broken) RoamColors.Alarm else RoamColors.Quiet,
-                filled = note.broken,
-            )
-            Spacer(Modifier.height(5.dp))
-            Text(
-                note.detail,
-                style = MaterialTheme.typography.bodySmall,
-                color = RoamColors.TextSecondary,
-            )
-        }
     }
 }
+
+/** Every tile on the shelf, so a test can measure how many of them share a row. */
+const val APP_TILE = "app-tile"

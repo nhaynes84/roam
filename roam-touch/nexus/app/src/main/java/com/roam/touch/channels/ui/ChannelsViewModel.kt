@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.roam.touch.channels.ChannelsState
 import com.roam.touch.channels.HubLink
 import com.roam.touch.channels.HubRepository
+import com.roam.touch.channels.RailCollapseStore
 import com.roam.touch.channels.Roam
 import com.roam.touch.channels.SendResult
 import com.roam.touch.channels.model.Event
@@ -19,9 +20,11 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 /** A one-shot message for the wearer: what just happened to something he did. */
@@ -57,15 +60,39 @@ class ChannelsViewModel(
     haProvider: () -> HaRepository = { Roam.homeAssistant },
     /** Lazy for the same reason as [haProvider] — see the note above. */
     pttProvider: () -> Ptt = { Roam.ptt },
+    /** Lazy for the same reason as [haProvider]; fakeable so the fold can be tested dry. */
+    railProvider: () -> RailCollapseStore = { Roam.settings },
     /** Injectable so "how long has this send been in flight" is a test, not a stopwatch. */
     private val clock: () -> Long = System::currentTimeMillis,
 ) : ViewModel() {
 
     private val ha: HaRepository by lazy(haProvider)
     private val ptt: Ptt by lazy(pttProvider)
+    private val rail: RailCollapseStore by lazy(railProvider)
 
     val state: StateFlow<ChannelsState> = repo.state
     val link: StateFlow<HubLink> = repo.link
+
+    /**
+     * ★ Is the rail folded down to its icon column? See [NavRail].
+     *
+     * ⚠️ `by lazy`, like [ha] and [ptt], and for the same reason: reading it constructs
+     * the store, and every Channels test that builds this view model with its own fake hub
+     * would otherwise fail on an uninitialised [Roam.settings] for a rail it never draws.
+     *
+     * ⚠️ Seeded expanded rather than from disk, because the disk read is asynchronous and
+     * there is no third "we do not know yet" shape to draw. One frame of an expanded rail
+     * on a cold start is the safe way to be wrong — it is the shape that contains the
+     * channel list.
+     */
+    val railCollapsed: StateFlow<Boolean> by lazy {
+        rail.railCollapsed.stateIn(viewModelScope, SharingStarted.Eagerly, false)
+    }
+
+    /** Fold or unfold the rail, and remember it past this process. */
+    fun setRailCollapsed(collapsed: Boolean) {
+        viewModelScope.launch { rail.setRailCollapsed(collapsed) }
+    }
 
     /** App #2. See [com.roam.touch.channels.ui.HomeAssistantScreen]. */
     val haHome: StateFlow<HaHome> get() = ha.home

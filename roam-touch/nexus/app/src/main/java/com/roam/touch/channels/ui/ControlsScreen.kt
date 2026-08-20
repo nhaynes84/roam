@@ -51,6 +51,12 @@ fun ControlsScreen(
     onCancelLearn: () -> Unit,
     onUnbind: (HeadsetGesture) -> Unit,
     shell: Shell = Shell.Narrow,
+    /**
+     * ⚠️ Where Back goes, and it must name the truth. This screen moved off the rail into
+     * [SettingsScreen] on 2026-08-15, so the way out is SETTINGS — the default stays
+     * CHANNELS for the tests that render it standalone.
+     */
+    backLabel: String = "CHANNELS",
 ) {
     Column(
         Modifier
@@ -64,6 +70,7 @@ fun ControlsScreen(
         BackToChannelsBar(
             "HEADSET CONTROLS",
             onBack,
+            backLabel = backLabel,
             trailing = if (shell == Shell.Wide && profile != null) {
                 {
                     Text(

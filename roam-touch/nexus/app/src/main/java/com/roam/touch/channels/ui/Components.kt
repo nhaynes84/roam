@@ -241,3 +241,46 @@ fun Dimmed(dimmed: Boolean, content: @Composable () -> Unit) {
 
 /** Small helper: alpha-composited divider colour that survives on true black. */
 fun dividerColor(): Color = RoamColors.Divider
+
+/**
+ * ★★ The shelf grid — the one place the app decides how many tiles fit across.
+ *
+ * Both shelves use it: the apps ([AppsScreen]) and the settings ([SettingsScreen]). They
+ * are the same device at the same reading distance, so a tile that is right on one is
+ * right on the other, and two copies of these numbers would drift the moment one screen
+ * was tuned.
+ *
+ * ⚠️ **Adaptive, not `Fixed(n)`.** Owner, 2026-08-15: *"let's also make the apps 3 or 4 to
+ * a row instead of two, it's a real scroll problem right now."* A column *count* cannot be
+ * right for both panes this is drawn in, and the pane itself now changes width under it
+ * when the rail folds. The arithmetic, with the rail expanded at 224 dp:
+ *
+ *   landscape 731 − 224 rail − 24 padding = 483 dp → 3 columns of ~154 dp
+ *   folded    731 −  56 rail − 24 padding = 651 dp → 4 columns of ~155 dp
+ *   portrait  411 −  62 rail − 24 padding = 325 dp → 2 columns of ~157 dp
+ *
+ * ⚠️ 150 dp is the floor for *reading*, not for touching: below it the subtitles that say
+ * what a tile opens ("internet stations", "what each button does") start ellipsising at
+ * arm's length. Nothing shrank to win a column — the tiles keep their 132 dp minimum
+ * height and their 40 dp icons, and the columns come out of dead margin.
+ */
+@Composable
+fun ShelfGrid(
+    modifier: Modifier = Modifier,
+    content: androidx.compose.foundation.lazy.grid.LazyGridScope.() -> Unit,
+) {
+    androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
+        columns = androidx.compose.foundation.lazy.grid.GridCells.Adaptive(minSize = SHELF_TILE_MIN_DP),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = modifier,
+        content = content,
+    )
+}
+
+/** See [ShelfGrid]. The one number both shelves are laid out from. */
+val SHELF_TILE_MIN_DP = 150.dp
+
+/** The minimum height of a shelf tile, apps and settings alike. He taps this walking. */
+val SHELF_TILE_HEIGHT_DP = 132.dp

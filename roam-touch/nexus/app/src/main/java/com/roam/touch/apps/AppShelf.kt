@@ -35,26 +35,29 @@ data class AppTile(
     val id: String,
     val label: String,
     val subtitle: String?,
-    val note: TileNote? = null,
+    /**
+     * ★ Known not to work on this device. It sinks the tile to the bottom of the shelf and
+     * dims it; it is still tappable, because the failure is environmental and he may well
+     * want to see it with his own eyes.
+     *
+     * ⚠️⚠️ **This used to be a `TileNote(chip, detail)` that the tile printed.** Owner,
+     * 2026-08-15: *"the chrome app widget is weird, it tells me a bunch of shit about the
+     * old engine i don't need on screen and blows the size out, just leave it as the logo
+     * and 'Chrome' label, with the subtext 'search' so it's consistent with all the other
+     * widgets"* — and then, on the second one: *"yeah HA companion too, i don't need debug
+     * notes on the widget, lol."* Both notes are gone, and so is the mechanism: a
+     * rendering path with no callers is a thing the next tile quietly starts using again.
+     *
+     * The *reasons* survive as KDoc on the candidates that carry the flag ([AppShelf]);
+     * they were diagnostics for whoever maintains this shelf, never text for the wrist.
+     * A boolean is the only part of a note that was ever about the layout.
+     */
+    val broken: Boolean = false,
     val kind: TileKind = TileKind.PACKAGE,
 ) {
-    val broken: Boolean get() = note?.broken == true
-
     /** Drawn by this app, so it has no package icon and never touches PackageManager. */
     val internal: Boolean get() = kind == TileKind.INTERNAL
 }
-
-/**
- * ★ A tile that will not work says so *before* the tap.
- *
- * Standing law: stale/dead state is surfaced up front, never discovered by clicking.
- * [chip] is the two-word badge; [detail] is the one-line reason, and it has to be
- * specific enough to stop him debugging it a second time.
- *
- * `broken = false` is a *caution*: the tile works, but it has a limit worth knowing
- * before the tap rather than after. It stays in normal sort order and is not dimmed.
- */
-data class TileNote(val chip: String, val detail: String, val broken: Boolean = true)
 
 /** A launchable package as the system reports it. Resolved by [AppCatalog] on device. */
 data class InstalledApp(val packageId: String, val label: String)
@@ -114,39 +117,30 @@ object AppShelf {
     val HUB_BASE: String = "http://${BuildConfig.HUB_HOST}:${BuildConfig.HUB_PORT}"
 
     /**
-     * ⚠️ Verified on sailfish 2026-08-12, do not re-diagnose: the HA companion app is
-     * installed, doze-exempt and pointed at a server that answers — and it still paints
-     * a blank white page. WebView and Chrome on this phone are pinned at 74.0.3729.186
-     * (2019) because Play Store is gone, and the HA frontend needs a far newer engine.
-     * Loading the same URL in Chrome directly is equally blank, so it is not the app.
-     * The WebView provider is signature-pinned; there is no sideload around it.
-     */
-    private val COMPANION_NOTE = TileNote(
-        chip = "BLANK SCREEN",
-        detail = "needs a newer WebView than this phone can get — use the native tile",
-    )
-
-    /**
-     * ⚠️ Chrome is not broken, and this note is not a broken one — it is the same
-     * "say it before the tap" rule applied to a working tile with a sharp edge.
+     * ★★ **The 2019 engine, which is the root cause of both notes this shelf used to
+     * print.** Kept here, in the code, because it is a real fact about this device that
+     * explains failures nothing else explains — and kept *only* here, because it is a
+     * maintainer's diagnostic and he reads this shelf on his wrist.
      *
-     * Same root cause as [COMPANION_NOTE]: no Play Store, so Chrome is frozen at
-     * 74.0.3729.186 from 2019 and cannot be updated (the WebView provider is
-     * signature-pinned). Simple pages are fine — the hub's own pages are built for it —
-     * but a 2019 engine white-screens on plenty of modern sites, and he should read that
-     * on the tile instead of concluding the phone's network is down.
+     * WebView and Chrome on sailfish are pinned at **74.0.3729.186 (2019)**: Play Store is
+     * gone, so neither can be updated, and the WebView provider is signature-pinned so
+     * there is no sideload around it. Consequences, both verified on device 2026-08-12,
+     * **do not re-diagnose**:
+     *
+     *  - **Chrome** works. Simple pages are fine — the hub's own pages are written for this
+     *    engine on purpose — but plenty of modern sites white-screen on it. That is not the
+     *    phone's network being down.
+     *  - **The HA companion app** is installed, doze-exempt and pointed at a server that
+     *    answers, and still paints a blank white page: the HA frontend needs a far newer
+     *    engine. The same URL in Chrome is equally blank, so it is not the app. It is
+     *    marked [AppTile.broken] for that reason — use the native tile.
      */
-    private val CHROME_NOTE = TileNote(
-        chip = "2019 ENGINE",
-        detail = "Chrome is stuck at v74 (2019) — modern sites may not render",
-        broken = false,
-    )
-
     private data class Candidate(
         val packages: List<String>,
         val label: String? = null,
         val subtitle: String? = null,
-        val note: TileNote? = null,
+        /** See the note above on the 2019 engine — the only thing that sets this today. */
+        val broken: Boolean = false,
     )
 
     private val CANDIDATES = listOf(
@@ -163,8 +157,9 @@ object AppShelf {
         Candidate(listOf("com.termux"), subtitle = "shell"),
         Candidate(listOf("com.tailscale.ipn"), subtitle = "tailnet"),
         Candidate(listOf("com.android.settings"), subtitle = "system"),
-        // Last of the packages so it sits next to the link tiles it opens.
-        Candidate(listOf("com.android.chrome"), subtitle = "search", note = CHROME_NOTE),
+        // Last of the packages so it sits next to the link tiles it opens. ⚠️ Not
+        // `broken`: Chrome works, it is only old. See the 2019-engine note above.
+        Candidate(listOf("com.android.chrome"), subtitle = "search"),
         Candidate(
             // The system label is "Home Assistant", which would read as a duplicate of
             // the native tile directly above it. This is the only forced rename.
@@ -174,7 +169,7 @@ object AppShelf {
             ),
             label = "HA Companion",
             subtitle = "official app",
-            note = COMPANION_NOTE,
+            broken = true,
         ),
     )
 
@@ -205,6 +200,7 @@ object AppShelf {
         AppTile("$HUB_BASE/browse", "Files", "network drive", kind = TileKind.HUB),
         AppTile("$HUB_BASE/browse#Photos", "Photos", "shared album", kind = TileKind.HUB),
         AppTile("$HUB_BASE/browse#CAD", "CAD", "models", kind = TileKind.HUB),
+        AppTile("$HUB_BASE/radio", "Radio", "internet stations", kind = TileKind.HUB),
     )
 
     /** The native Home Assistant screen. Always present; it needs no package. */
@@ -239,8 +235,10 @@ object AppShelf {
      * that works and the device is a smart-home controller, then the torch beside it
      * because both are instant and neither leaves the app; then the installed tools in
      * declaration order; then the hub links; then anything known-broken, last, so a tile
-     * that cannot do its job never sits above one that can. A caution note ([CHROME_NOTE])
-     * does not sink a tile — only `broken` does.
+     * that cannot do its job never sits above one that can. ⚠️ Position and the dimming
+     * are now the *whole* of that signal — the tiles no longer print why (see
+     * [AppTile.broken]) — so an old-but-working tile like Chrome must not be marked broken
+     * to convey a caution. There is nowhere for a caution to be said any more, by design.
      *
      * @param hasTorch whether the device reports a camera flash. The default is the
      *   convenient answer for tests; the real caller ([AppCatalog.shelf]) always asks
@@ -254,7 +252,7 @@ object AppShelf {
                 id = app.packageId,
                 label = candidate.label ?: app.label,
                 subtitle = candidate.subtitle,
-                note = candidate.note,
+                broken = candidate.broken,
             )
         }
         val (broken, working) = (resolved + LINKS).partition { it.broken }

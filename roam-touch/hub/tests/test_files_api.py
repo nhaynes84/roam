@@ -446,7 +446,7 @@ def inline_scripts(html: str) -> str:
     return "\n".join(re.findall(r"<script>(.*?)</script>", html, re.S))
 
 
-@pytest.mark.parametrize("page", ["browse.html", "stl.html"])
+@pytest.mark.parametrize("page", ["browse.html", "stl.html", "radio.html"])
 def test_our_pages_use_no_syntax_chrome_74_cannot_parse(page):
     source = inline_scripts((WEB_DIR / page).read_text(encoding="utf-8"))
     assert source.strip(), f"{page} has no inline script -- did the markup change?"
@@ -455,7 +455,7 @@ def test_our_pages_use_no_syntax_chrome_74_cannot_parse(page):
         assert not found, f"{page}: {why} at {found.start() if found else 0}"
 
 
-@pytest.mark.parametrize("page", ["browse.html", "stl.html"])
+@pytest.mark.parametrize("page", ["browse.html", "stl.html", "radio.html"])
 def test_our_pages_use_no_css_chrome_74_cannot_parse(page):
     css = "\n".join(
         re.findall(r"<style>(.*?)</style>", (WEB_DIR / page).read_text("utf-8"), re.S)
@@ -577,7 +577,7 @@ def _acorn_available() -> bool:
     reason="node+acorn not installed here; `npm i acorn` somewhere and run with "
     "NODE_PATH=<that>/node_modules to turn this on",
 )
-@pytest.mark.parametrize("page", ["browse.html", "stl.html"])
+@pytest.mark.parametrize("page", ["browse.html", "stl.html", "radio.html"])
 def test_pages_really_parse_at_ecmaversion_2019(tmp_path, page):
     """The real check, when the tooling is on the box.
 

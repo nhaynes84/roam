@@ -1,6 +1,7 @@
 package com.roam.touch.channels.stt
 
 import android.util.Log
+import com.roam.touch.channels.audio.AudioHold
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -116,6 +117,20 @@ class Ptt(
     private val scope: CoroutineScope,
     private val headset: HeadsetLink,
     private val clock: () -> Long = System::currentTimeMillis,
+    /**
+     * ★★ **What a press does to everything else that is making a sound.**
+     *
+     * The headset is one earbud: it is the only working microphone on this handset *and*
+     * it is where the hub's radio comes out. Without this, keying PTT leaves music playing
+     * into the ear he is talking with — the owner's words, on the first build that had
+     * both: *he talks over his own music every time*.
+     *
+     * ⚠️ Bracketed by [closeLink] rather than sprinkled through the paths below, because
+     * the invariant is "audio is held for exactly as long as the link is" and there are
+     * six ways for a press to end. Defaulted to [AudioHold.None] so the state machine
+     * stays constructible — and testable — with no audio system at all.
+     */
+    private val audio: AudioHold = AudioHold.None,
 ) {
 
     private val _state = MutableStateFlow<PttState>(PttState.Idle)
@@ -247,6 +262,12 @@ class Ptt(
             }
 
             _level.value = Pcm.FLOOR_DBFS
+            // ★★ Here, not after the link comes up. SCO takes ~600 ms to establish and
+            // the recording starts the instant it does; silencing the radio at the far end
+            // of that wait would leave music playing over the whole CONNECTING state and
+            // into the first word of the sentence. This is the moment his thumb went down,
+            // and it is the moment the music stops.
+            audio.begin()
             _state.value = PttState.Connecting(target, clock())
             currentPress = ++pressSeq
             currentPress
@@ -262,16 +283,16 @@ class Ptt(
                 // He let go, cancelled, or pressed elsewhere while the link was coming
                 // up. Whoever replaced this press owns the state; this one only cleans up.
                 if (currentPress != press) {
-                    headset.close()
+                    closeLink()
                     return@launch
                 }
                 if (!up) {
-                    headset.close()
+                    closeLink()
                     fail(HEADSET_NO_LINK)
                     return@launch
                 }
                 if (!recorder.start()) {
-                    headset.close()
+                    closeLink()
                     fail(NO_MIC)
                     return@launch
                 }
@@ -337,7 +358,7 @@ class Ptt(
             work?.cancel()
             work = null
             currentPress = NO_PRESS
-            headset.close()
+            closeLink()
             fail(RELEASED_WHILE_CONNECTING)
             return
         }
@@ -370,7 +391,7 @@ class Ptt(
         recorder.discard()
         // ⚠️ The link goes down with the mic, always. A press abandoned mid-connect has
         // already asked for SCO, and leaving it standing pins the headset in call mode.
-        headset.close()
+        closeLink()
         _state.value = PttState.Idle
     }
 
@@ -416,6 +437,23 @@ class Ptt(
 
     // -----------------------------------------------------------------------
 
+    /**
+     * ★★ **The link and the audio it took come down together, always.**
+     *
+     * ⚠️ Every path that ends a press goes through here — the three inside the press
+     * coroutine, the release that lands mid-connect, [finish] and [cancel]. That is the
+     * whole of the "music comes back" guarantee: a press that ends in an error, or is
+     * abandoned before the mic ever opened, releases audio focus on exactly the same line
+     * as a normal one. `PttAudioFocusTest` walks all six.
+     *
+     * ⚠️ [AudioHold.end] is idempotent because [cancel] calls this unconditionally,
+     * including from Idle where nothing was ever taken.
+     */
+    private fun closeLink() {
+        headset.close()
+        audio.end()
+    }
+
     /** ⚠️ Always called with [lock] held — it moves the state machine. */
     private fun finish(target: PttTarget) {
         currentPress = NO_PRESS
@@ -426,7 +464,7 @@ class Ptt(
         // mono narrowband call mode for as long as it is up, so anything he was
         // listening to gets it back straight away — and there is never an open link
         // outside a press.
-        headset.close()
+        closeLink()
         _level.value = Pcm.FLOOR_DBFS
 
         // ⚠️⚠️ The two gates below exist because of a measured fact, not a hunch:

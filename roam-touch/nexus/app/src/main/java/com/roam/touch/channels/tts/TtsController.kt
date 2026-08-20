@@ -1,6 +1,7 @@
 package com.roam.touch.channels.tts
 
 import android.util.Log
+import com.roam.touch.channels.audio.AudioHold
 import com.roam.touch.channels.model.Event
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -33,8 +34,18 @@ interface Speaker {
 }
 
 class TtsSpeaker(
-    private val tts: WyomingTts,
+    private val tts: Voice,
     private val scope: CoroutineScope,
+    /**
+     * ★ What Piper does to the hub's radio while it talks: turns it down, and puts it back.
+     *
+     * ⚠️ It ducks rather than pauses — see [com.roam.touch.channels.audio.SpeechAudio].
+     * The `AudioTrack` in [WyomingTts] has always declared itself USAGE_ASSISTANT and
+     * commented that it "should duck music rather than be treated as music"; without a
+     * focus request that declaration did nothing at all, and a tapped message played at
+     * full volume on top of the radio in the same earbud.
+     */
+    private val audio: AudioHold = AudioHold.None,
 ) : Speaker {
 
     private val _speakingEventId = MutableStateFlow<Long?>(null)
@@ -51,8 +62,18 @@ class TtsSpeaker(
         _speakingEventId.value = event.id
         job = scope.launch {
             Log.i(TAG, "play(${event.id}): ${text.take(80)}")
-            runCatching { tts.speak(text) }
-                .onFailure { Log.w(TAG, "piper failed: ${it.message}") }
+            // ⚠️ The duck is taken here rather than beside `_speakingEventId` above so
+            // that it is inside the coroutine whose `finally` gives it back. Cancelling
+            // this job — which is what tapping play on a second message does, and what
+            // [stop] does — unwinds through that finally, so there is no path where the
+            // radio is left turned down by a sentence that is no longer being spoken.
+            audio.begin()
+            try {
+                runCatching { tts.speak(text) }
+                    .onFailure { Log.w(TAG, "piper failed: ${it.message}") }
+            } finally {
+                audio.end()
+            }
             if (_speakingEventId.value == event.id) _speakingEventId.value = null
         }
     }

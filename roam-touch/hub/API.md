@@ -638,6 +638,69 @@ r112 for the same reason. If you touch `web/`, read the header comment in
 `web/browse.html` and run the suite — `tests/test_files_api.py` fails on modern
 syntax rather than letting the wrist find out.
 
+### Radio — streams he can actually play
+
+No music lives on the device and no account is signed in on it, so the answer to
+"play something" is **internet radio in a bare `<audio>` element**. Stations come
+from the open [radio-browser.info](https://www.radio-browser.info/) directory —
+no key, no account — fetched **by the hub**, never by the client.
+
+#### `GET /radio/stations`
+
+Query: `q` (≤64 chars). Empty `q` is the curated favourites; anything else is a
+name search, most-played first.
+
+```json
+{"kind": "favourites", "query": "", "source": "live", "fetched_at": 1786763001.4,
+ "stations": [
+   {"uuid": "960cf833-0601-11e8-ae97-52543be04c81", "name": "SomaFM Groove Salad",
+    "url": "https://ice5.somafm.com/groovesalad-128-mp3",
+    "codec": "MP3", "bitrate": 128, "tags": "ambient, downtempo"}
+ ]}
+```
+
+★ **Every station in that list is playable by a plain `<audio>` tag.** HLS,
+`.pls`/`.m3u` playlists, non-HTTP schemes and any codec outside MP3/AAC are
+filtered out server-side, because a station that lists and then plays silence is
+indistinguishable from a broken radio at arm's length. **Do not add a station
+from another source without applying the same filter** (`radio.playable`).
+
+`source` is `live` | `cache` | `stale` | `builtin`. The last two mean the
+directory was unreachable and this is the last good answer, or the baked-in
+favourites — **say so in the UI**; some of those URLs may have rotted. `502` is
+a search with nothing cached behind it; the hub is fine, the directory is not.
+
+#### `GET /radio` — HTML
+
+The player page, for a phone browser: two columns (now-playing left, list
+right), 44px+ targets, one `<audio>` element and no library. Same Chrome 74
+rules as above — `tests/test_radio_api.py` and `tests/test_files_api.py` hold
+the line.
+
+★★ **It keeps both halves of Nexus's audio contract**, which the app defined
+before this page existed (`channels/audio/WebViewPlayback.kt`):
+
+* it defines `window.RoamRadio = {play(volume), pause(), setVolume(volume)}`, the
+  hook the app prefers over poking `<audio>` elements itself. `pause()` **hangs
+  up** (drops `src`) rather than pausing — this is live radio, and a resumed
+  buffer leaves him permanently behind the broadcast — and `play()` re-opens the
+  stream, but only if he had asked for music in the first place;
+* it calls `RoamAudio.onPlay()` / `.onPause()` **for his actions only**, so the
+  app knows whether music is wanted and whether a PTT press has anything to put
+  back afterwards. Reporting the app's own resume would loop.
+
+⚠️ The app takes **no Android media focus** for this page — the WebView's own
+Chromium already holds it, and a second request from the same process revoked it
+and paused the station a heartbeat after starting it. Calls and prompts interrupt
+Chromium, which suspends and resumes the element itself.
+
+⚠️ `audio.volume` is ignored on Android — the hardware keys are the only volume
+there is. A duck therefore arrives as pause-and-return, not as "quieter".
+
+⚠️ Most stream URLs are plain `http://`. Harmless while the hub is plain HTTP
+over Tailscale; **if the hub ever gets TLS, mixed content silently kills every
+one of them.**
+
 ---
 
 ## 4. WebSocket

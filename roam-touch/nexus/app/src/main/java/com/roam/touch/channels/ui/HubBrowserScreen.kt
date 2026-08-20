@@ -13,10 +13,15 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
+import com.roam.touch.channels.Roam
+import com.roam.touch.channels.audio.PlaybackFocus
+import com.roam.touch.channels.audio.RadioBridge
+import com.roam.touch.channels.audio.WebViewPlayback
 
 /** Same tag the rest of Nexus logs under, so `roam-emu logcat` catches it unchanged. */
 private const val TAG = "RoamNexus"
@@ -113,11 +118,37 @@ fun HubBrowserScreen(
     token: String,
     base: String,
     onBack: () -> Unit,
+    /**
+     * ★★ The referee for the earbud — see [PlaybackFocus].
+     *
+     * ⚠️ Null when the process graph has not been built (a preview, a screen test). The
+     * page then still loads and still plays; it is only the arbitration that is absent,
+     * which is the right failure for a test harness and the wrong one for the device — so
+     * the real caller always has it.
+     */
+    playback: PlaybackFocus? = if (Roam.isReady()) Roam.playback else null,
 ) {
     val headers = remember(token) { HubBrowser.authHeaders(token) }
     // Held so Back can ask the live WebView whether it has anywhere to go, at the moment
     // it is pressed rather than at the moment it was composed.
     val web = remember { mutableStateOf<WebView?>(null) }
+
+    /**
+     * ★★ **The radio stops when this screen does.**
+     *
+     * ⚠️ Both halves matter. The JS pause is for the WebView itself: Compose detaches the
+     * view but nothing guarantees the media element inside it stops, and a stream that
+     * keeps playing from a screen he has left is unreachable — there is no control on any
+     * other screen that can stop it. [PlaybackFocus.onSurfaceGone] is for the app's own
+     * memory of it: a page that has gone must not be resumed by the next PTT release.
+     */
+    DisposableEffect(playback) {
+        onDispose {
+            Roam.radio?.pause()
+            Roam.radio = null
+            playback?.onSurfaceGone()
+        }
+    }
 
     // ★ Back walks the page's own history first, and only then leaves.
     //
@@ -150,6 +181,18 @@ fun HubBrowserScreen(
                     setBackgroundColor(android.graphics.Color.BLACK)
                     configure()
                     webViewClient = hubClient(base, headers)
+                    // ★★ The radio, wired to the referee. Installed on every hub page
+                    // rather than only on the radio one: a page that never calls
+                    // `RoamAudio` is unaffected, and there is no way to know from a URL
+                    // which hub page has an <audio> element on it today.
+                    //
+                    // ⚠️ Safe because this WebView cannot navigate off the hub — see
+                    // `hubClient` — and because the bridge exposes two no-argument
+                    // methods and nothing else. See [RadioBridge].
+                    if (playback != null) {
+                        addJavascriptInterface(RadioBridge(playback), RadioBridge.NAME)
+                        Roam.radio = WebViewPlayback(this)
+                    }
                     // ★ The one request that has to carry the token as a header. Every
                     // fetch the page makes afterwards uses the copy the hub baked into
                     // its JavaScript, and its folder navigation never leaves this
@@ -179,6 +222,19 @@ fun HubBrowserScreen(
 private fun WebView.configure() {
     settings.javaScriptEnabled = true
     settings.domStorageEnabled = true
+    // ★★ **False, or the music never comes back after PTT.**
+    //
+    // ⚠️ The default is true, and it does not mean "the first play needs a tap" — it means
+    // *every* `play()` that is not inside a touch handler is refused. The resume after a
+    // press is issued from a focus callback, which is not a gesture by any definition the
+    // engine has, so with the default the radio would stop at the first PTT press and stay
+    // stopped until he found the page and pressed play again. That is the exact failure
+    // this whole file exists to remove.
+    //
+    // ⚠️ The cost is that a hub page *could* autoplay on load. Accepted: this WebView
+    // loads nothing but pages from his own hub, out of this repository, and it refuses to
+    // navigate anywhere else.
+    settings.mediaPlaybackRequiresUserGesture = false
     settings.allowFileAccess = false
     settings.allowContentAccess = false
     // A forearm screen is small and the hub's pages are already laid out for it; pinch

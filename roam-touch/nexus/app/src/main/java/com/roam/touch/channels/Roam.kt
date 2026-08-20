@@ -6,6 +6,12 @@ import com.roam.touch.channels.net.HubApi
 import com.roam.touch.channels.net.HubConfig
 import com.roam.touch.channels.controls.ControlStore
 import com.roam.touch.channels.controls.HeadsetControls
+import com.roam.touch.channels.audio.AudioFocusManager
+import com.roam.touch.channels.audio.FocusCaptureAudio
+import com.roam.touch.channels.audio.PlaybackFocus
+import com.roam.touch.channels.audio.PlaybackSurface
+import com.roam.touch.channels.audio.SpeechAudio
+import com.roam.touch.channels.audio.SystemAudioFocus
 import com.roam.touch.channels.net.HubSocket
 import com.roam.touch.channels.stt.BluetoothHeadsetLink
 import com.roam.touch.channels.stt.MicRecorder
@@ -63,6 +69,41 @@ object Roam {
         private set
 
     /**
+     * ★★ **The referee for the one earbud.**
+     *
+     * Music (the hub's radio, in the WebView) and the microphone (PTT, over the same
+     * Bluetooth headset) cannot both have it. This pauses the page for PTT and ducks it for
+     * Piper — the two sound sources inside this process, which the framework cannot
+     * arbitrate because they are all one app to it.
+     *
+     * ⚠️ It holds no audio focus of its own. Media focus for the radio belongs to the
+     * WebView's Chromium, which already takes it for the page and is what a phone call or a
+     * navigation prompt actually interrupts; a second media request from this app revoked
+     * its own page. See [PlaybackFocus].
+     *
+     * ⚠️ Process-scoped, like the socket and for the same reason: playback outlives the
+     * Activity, and state tied to a torn-down Activity is a PTT press that resumes nothing.
+     *
+     * ⚠️ The surface is looked up through [radio], which the browser screen sets while a
+     * page is on screen and clears when it leaves. Nothing here holds a WebView.
+     */
+    lateinit var playback: PlaybackFocus
+        private set
+
+    /**
+     * The live radio page, or null when none is on screen.
+     *
+     * ★ A field rather than a constructor argument because the WebView is created and
+     * destroyed by navigation, many times, while [playback] is created once.
+     */
+    @Volatile
+    var radio: PlaybackSurface? = null
+
+    /** The system audio-focus service. Exposed so the browser screen can wire a page in. */
+    lateinit var audioFocus: AudioFocusManager
+        private set
+
+    /**
      * ★★ The headset's own buttons, wired to this app.
      *
      * ⚠️ Owned here rather than by the Activity because it must keep working while the
@@ -102,9 +143,18 @@ object Roam {
         val api = HubApi(config, client)
         repository = HubRepository(api, HubSocket(config, client), settings)
         device = DeviceStateMonitor(app)
+        // ★ Built before the two things that make a sound, because it arbitrates between
+        // them: the radio in the WebView, PTT's microphone, and Piper's voice all reach
+        // the wearer through one Bluetooth earbud.
+        audioFocus = SystemAudioFocus(app)
+        playback = PlaybackFocus { radio }
+
         speaker = TtsSpeaker(
             WyomingTts(BuildConfig.TTS_HOST, BuildConfig.TTS_PORT, BuildConfig.TTS_VOICE),
             scope,
+            // ⚠️ Ducks the radio rather than pausing it — a spoken message is meant to sit
+            // on top of music, and a stream stopped for a sentence re-buffers twice.
+            audio = SpeechAudio(audioFocus, playback),
         )
 
         // The level callback is read back through `ptt` at call time, which is why the
@@ -116,6 +166,10 @@ object Roam {
             // ⚠️ Not an accessory path. This handset's own microphone is dead at the
             // HAL, so the headset link IS the microphone — see HeadsetLink.
             headset = BluetoothHeadsetLink(app),
+            // ★★ The half that makes music and PTT survive each other: a press takes
+            // exclusive transient focus (so other apps stop) and pauses our own radio
+            // directly (so it is silent before SCO even comes up).
+            audio = FocusCaptureAudio(audioFocus, playback),
         )
 
         // ⚠️ Inert until a gesture he bound arrives: the router passes every unbound key

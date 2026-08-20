@@ -18,6 +18,26 @@ import java.net.Socket
 import kotlin.coroutines.coroutineContext
 
 /**
+ * Something that can say a sentence out loud, and takes as long as the sentence does.
+ *
+ * ★ An interface for the same reason [com.roam.touch.channels.stt.Recorder] is one: the
+ * *policy* around speaking — what is spoken, what it does to the music, what happens when
+ * it is cancelled halfway — has to be testable on a JVM, and the thing that opens a socket
+ * and pushes PCM at a speaker cannot be.
+ */
+interface Voice {
+
+    /**
+     * Say [text], returning when the audio has finished playing.
+     *
+     * ⚠️ Cancellation stops the audio immediately — that is what makes "he picked the
+     * phone up mid-sentence" work, and it is why every caller's cleanup has to live in a
+     * `finally`.
+     */
+    suspend fun speak(text: String)
+}
+
+/**
  * Piper over the Wyoming protocol, streamed straight into an [AudioTrack].
  *
  * There is no Android package for Wyoming, so this is hand-rolled — but only just: the
@@ -29,14 +49,8 @@ class WyomingTts(
     private val host: String,
     private val port: Int,
     private val voice: String?,
-) {
-    /**
-     * Synthesise and play [text], returning when playback finishes.
-     *
-     * Cancellation stops the audio immediately — that is what makes "he picked the
-     * phone up mid-sentence" work.
-     */
-    suspend fun speak(text: String) = withContext(Dispatchers.IO) {
+) : Voice {
+    override suspend fun speak(text: String) = withContext(Dispatchers.IO) {
         if (text.isBlank()) return@withContext
         var track: AudioTrack? = null
         var played = 0L

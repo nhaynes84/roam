@@ -92,6 +92,25 @@ class BluetoothHeadsetLink(context: Context) : HeadsetLink {
     @Volatile
     private var up = false
 
+    /**
+     * ⚠️⚠️ **Did we ever touch the audio stack at all?**
+     *
+     * Set immediately before `startBluetoothSco()` and cleared by [close]. It is not the
+     * same question as [up], which means "SCO reported CONNECTED": a press abandoned
+     * halfway through [open] is `started && !up`, and that is precisely the case whose
+     * teardown must still run.
+     *
+     * ★ It exists because [close] is called far more often than [open]. `Ptt.cancel()`
+     * tears the link down from **Idle**, and cancel fires on every Back press and every
+     * thread close — so without this flag every Back press ran `stopBluetoothSco()` and
+     * `setMode(MODE_NORMAL)` **on the main thread**, against a capture HAL this repo
+     * already documents as broken (see [HeadsetLink]). `setMode` is a global audio-HAL
+     * operation; a HAL that is wedged blocks it, and a blocked main thread is a frozen
+     * launcher on his forearm. The owner must never have to avoid the Back button.
+     */
+    @Volatile
+    private var started = false
+
     override var onDropped: (() -> Unit)? = null
 
     /**
@@ -148,6 +167,10 @@ class BluetoothHeadsetLink(context: Context) : HeadsetLink {
         )
         val startedAt = SystemClock.elapsedRealtime()
         try {
+            // ⚠️ Raised *before* the first global mutation, never after. From this line on,
+            // this object has touched the audio stack and [close] owes it a teardown —
+            // including if the mode change or the start below throws.
+            started = true
             // ⚠️ Order is load-bearing. MODE_IN_COMMUNICATION first: the routing policy
             // is evaluated when SCO starts, not when the recorder opens.
             audio.mode = AudioManager.MODE_IN_COMMUNICATION
@@ -184,11 +207,24 @@ class BluetoothHeadsetLink(context: Context) : HeadsetLink {
     }
 
     /**
-     * ⚠️ Unconditional. A press that was abandoned halfway through [open] has already
-     * issued `startBluetoothSco()`, and leaving that standing is a headset stuck in call
-     * mode — mono, narrowband, and a live link nobody asked for.
+     * ⚠️⚠️ **Unconditional over a press, but a no-op when there was no press.**
+     *
+     * The teardown itself is still unconditional once [open] has run: a press abandoned
+     * halfway has already issued `startBluetoothSco()`, and leaving that standing is a
+     * headset stuck in call mode — mono, narrowband, and a live link nobody asked for. So
+     * `started`, not `up`, is what gates it.
+     *
+     * ⚠️⚠️ The early return is the point. `Ptt.cancel()` calls this from **Idle**, and
+     * cancel fires on every Back press and every thread close — three call sites in
+     * `ChannelsApp`, all on the main thread. `setMode(MODE_NORMAL)` is a *global*
+     * audio-HAL operation, and this device's capture HAL is documented broken in
+     * [HeadsetLink]: a wedged HAL turns that call into a blocked main thread, i.e. a
+     * launcher frozen on his forearm by pressing Back. Nothing here is worth doing when
+     * we never touched the audio stack, so nothing here runs.
      */
     override fun close() {
+        if (!started) return
+        started = false
         watcher?.let { runCatching { app.unregisterReceiver(it) } }
         watcher = null
         @Suppress("DEPRECATION")

@@ -98,11 +98,11 @@ class NavTest {
                     val expected = when (Nav.pane(reading, screen, open)) {
                         Pane.Reader -> Back.CloseReader
                         // ⚠️ The one documented exception to the mirror, and it is about
-                        // *how far* back rather than about what is on top: the browser is
-                        // a detour opened from another detour, so it unwinds to the shelf
-                        // rather than all the way to Channels. See Back.CloseHubBrowser.
+                        // *how far* back rather than about what is on top: a screen with a
+                        // parent was opened from another screen, so it unwinds to that one
+                        // rather than all the way to Channels. See Back.CloseSubScreen.
                         Pane.Detour ->
-                            if (screen == Screen.HubBrowser) Back.CloseHubBrowser
+                            if (Nav.parentOf(screen) != null) Back.CloseSubScreen
                             else Back.CloseDetour
                         Pane.Thread -> Back.CloseThread
                         Pane.List -> null
@@ -129,13 +129,13 @@ class NavTest {
     @Test
     fun `back out of the hub browser lands on the shelf, not on channels`() {
         assertEquals(
-            Back.CloseHubBrowser,
+            Back.CloseSubScreen,
             Nav.back(reading = false, screen = Screen.HubBrowser, hasOpenPane = false),
         )
         // …and an open conversation behind it does not change that. It is still there
         // afterwards; the shelf is simply what he was looking at a moment ago.
         assertEquals(
-            Back.CloseHubBrowser,
+            Back.CloseSubScreen,
             Nav.back(reading = false, screen = Screen.HubBrowser, hasOpenPane = true),
         )
     }

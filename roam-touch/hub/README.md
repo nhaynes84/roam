@@ -21,7 +21,8 @@ hub.py         FastAPI service + WebSocket + the tmux poller
 bridge.py      hub events -> phone notifications, via tools/roam-push
 files.py       ~/Collab browsing, path safety, share-to-Claude, thumbnails
 photo_bridge.py  a Google Photos shared album -> ~/.claude/dropzone/inbox
-web/           browse.html + stl.html, and a vendored three.js r112
+radio.py       internet radio: radio-browser.info, filtered to what plays, cached
+web/           browse.html + stl.html + radio.html, and a vendored three.js r112
 roam-hub-hook  the Claude Code hook that posts receipts and outcomes
 tests/         pytest; tmux faked at channels._run, network at urlopen
 ```
@@ -212,6 +213,58 @@ producers, both of which `photo_bridge.py` and `POST /share` follow:
 
 ⚠️ When globbing that directory, match on the **basename**. A `case "$f" in */.*)`
 against the full path matches the `/.claude/` in it and silently skips every file.
+
+## The radio (`GET /radio`)
+
+There is no music on the device and no account on it, so "play something" means
+**a live stream in a plain `<audio>` tag**. `GET /radio` is a two-column page —
+what is playing on the left, what could be on the right — and `radio.py` is the
+part that knows which streams a 2019 engine can actually decode.
+
+```
+radio.py         radio-browser.info: fetch, filter, normalise, cache to disk
+web/radio.html   the page: one <audio> element, no library, no HLS
+```
+
+* **The browser never calls radio-browser.info.** The hub fetches, filters and
+  caches; the page only ever talks to the hub. Three reasons, worst first: Chrome
+  74 plus a third-party endpoint is one CORS header away from a blank list it
+  cannot explain; their mirrors come and go, and failing over is server work; and
+  a cache on talos opens the list instantly and still opens it when the API is
+  down. **No key and no account** — that is why this API and not TuneIn.
+* ★ **A station is only offered if it will actually play.** HLS (`hls: 1` or a
+  `.m3u8`) needs MSE and a library; a `.pls`/`.m3u` is a playlist file that
+  `<audio>` feeds straight to the decoder; anything outside MP3/AAC is a coin
+  toss on a 2019 Android engine, `UNKNOWN` most of all. A station that appears on
+  his wrist and then produces silence is worse than one that was never listed —
+  from the arm the two look identical.
+* **Favourites are baked in *and* refreshed.** `FAVOURITES` in `radio.py` holds a
+  uuid and a known-good URL for each of a dozen stations, so a hub with no
+  network still shows a full list that plays. A refresh (daily) takes the live
+  stream URL — they rot — and keeps the curated **name**: the directory calls one
+  of them "SomaFM Groove Salad (128k MP3)", which is noise at arm's length.
+* **`source` tells the truth**: `live`, `cache`, `stale` (directory unreachable,
+  this is the last good answer) or `builtin`. The page says so for the last two
+  rather than presenting a possibly-rotted list as current.
+* **Search** is a name search, most-played first, capped at 30 after filtering —
+  it asks the API for six times that, because most of what comes back is thrown
+  away by the rules above.
+* ⚠️ **Stopping is `removeAttribute("src")`, not just `pause()`.** A paused
+  `<audio>` keeps the connection open and the buffer filling: a radio he cannot
+  hear, still spending battery and data.
+* ★★ **The page keeps both halves of Nexus's audio contract** — `window.RoamRadio`
+  (the app's handle on playback, for PTT and Piper) and `RoamAudio.onPlay/onPause`
+  (how the app knows music is wanted — it holds no media focus of its own; the
+  WebView's Chromium does). Both were written in
+  `nexus/.../channels/audio/WebViewPlayback.kt` before this page existed; read it
+  before changing either. `tests/test_radio_api.py` runs the page's whole state
+  machine in a browser-shaped node sandbox, including the interruption path.
+* Many stream URLs are plain `http://`. That is fine here — the hub itself is
+  plain HTTP over Tailscale, so there is no mixed-content downgrade to trip over.
+  ★ If the hub ever gets TLS, every `http://` stream in that list stops playing
+  and the fix is to prefer the `https` variant, not to relax the page.
+* Cache: `~/Library/Caches/roam-hub/radio` (`ROAM_HUB_RADIO_CACHE`). Deleting it
+  is always safe; the next request refills it.
 
 ## Where a reply goes
 

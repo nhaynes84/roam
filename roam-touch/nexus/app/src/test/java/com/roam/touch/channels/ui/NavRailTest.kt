@@ -2,8 +2,13 @@ package com.roam.touch.channels.ui
 
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
@@ -49,6 +54,7 @@ class NavRailTest {
     private var voicePresses = 0
     private var quickSent: String? = null
     private var wentTo: Screen? = null
+    private var folds = 0
 
     private fun render(
         shell: Shell,
@@ -57,10 +63,15 @@ class NavRailTest {
         screen: Screen = Screen.Channels,
         sending: Boolean = false,
         battery: BatteryState = BatteryState(percent = 72),
+        collapsed: Boolean = false,
     ) {
-        opened = null; voicePresses = 0; quickSent = null; wentTo = null
+        opened = null; voicePresses = 0; quickSent = null; wentTo = null; folds = 0
         compose.setContent {
             RoamTheme {
+                // ⚠️ The fold is state the rail's own control drives, not a fixed flag:
+                // Compose allows one `setContent` per test, so pinning "the control works
+                // in both states" needs a rail that can actually change state under it.
+                var folded by remember { mutableStateOf(collapsed) }
                 Row(Modifier.fillMaxSize()) {
                     NavRail(
                         shell = shell,
@@ -70,11 +81,12 @@ class NavRailTest {
                         screen = screen,
                         openPane = openPane,
                         sending = sending,
+                        collapsed = folded,
+                        onToggleCollapse = { folds++; folded = !folded },
                         onOpenChannel = { opened = it },
                         onHome = {},
                         onOpenApps = { wentTo = Screen.Apps },
-                        onOpenHomeAssistant = { wentTo = Screen.HomeAssistant },
-                        onOpenControls = { wentTo = Screen.Controls },
+                        onOpenSettings = { wentTo = Screen.Settings },
                         onVoice = { voicePresses++ },
                         onQuickSend = { quickSent = it },
                     )
@@ -83,8 +95,18 @@ class NavRailTest {
         }
     }
 
-    /** The three destinations, by the names they used to shout. */
-    private val DESTINATIONS = listOf("home assistant", "apps", "headset buttons")
+    /**
+     * The destinations the rail offers, by the names they used to shout.
+     *
+     * ⚠️⚠️ **Both of these changed on 2026-08-15, and neither was a rename.** "home
+     * assistant" was a house glyph in the first slot — pressing it opened the HA token
+     * wizard, which is the screen behind owner's *"home … telling me i need a token"*; HA
+     * is an app now and lives on the shelf. "headset buttons" became one widget inside
+     * [SettingsScreen]: *"the headphones setup is a Setting."* Home itself is not in this
+     * list because it is the CHANNELS header while the rail is open — see
+     * `the folded rail is his column, in his order` for where it appears when it is not.
+     */
+    private val DESTINATIONS = listOf("apps", "settings")
 
     // --- the correctness fix -------------------------------------------------
 
@@ -182,7 +204,7 @@ class NavRailTest {
         render(Shell.Narrow)
         assertTrue(compose.onAllNodesWithText("HOME ASSISTANT").fetchSemanticsNodes().isEmpty())
         assertTrue(compose.onAllNodesWithTag(RAIL_QUEUE).fetchSemanticsNodes().isEmpty())
-        compose.onNodeWithContentDescription("home assistant").assertIsDisplayed()
+        compose.onNodeWithContentDescription("apps").assertIsDisplayed()
         compose.onNodeWithText("CH").assertIsDisplayed()
     }
 
@@ -235,10 +257,8 @@ class NavRailTest {
         render(Shell.Wide)
         compose.onNodeWithContentDescription("apps").performClick()
         assertEquals(Screen.Apps, wentTo)
-        compose.onNodeWithContentDescription("home assistant").performClick()
-        assertEquals(Screen.HomeAssistant, wentTo)
-        compose.onNodeWithContentDescription("headset buttons").performClick()
-        assertEquals(Screen.Controls, wentTo)
+        compose.onNodeWithContentDescription("settings").performClick()
+        assertEquals(Screen.Settings, wentTo)
     }
 
     // --- what the hidden status bar handed over ------------------------------
@@ -343,6 +363,133 @@ class NavRailTest {
     fun `the unread badge is on the Wide rail header and on its channel`() {
         render(Shell.Wide, state = withOneUnread())
         compose.onAllNodesWithContentDescription("1 unread").assertCountEquals(2)
+    }
+
+    // --- folded: the icon column ---------------------------------------------
+
+    /** The top of a node, in dp, for asserting what is above what. */
+    private fun topOf(tag: String) =
+        compose.onNodeWithTag(tag).getUnclippedBoundsInRoot().top.value
+
+    private fun topOfName(name: String) =
+        compose.onNodeWithContentDescription(name).getUnclippedBoundsInRoot().top.value
+
+    /**
+     * ★★ **The spec, in his order.** Owner: *"show me the home / apps / headphones
+     * stacked, with the expand icon at the top of the column, and just unread notification
+     * count bubble under that."*
+     *
+     * ⚠️ Asserted as an *order*, not as a set. Every one of these could be present and the
+     * column still be wrong — the expand control below the destinations is a different
+     * control from the one he asked for, because on a rail he finds by feel while walking,
+     * position is the label.
+     */
+    @Test
+    fun `the folded rail is his column, in his order`() {
+        render(Shell.Wide, state = withOneUnread(), collapsed = true)
+
+        val order = listOf(
+            "expand" to topOf(RAIL_FOLD),
+            "count" to topOf(RAIL_COUNT),
+            "channels" to topOfName("channels"),
+            "apps" to topOfName("apps"),
+            "settings" to topOfName("settings"),
+        )
+        println("FOLDED " + order.joinToString { "${it.first}=${it.second}dp" })
+        order.zipWithNext { (aName, a), (bName, b) ->
+            assertTrue("$bName is not below $aName ($b vs $a)", b > a)
+        }
+    }
+
+    /**
+     * ⚠️⚠️ Folding must *remove* the list, not squeeze it. A queue clipped to a 56 dp
+     * column would still be composed, still be scrollable, and still be reported as
+     * present by everything except the eye — which is exactly how the rail once shipped
+     * with a 0 dp channel list nobody could see.
+     */
+    @Test
+    fun `folding puts the channel list away rather than clipping it`() {
+        render(Shell.Wide, collapsed = true)
+        assertTrue(compose.onAllNodesWithTag(RAIL_QUEUE).fetchSemanticsNodes().isEmpty())
+        assertTrue(compose.onAllNodesWithText("◑ live one").fetchSemanticsNodes().isEmpty())
+        // ★ And the door to voice goes with it: it is a full-width control with a channel
+        // name printed on it, and there is no width to print one in.
+        assertTrue(compose.onAllNodesWithTag(RAIL_TALK).fetchSemanticsNodes().isEmpty())
+    }
+
+    /**
+     * ★★ One badge, not two. Expanded, the count sits on the CHANNELS row (and again on
+     * the channel that owns it, which is a different fact about a different thing). Folded,
+     * there is no CHANNELS row, so the bubble *is* that badge in the shape that has room
+     * for it — never an addition to it.
+     */
+    @Test
+    fun `the folded rail counts once, and does not repeat itself`() {
+        render(Shell.Wide, state = withOneUnread(), collapsed = true)
+        compose.onAllNodesWithContentDescription("1 unread").assertCountEquals(1)
+    }
+
+    /** Nothing waiting means no bubble — the count is a signal, not a permanent zero. */
+    @Test
+    fun `a quiet folded rail shows no bubble at all`() {
+        render(Shell.Wide, collapsed = true)
+        assertTrue(compose.onAllNodesWithTag(RAIL_COUNT).fetchSemanticsNodes().isEmpty())
+    }
+
+    /**
+     * ⚠️ The control is at the top in *both* states, and it works in both. A toggle that
+     * moves when it is used is a toggle he has to look for after every press.
+     */
+    @Test
+    fun `the fold control is the top of the column in both states`() {
+        render(Shell.Wide, collapsed = true)
+        compose.onNodeWithContentDescription("expand the channel rail").assertIsDisplayed()
+
+        // ★ One press, and the same control is still under the finger that pressed it —
+        // now saying the opposite thing, above the list it just brought back.
+        compose.onNodeWithTag(RAIL_FOLD).performClick()
+        assertEquals(1, folds)
+        compose.onNodeWithContentDescription("collapse the channel rail").assertIsDisplayed()
+        assertTrue("the fold control moved off the top row", topOf(RAIL_FOLD) < topOf(RAIL_QUEUE))
+
+        compose.onNodeWithTag(RAIL_FOLD).performClick()
+        assertEquals(2, folds)
+        compose.onNodeWithContentDescription("expand the channel rail").assertIsDisplayed()
+    }
+
+    /** ⚠️ Narrow is already the icon column. A fold control there folds nothing. */
+    @Test
+    fun `Narrow has nothing to fold, so it offers no control`() {
+        render(Shell.Narrow, collapsed = true)
+        assertTrue(compose.onAllNodesWithTag(RAIL_FOLD).fetchSemanticsNodes().isEmpty())
+        // …and it stays the rail it always was, list or no list.
+        compose.onNodeWithText("CH").assertIsDisplayed()
+    }
+
+    /**
+     * The three destinations are the *same three*, reached the same way. Folding must not
+     * fork the nav targets — see the `destinations` lambda they both draw from.
+     */
+    @Test
+    fun `the folded destinations are the same doors and still open`() {
+        render(Shell.Wide, collapsed = true)
+        DESTINATIONS.forEach { compose.onNodeWithContentDescription(it).assertIsDisplayed() }
+        compose.onNodeWithContentDescription("apps").performClick()
+        assertEquals(Screen.Apps, wentTo)
+        compose.onNodeWithContentDescription("settings").performClick()
+        assertEquals(Screen.Settings, wentTo)
+    }
+
+    /**
+     * ⚠️ The clock survives the fold. He did not ask for it in the column — but the system
+     * status bar is hidden app-wide, so this rail is the only clock the device has, in
+     * whatever shape it is in. See `the Wide rail carries the time and the charge`.
+     */
+    @Test
+    fun `the folded rail still tells the time`() {
+        render(Shell.Wide, collapsed = true)
+        compose.onNodeWithTag(RAIL_STATUS).assertIsDisplayed()
+        compose.onNodeWithText(Format.clock(Fx.NOW_MS)).assertIsDisplayed()
     }
 
     private fun withOneUnread() = ChannelReducer.applyEvent(

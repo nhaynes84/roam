@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
@@ -21,10 +22,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.GridView
-import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.RecordVoiceOver
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material3.MaterialTheme
@@ -76,19 +79,36 @@ fun NavRail(
      * is exactly where the merge of the nav rail and the send deadlines could have lost it.
      */
     sending: Boolean,
+    /**
+     * ★★ Folded down to the icon column. Owner: *"make it collapsible into the left side
+     * where it becomes some icons."*
+     *
+     * ⚠️ Hoisted, and persisted in [com.roam.touch.channels.Settings] rather than
+     * remembered here — the fold is a preference, and this is a launcher whose process is
+     * killed routinely. Wide only: [Shell.Narrow] is already an icon strip, and a fold
+     * control there would be a button that changes nothing.
+     */
+    collapsed: Boolean,
+    onToggleCollapse: () -> Unit,
     onOpenChannel: (Channel) -> Unit,
     onHome: () -> Unit,
     onOpenApps: () -> Unit,
-    onOpenHomeAssistant: () -> Unit,
-    onOpenControls: () -> Unit,
+    onOpenSettings: () -> Unit,
     onVoice: () -> Unit,
     onQuickSend: (String) -> Unit,
 ) {
     val open = openPane?.let { state.channel(it) }
+    val folded = shell == Shell.Wide && collapsed
     Column(
         Modifier
             .testTag(RAIL)
-            .width(if (shell == Shell.Wide) WIDE_DP else NARROW_DP)
+            .width(
+                when {
+                    folded -> COLLAPSED_DP
+                    shell == Shell.Wide -> WIDE_DP
+                    else -> NARROW_DP
+                }
+            )
             .fillMaxHeight()
             .background(RoamColors.Surface)
             .padding(vertical = 4.dp),
@@ -98,7 +118,62 @@ fun NavRail(
         // presses. `the rail spends width, never height` is the test that says so.
         verticalArrangement = Arrangement.spacedBy(5.dp),
     ) {
-        RailHome(shell, state.totalUnread(), atHome = screen == Screen.Channels, onHome)
+        // ★ Declared once and used by both shapes of the rail. There is no second set of
+        // nav targets and there must never be one: a control that exists in only one fold
+        // state is a control he cannot find in the other.
+        //
+        // ⚠️⚠️ **Home Assistant is not here any more, and the house glyph is now Home.**
+        // Owner, 2026-08-15: *"no the main feature is channels, Home is channels, HA is an
+        // app, has no business being a main tab."* The old first destination was a house
+        // that opened [Screen.HomeAssistant] — and with `roam.ha.token` unset that screen
+        // is the token-setup wizard, which is the *literal* screen behind *"home … telling
+        // me i need a token."* Pressing the house was pressing Home Assistant. HA keeps its
+        // screen and its tile on the shelf ([AppShelf] NATIVE_HA, always first); what it
+        // loses is a seat in the navigation.
+        //
+        // ⚠️ [withHome] is not a fourth destination — it is *where* the one Home control is
+        // drawn. Expanded, home is the CHANNELS header above the queue, which is bigger and
+        // carries the unread count; folded, there is no header, so it is this glyph. Same
+        // target, one affordance per shape, never two at once.
+        val destinations = @Composable { m: Modifier, withHome: Boolean ->
+            if (withHome) {
+                RailDestination(m, Icons.Filled.Home, "channels", RoamColors.Attention,
+                    selected = screen == Screen.Channels && openPane == null, onClick = onHome)
+            }
+            RailDestination(m, Icons.Filled.GridView, "apps", RoamColors.TextPrimary,
+                selected = screen == Screen.Apps, onClick = onOpenApps)
+            // ⚠️⚠️ **Settings, not headphones.** Owner, 2026-08-15: *"honestly the
+            // headphones setup is a Setting, we'll need our own settings so might as well
+            // just start making widgets there, of which headphones is one setting."* The
+            // headset screen is unchanged and one tap further in — [SettingsShelf] —
+            // which matters, because with the handset mic dead it is how PTT is bound.
+            //
+            // ⚠️ Selected for [Screen.Controls] too: he is *inside* settings when he is
+            // binding a button, and a rail that unlights while he is two taps deep says he
+            // left something he did not leave.
+            RailDestination(m, Icons.Filled.Settings, "settings", RoamColors.TextPrimary,
+                selected = screen == Screen.Settings || screen == Screen.Controls,
+                onClick = onOpenSettings)
+        }
+
+        if (folded) {
+            FoldedRail(
+                unread = state.totalUnread(),
+                battery = battery,
+                nowMs = nowMs,
+                onExpand = onToggleCollapse,
+                destinations = destinations,
+            )
+            return@Column
+        }
+
+        RailHome(
+            shell = shell,
+            unread = state.totalUnread(),
+            atHome = screen == Screen.Channels,
+            onHome = onHome,
+            onCollapse = onToggleCollapse,
+        )
 
         // ★ The list itself, in the rail, only where there is width for it. In Narrow it
         // stays in the content pane — collapsing the rail rather than forking the tree is
@@ -177,28 +252,100 @@ fun NavRail(
         // exact confusion the root PTT bar used to cause.
         if (open == null) RailTalk(shell, VoiceEntry.target(state.channels), onVoice)
 
-        val destinations = @Composable { m: Modifier ->
-            RailDestination(m, Icons.Filled.Home, "home assistant", RoamColors.Attention,
-                selected = screen == Screen.HomeAssistant, onClick = onOpenHomeAssistant)
-            RailDestination(m, Icons.Filled.GridView, "apps", RoamColors.TextPrimary,
-                selected = screen == Screen.Apps, onClick = onOpenApps)
-            // ⚠️ Reachable without a headset connected, on purpose: he will want to change
-            // a binding sitting down, not while putting earbuds in.
-            RailDestination(m, Icons.Filled.Headphones, "headset buttons", RoamColors.TextPrimary,
-                selected = screen == Screen.Controls, onClick = onOpenControls)
-        }
         if (shell == Shell.Wide) {
             // One row, three doors: 46 dp instead of 138. In a 411 dp window those 92 dp
             // are two more channels in the list.
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(3.dp),
-            ) { destinations(Modifier.weight(1f)) }
+            ) { destinations(Modifier.weight(1f), false) }
         } else {
-            destinations(Modifier.fillMaxWidth().padding(horizontal = 6.dp))
+            // ⚠️ Narrow has a "CH" header, so home lives there too — see [RailHome].
+            destinations(Modifier.fillMaxWidth().padding(horizontal = 6.dp), false)
         }
 
         RailStatus(shell, battery, nowMs)
+    }
+}
+
+/**
+ * ★★ The rail, folded: a column of icons and nothing that needs reading.
+ *
+ * The owner's spec, verbatim and in his order: *"show me the home / apps / headphones
+ * stacked, with the expand icon at the top of the column, and just unread notification
+ * count bubble under that."* So the order below **is** the requirement — expand, count,
+ * then the three destinations — and `the folded rail is his column, in his order` is the
+ * test that keeps it that way.
+ *
+ * ⚠️ **No channel list, and no [RailTalk].** Folding is not a narrower list, it is the
+ * absence of one: the queue is not clipped or scrolled away here, it is simply not
+ * composed, and [ChannelsApp] hands the freed width to the content pane — which draws the
+ * full list instead, exactly as it does in portrait. That is what keeps the fold from
+ * being a dead end with no way to pick a channel.
+ *
+ * ⚠️ The clock and the battery stay, at the foot, below the fold he asked for. He did not
+ * ask for them and they are not navigation, but the system status bar is hidden app-wide
+ * (see `SystemBars`) — this rail is the only clock the device has, and a worn screen that
+ * cannot tell the time is a regression whichever shape it is in. Everything above them is
+ * his column, untouched.
+ */
+@Composable
+private fun ColumnScope.FoldedRail(
+    unread: Int,
+    battery: BatteryState,
+    nowMs: Long,
+    onExpand: () -> Unit,
+    destinations: @Composable (Modifier, Boolean) -> Unit,
+) {
+    RailFold(collapsed = true, onToggle = onExpand)
+
+    // ★ Just the count, as he asked — not a home button wearing a badge. It is the one
+    // thing in the folded column that is read rather than pressed, and [UnreadBadge]
+    // draws nothing at zero, so a quiet rail stays quiet.
+    if (unread > 0) {
+        Box(Modifier.testTag(RAIL_COUNT), contentAlignment = Alignment.Center) {
+            UnreadBadge(unread)
+        }
+    }
+
+    // ★ HOME first of the three, and it is the channel list — his order, and now his
+    // meaning too. See the note on `destinations`.
+    destinations(Modifier.fillMaxWidth().padding(horizontal = 4.dp), true)
+
+    Spacer(Modifier.weight(1f))
+    RailStatus(Shell.Narrow, battery, nowMs)
+}
+
+/**
+ * The fold control, in both directions.
+ *
+ * ⚠️ It sits at the top of the column in both states — the expand icon at the top of the
+ * folded rail is where he asked for it, and putting collapse in the same place means the
+ * control does not move when it is used. A toggle that jumps under the finger that pressed
+ * it is the one thing a worn device cannot afford.
+ *
+ * The chevron points where the rail is going, not at what it is: right to open it out,
+ * left to put it away.
+ */
+@Composable
+private fun RailFold(collapsed: Boolean, onToggle: () -> Unit) {
+    Box(
+        Modifier
+            .testTag(RAIL_FOLD)
+            .then(if (collapsed) Modifier.fillMaxWidth() else Modifier.width(46.dp))
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onToggle)
+            // The same 46 dp every pressable row in this rail uses. He does this walking.
+            .heightIn(min = 46.dp)
+            .padding(horizontal = 4.dp, vertical = 4.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = if (collapsed) Icons.Filled.ChevronRight else Icons.Filled.ChevronLeft,
+            contentDescription = if (collapsed) "expand the channel rail" else "collapse the channel rail",
+            tint = RoamColors.TextPrimary,
+            modifier = Modifier.size(26.dp),
+        )
     }
 }
 
@@ -208,6 +355,12 @@ fun NavRail(
  * The badge is on the rail rather than over the list because in Wide the list is *in* the
  * rail: one glance at the left edge answers "is anything waiting for me" whatever screen
  * he is on, including the ones that are not Channels at all.
+ *
+ * ⚠️ **There is exactly one unread badge, and this is it while the rail is open.** The
+ * folded column's count bubble is the *same* badge in the shape that has no CHANNELS row
+ * to hang it off — never a second copy. Two counts of the same number on one screen is how
+ * a badge stops meaning anything, and `only one unread badge exists in either fold state`
+ * is the test that says so.
  */
 @Composable
 private fun RailHome(
@@ -215,6 +368,7 @@ private fun RailHome(
     unread: Int,
     atHome: Boolean,
     onHome: () -> Unit,
+    onCollapse: () -> Unit,
 ) {
     val label = @Composable {
         Text(
@@ -263,6 +417,10 @@ private fun RailHome(
                 UnreadBadge(unread)
             }
         }
+
+        // ★ Only where there is something to fold. Narrow is already the icon column, so
+        // it gets no control — see the note on [NavRail]'s `collapsed`.
+        if (shell == Shell.Wide) RailFold(collapsed = false, onToggle = onCollapse)
     }
 }
 
@@ -529,45 +687,39 @@ private fun RailDivider() {
 }
 
 /**
- * ★ The empty half of the two-pane layout, and it is not blank.
- *
- * In Wide the rail holds the list, so the content pane has nothing to show until a
- * channel is picked. It says which of the two things to do rather than sitting empty —
- * and it names the same door the rail does, so there is one story about how voice starts.
- */
-@Composable
-fun NoChannelOpen(hasChannels: Boolean) {
-    Box(
-        Modifier
-            .testTag(NO_CHANNEL_OPEN)
-            .fillMaxWidth()
-            .fillMaxHeight()
-            .padding(24.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = if (hasChannels) "pick a channel — or press TALK for the top live one"
-            else "no channels — open a pane on talos",
-            style = MaterialTheme.typography.bodyLarge,
-            color = RoamColors.TextSecondary,
-            textAlign = TextAlign.Center,
-        )
-    }
-}
-
-/**
  * Rail widths. Wide holds a channel name; Narrow holds a word and a thumb.
+ *
+ * ⚠️ **This number is the whole of the "channels pane" width.** In Wide the list lives in
+ * the rail, so what he sees as the channels pane *is* the rail — there is no second weight
+ * splitting the window. [ChannelsApp]'s two `weight(1f)` boxes are nested, one horizontal
+ * and one vertical, and neither divides the screen in two.
+ *
+ * ⚠️⚠️ **224 is deliberate, and narrowing it is the answer that was tried and rejected.**
+ * sailfish's landscape window is 731 dp, so 224 dp is 31 % of it — owner: *"the channels
+ * takes up like a third of the screen."* It was cut to 184, a true quarter, and he chose
+ * differently: *"instead of 1/4 on the channels, let's keep the proportions, but make it
+ * collapsible into the left side where it becomes some icons."* So the expanded rail is
+ * back to the width that fits a channel name, and the third of the screen is now something
+ * he can **put away** rather than something he has to live with. Do not re-narrow this to
+ * buy width — [COLLAPSED_DP] is where that width comes from now.
  *
  * ⚠️ 224, not 196: at 196 the header rendered as "CHANNE… (3) 100%" on the device. The
  * title is the one word in the rail that must never be abbreviated — it is the way home.
- * The battery has since moved out of the header into [RailStatus], so the header has slack
- * again; the width stays because it is also what lets [RailTalk] print a channel name.
+ *
+ * ⚠️ [COLLAPSED_DP] is measured off its contents rather than picked. The widest thing in
+ * the icon column is [UnreadBadge] — 30 dp of minimum width plus 9 dp of padding either
+ * side, so 48 — and 4 dp of air each side makes 56. That leaves every destination a
+ * 48 × 46 dp target, the same 46 dp row the expanded rail uses throughout. **Do not tune
+ * this down**: below 56 it is the badge that breaks first, not the layout, and the badge is
+ * the only unread signal the collapsed rail has.
  */
 private val WIDE_DP = 224.dp
+private val COLLAPSED_DP = 56.dp
 private val NARROW_DP = 62.dp
 
 const val RAIL = "nav-rail"
 const val RAIL_QUEUE = "rail-queue"
+const val RAIL_FOLD = "rail-fold"
+const val RAIL_COUNT = "rail-count"
 const val RAIL_TALK = "rail-talk"
 const val RAIL_STATUS = "rail-status"
-const val NO_CHANNEL_OPEN = "no-channel-open"

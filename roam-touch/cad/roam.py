@@ -39,6 +39,8 @@ only: **fit**. The pack tube, cable routing, flush cap, mic pod and sleeve are
 later steps, and the sliding cover is a separate model after those.
 """
 import math
+import os
+import sys
 from build123d import *
 
 # ------------------------------------------------------------------ phone
@@ -127,6 +129,7 @@ BTN_CB_D = 1.2
 BTN_CB_EXT = 3.0
 BTN_CLR = 0.35
 BTN_PROUD = 0.6
+BTN_PRESS = 0.0       # how far the flange may stand proud INTO the pocket
 
 CHAMFER, CHAMFER_SM = 3.0, 1.5
 EPS = 0.1
@@ -299,7 +302,9 @@ MIC_SWELL_HALF = 10.0     # flat span either side of the mic
 MIC_SWELL_BITE = 1.0      # ⚠️ starts inside the rail's face, never on it
 # ★ The chamber reaches inboard to CH_X0 — it and the cable groove are one void,
 # which is how the lead gets to the capsule without a separate connecting cut.
-MIC_CH_X1 = 50.90
+# ⚠️ 50.90 left only 0.60 mm to the swell's rounded outer face at Z -9.9 (nominal looked
+# like 1.10, but the swell curves in). Measured, not nominal: 50.30 restores MIN_WALL.
+MIC_CH_X1 = 50.30
 MIC_CH_L = 19.0
 
 # ★ Owner: *"i might even put a little bit of black screen on the underside too
@@ -624,20 +629,54 @@ def port_openings() -> Part:
     return cut
 
 
-def button_bores() -> Part:
-    """Bores for the two print-in-place plungers, +X wall.
+def _btn_geo():
+    """Shared bore/plunger arithmetic, straight out of `archive/bracer.py` (the version he
+    printed and called perfect). Kept in one place so the hole and the thing that goes in
+    it cannot drift apart again."""
+    x_pock, x_out = POCK_W / 2, POCK_W / 2 + WALL
+    z_btn = FLOOR + POCK_D / 2
+    for y0s, y1s in (PWR_SVG, VOL_SVG):
+        y0, y1 = fy(y1s), fy(y0s)
+        yield x_pock, x_out, z_btn, (y0 + y1) / 2, (y1 - y0)
 
-    ⚠️ Positions untouched. "buttons are perfect though man, they feel great,
-    first try" — the drawing was only wrong about the face features.
+
+def button_bores() -> Part:
+    """Outer bore (the stem passes through) + inner counterbore (the flange is trapped).
+
+    ⚠️ I had only ever cut the OUTER bore. Without the counterbore there is nothing for a
+    flange to sit behind, so the plunger is not captive — it is a loose tab that falls out.
     """
     cut = Part()
-    x = POCK_W / 2 + WALL / 2
-    for y0, y1 in (PWR_SVG, VOL_SVG):
-        ya, yb = fy(y1), fy(y0)
-        cut += Pos(x, (ya + yb) / 2, FLOOR + PH_T / 2) * Box(
-            WALL + 2 * EPS, (yb - ya) + BTN_CB_EXT, BTN_BORE_H,
+    for x_pock, x_out, z_btn, yc, ylen in _btn_geo():
+        cut += Pos((x_pock + BTN_CB_D + x_out + EPS) / 2, yc, z_btn) * Box(
+            x_out + EPS - x_pock - BTN_CB_D, ylen, BTN_BORE_H,
+            align=(Align.CENTER, Align.CENTER, Align.CENTER))
+        cut += Pos((x_pock - EPS + x_pock + BTN_CB_D) / 2, yc, z_btn) * Box(
+            BTN_CB_D + EPS, ylen + BTN_CB_EXT, BTN_CB_H,
             align=(Align.CENTER, Align.CENTER, Align.CENTER))
     return cut
+
+
+def buttons() -> Part:
+    """★ THE PRINT-IN-PLACE PLUNGERS — restored from `archive/bracer.py`, not re-derived.
+
+    ⚠️ He said "put those back in for power and volume" and I built NEW ones from the bore
+    numbers: stem only, 3.30 tall, 3 mm short. His were 6.30 — because a plunger is TWO
+    features, a FLANGE trapped in the counterbore and a STEM through the bore standing
+    BTN_PROUD past the wall. The flange is what makes it captive and print-in-place.
+    ★ The rule this cost, twice in one night: when he says a feature is right, RESTORE the
+    geometry. Do not rebuild it from the constants that happen to live near it.
+    """
+    c = BTN_CLR
+    out = Part()
+    for x_pock, x_out, z_btn, yc, ylen in _btn_geo():
+        out += Pos((x_pock - BTN_PRESS + x_pock + BTN_CB_D - c) / 2, yc, z_btn) * Box(
+            BTN_CB_D - c + BTN_PRESS, ylen + BTN_CB_EXT - 2 * c, BTN_CB_H - 2 * c,
+            align=(Align.CENTER, Align.CENTER, Align.CENTER))
+        out += Pos((x_pock + BTN_CB_D - c + x_out + BTN_PROUD) / 2, yc, z_btn) * Box(
+            x_out + BTN_PROUD - x_pock - BTN_CB_D + c, ylen - 2 * c, BTN_BORE_H - 2 * c,
+            align=(Align.CENTER, Align.CENTER, Align.CENTER))
+    return out
 
 
 def _roll(x_outer: float) -> Part:
@@ -904,212 +943,235 @@ def pack_bore() -> Part:
         align=(Align.CENTER, Align.CENTER, Align.MIN))
 
 
-# ================================================================ THE SLEEVE
-# ★★ STEP 7, his spec: a FLUSH-MOUNTED HALF-CIRCLE SLEEVE — **not ribs** — with slots
-# at both ends for two velcro straps. He adds the comfort layer under the velcro.
-# This is what kills the ~1 inch of stack (ribs + velcro + strap) and the roll: the
-# housing base becomes a flat mounting face and the arm-conforming job leaves the
-# housing entirely.
-#
-# ★ THE KEY MOVE: the arm's crown sits AT the housing's mounting plane, so the sleeve
-# adds ZERO standoff. Its inner cylinder is therefore centred ARM_R below that plane
-# and the shell only exists where the housing is not — which is why it is cut against
-# the REAL housing solid rather than against my idea of the underside. The tube dives
-# to Z −12.2 on −X and the rail sits at −0.4 on +X; conforming to that by hand would
-# be three assumptions I would get wrong.
-#
-# ⚠️ ARM_R IS THE ONE NUMBER I CANNOT DERIVE. 45.0 is bracer.py's nominal, and it says
-# so itself: "nominal, NOT critical, and that is deliberate". That was fine for a
-# shallow saddle. A half-circle that WRAPS and takes strap tension is sized by the
-# real limb — measure the forearm's circumference at the strap stations and set
-# ARM_R = circumference / (2*pi). Everything below follows from it.
-# ★ the mounting plane IS the rail top — the flat band the probe found running
-# X −36..+34 at this Z, which is the only continuous flat on the underside.
-MOUNT_Z = RAIL_TOP
-MOUNT_BAND = 55.0
-# ★★ THE SLEEVE IS A TILTED CONE, NOT A CYLINDER. His call: *"i don't want something
-# too tight and arms naturally taper"*. A constant radius binds at the elbow end and
-# gaps at the wrist, and over 144 mm of forearm the taper is real — several mm of radius.
-# ⚠️ AND THE AXIS HAS TO SLOPE. The arm's crown stays against the mounting plane for the
-# whole length (that is what buys zero standoff), so as the radius grows toward the elbow
-# the arm's CENTRE drops further below that plane. Axis from (MOUNT_Z − R_WRIST) at Y0 to
-# (MOUNT_Z − R_ELBOW) at Y1. A horizontal axis would lift the crown off the plane at one
-# end and bury it at the other.
-# ⚠️⚠️ THESE TWO NUMBERS ARE PLACEHOLDERS — deliberately generous, not measured. Owner:
-# *"that's a fitment dance we can do later."* They are the ONLY things to change when it
-# happens; everything below is derived. Sized loose on purpose: include the comfort layer
-# he adds under the velcro, and err large — a sleeve that is slightly loose is strapped
-# down, one that is tight is a reprint.
-ARM_R_WRIST = 40.0            # Y0 end — points at the WRIST (USB/cap end)
-ARM_R_ELBOW = 50.0            # Y1 end — points at the ELBOW (jack end)
-ARM_R = ARM_R_WRIST           # kept for anything that wants one number
-SLEEVE_WALL = 3.0
-SLEEVE_Y0, SLEEVE_Y1 = 8.0, 152.0
-# ★★ THE HOUSING SITS CANTED ON THE ARM. His call: rotate ~-30°, stern (USB/wrist end)
-# swinging toward STARBOARD. Expressed here as the ARM being yawed within the housing's
-# frame, because every other dimension in this file is housing-relative and re-basing
-# them all would be the larger change.
-# ★ Yaw is about Z, so it costs nothing geometrically: the cone stays tangent to the
-# mounting plane at exactly the same height, and every horizontal cut below still lands
-# where it did. Only the crown LINE swings.
-SLEEVE_YAW = -20.0
-SLEEVE_Z_C = MOUNT_Z - ARM_R_WRIST   # crown on the mounting plane at the wrist end
-STRAP_W, STRAP_T = 26.0, 4.0  # 25 mm webbing through a 26 x 4 slot
-STRAP_AT = (0.12, 0.83)       # two straps, as a fraction ALONG the sleeve axis
-# ★★ HOW FAR ROUND THE SLEEVE WRAPS — the one real shape decision, exposed as a number.
-# The inner cone is TANGENT to the mounting plane (that is what gives zero standoff), so
-# where you cut decides everything:
-# ⚠️ IT KEEPS THE TOP HALF — it is a HOOD OVER the arm, not a trough under it. The arm
-# comes UP into it from below and the straps close underneath. I built it the other way
-# first and then could not explain why the part floated 40 mm below the housing held by
-# nothing: keeping the lower half puts the material where the arm has to pass.
-#   0.0  cut at the crown -> nothing left
-#   1.0  cut at the axis  -> a true 180° hood, meeting the housing along the crown
-# Anything less than 1.0 is a partial hood that grips further round the arm.
-SLEEVE_OPEN = 1.0
-STRAP_FRAC = 0.35             # slot height above the axis, as a fraction of the local radius
+# ================================================================ THE COVER
+# ★★ STEP 9 — the sliding ROAM plate. HIS `RoamTouchConcept.step` IS this part in its OPEN
+# position: a flat panel, horizontal, embossed ROAM, floating above the port side and
+# lapping only a little of the screen. Measured off it: 37.1 x 126.2 at Z 28.4, overlapping
+# the pocket 10.7 and reaching 26.4 OUTBOARD of it. He confirmed it is the cover and that it
+# "should reasonably be a bit wider to cover the screen" — 37 was an illustration.
+# ★ WHY THE OVERHANG IS NOT A PROBLEM: I kept measuring it against the TRAY edge at X -37.5
+# and getting alarming numbers. The device is already 121.7 wide because the PACK TUBE runs
+# to X -69.7. Open, the cover reaches -84 — only 14 mm past the real silhouette — and the
+# tube's crown at Z 22.0 sits 6.4 mm under his 28.4 panel. It is a canopy ROOFING the tube,
+# not a wing in space. That single misread is what drove three wrong proposals.
+# ⚠️ THE COVER MUST NEST IN THE SURROUND CAVITY WHEN SHUT. Measured at mid-wall height:
+# the cavity is Y 16.0..131.5 (115.5 long) and X -34.0..+37.5. His concept panel was 126.2
+# long — 10.5 too long to drop in — and I had also centred the plate on the HOUSING (Y 80.7)
+# when the screen centres at Y 73.2, which would have left the wrist end of the screen bare
+# even at the right length. Both derived from the cavity now, never typed in.
+BAND_CLR = 0.25               # gap the band keeps off everything it carries
+CAVITY_Y0, CAVITY_Y1 = 16.0, 131.5
+COVER_CLR = 1.5               # per side, into the cavity
+COVER_W, COVER_T = 66.0, 3.0
+COVER_L = (CAVITY_Y1 - CAVITY_Y0) - 2 * COVER_CLR
+COVER_CY = (CAVITY_Y0 + CAVITY_Y1) / 2
+# ⚠️ A PIN CANNOT BE FATTER THAN THE PLATE IT GROWS FROM. r2.0 was 4.0 dia through a 3.0
+# plate, standing proud on both faces. r1.2 = 2.4 dia leaves 0.3 of plate above and below.
+COVER_PIN_R = 1.2
+SLOT_CLR = 0.3
+# ★★ THE PINS SIT AT THE PLATE'S EDGES, and the starboard pair IS the hinge.
+# ⚠️ I first put them 11 mm inboard. With the hinge inboard, the 11 mm of plate starboard
+# of it swings DOWN as the port side swings up — 14 mm down at 39 deg, straight through the
+# screen cavity into the phone. Hinging ON the starboard edge means the plate only ever
+# extends PORT of its pivot, so every part of it rises and nothing can dip.
+# ⚠️ INSET BY THE PIN RADIUS. Centred ON the edge, a r1.2 pin stands 1.2 proud of the
+# plate in X. Inset by r, its outer face lands exactly flush with the plate edge.
+PIN_X_SB, PIN_X_PORT = COVER_W / 2 - COVER_PIN_R, -(COVER_W / 2 - COVER_PIN_R)
+# ★★ TWO PIN LENGTHS — the whole locking scheme. Long starboard, short port.
+PIN_LEN_SB, PIN_LEN_PORT = 6.5, 3.2
+CHAN_DEEP, BRANCH_DEEP = 7.0, 3.8      # branch shallower than PIN_LEN_SB by 2.7 mm of solid
+# ★ The channel is SMOOTH — a swept slot, not a stack of cylinders — with a detent bump
+# only at each end, where the starboard pin clicks in, and one in the branch so the port
+# pin clicks into its resting position. Everywhere else it must slide freely.
+DETENT_R = 0.55                        # bump radius intruding into the slot
+# ⚠️ THE BUMP SITS EXACTLY pin_r + bump_r FROM THE SEAT. At 3.0 the pocket was longer than
+# the pin, leaving 1.25 mm for it to shimmy port-to-starboard while supposedly "clicked in".
+# Derived, not chosen: any other value is either slop or a pin that cannot seat.
+DETENT_IN = COVER_PIN_R + DETENT_R
+# ★★ THE CHANNEL IS STRAIGHT — parallel to the screen face, one height throughout.
+# ⚠️ I twice built this wrong by keeping the plate FLAT as it travelled, which drives it
+# into the pack tube and made a ramp look necessary. It is not. The PORT PINS COME UP AND
+# OUT FIRST, so the plate is a DOOR hinged on the starboard pins: it SWINGS UP, and a
+# standing plate clears the cylinder by attitude, not by height. His design, and it needs
+# no ramp, no cam, no second track.
+# ⚠️ THE CHANNEL NEEDS A ROOF. At the shut plate's mid-height the slot topped out at 19.2
+# against a wall that ends at 18.4 — an open trench with nothing over it, so nothing held
+# the pin down. Dropped so the slot closes at 16.9 and leaves 1.5 mm of roof under 18.4.
+CHAN_Z = 15.4
+# ⚠️ The one hard limit: at this height the TUBE occupies X -64.7..-40.3, so the channel
+# must stop short of that or it breaks into the bore. ★ Mind the SLOT, not the pin centre:
+# at -38 the pin centre looks fine but the slot radius (2.3) reaches exactly -40.3 and
+# grazes the bore — which is what the last 0.04 cm3 of "clash" actually was. -35 puts the
+# slot's port edge at -37.3, a clean 3.0 mm off the tube.
+# ★ blind end = where the hinge must stop for a 12 mm glare lip. Because the hinge IS the
+# starboard edge, the lap is set by this number alone and does not depend on the swing —
+# so the angle is genuinely free, "swings open as needed".
+SB_X_BLIND = -18.0
+BRANCH_TOP = CHAN_Z + 9.0              # branch runs up through the wall top
+SB_X_SHUT = PIN_X_SB                   # plate centred on the screen when shut
+SB_X_OPEN = SB_X_BLIND                 # blind end of the channel — THIS is the end stop
+# ⚠️ Grip rises in +Z off the PORT pin line. Hung out to port it only levers the plate.
+GRIP_T, GRIP_L, GRIP_H = 2.4, 34.0, 8.0
+# ★ OPEN ANGLE IS NOT CHOSEN — the plate lies on the PACK TUBE and the tube sets it.
+# Solved below against the real tube, not typed in.
+# ★ Swept against the real tube AND housing over the whole travel: 20 deg still fouls
+# (0.103 cm3), 25 is the first clear angle, 30 taken for margin. Above 25 it is genuinely
+# free — "swings open as needed" — because with the hinge on the starboard edge the glare
+# lip is set by SB_X_BLIND alone and does not change with the angle.
+OPEN_ANGLE = 30.0
+COVER_AT = 1.0                # what gets EXPORTED: 0.0 = shut over the screen, 1.0 = open
 
 
-# ★★ ORGANIC = the cuff reads as the housing carried on down and around the arm, not a
-# cone butted against it. His words: "it should look organic, like an extension of the
-# existing piece, but clearly read as a cuff, just not a cuff glued to a phone".
-# ★ HOW: at each station take the CONVEX HULL of the arm circle and the pack tube's
-# circle. One outline containing both forms, so the tube's curve flows into the cuff
-# instead of intersecting it. Loft those sections along the arm, subtract the arm, then
-# subtract the housing. What is left grew out of the housing's own silhouette.
-ORGANIC = True
-# ★★ SCREEN TILT. His call: ~10 deg from port to starboard so the screen faces him at
-# rest. It is built as THICKNESS IN THE PORT SIDE of the cuff, not as a rotation of the
-# housing — the housing's mounting face stays flat and horizontal in this file, and the
-# ARM sits offset to starboard underneath it. Wedge on port, thin on starboard.
-# ⚠️ Offsetting the arm to STARBOARD is what thickens PORT. Getting that backwards gives
-# a cuff that tilts the screen away from him, which looks identical in a render.
-SCREEN_TILT = 10.0
+def _sb(t: float):
+    """Starboard pin (x, z) along the channel. BLIND at the port end — the blind end IS the
+    stop (his point; I had invented a separate feature for it). Rise is front-loaded so the
+    plate is clear of the surround wall before it runs, and clear of the tube before it
+    arrives over it."""
+    # ⚠️ SWING FIRST, THEN SLIDE. Doing both at once clipped the top of the port surround
+    # wall at 12% of travel (0.154 cm3, at X -37.5..-34.2, Z 17.9..18.4). It is also simply
+    # how the thing is used: you lift the door open, THEN push it across.
+    return SB_X_SHUT + (SB_X_OPEN - SB_X_SHUT) * max(0.0, (t - 0.30) / 0.70), CHAN_Z
 
 
-def _organic(a: Vector, b: Vector) -> Part:
-    """★ The cuff FLARES into the housing's underside; it does not envelop it.
+def _plate(cx: float, cz: float, ang: float) -> Part:
+    """The plate + pins + grip, placed by its centre and port-up angle."""
+    # ⚠️ POSITIVE rotation about Y lifts PORT (-X). I had this negated, which swung the
+    # port edge DOWN into the tube and made the whole thing look impossible.
+    pl = Rot(0, ang, 0) * Box(COVER_W, COVER_L, COVER_T)
+    for sy in (-1, 1):
+        face = sy * COVER_L / 2
+        # ★★ THE KEYING: starboard pins are LONG, port pins are SHORT. The branch is cut
+        # shallower than the long pins, so solid wall sits behind it and a starboard pin
+        # physically cannot climb out — it just slides past the mouth. One dimension does
+        # all the selecting: no catch, no spring, nothing to go wrong.
+        for dx, ln in ((PIN_X_SB, PIN_LEN_SB), (PIN_X_PORT, PIN_LEN_PORT)):
+            pl += Rot(0, ang, 0) * Pos(dx, face, 0) * Rot(-90 * sy, 0, 0) * Cylinder(
+                COVER_PIN_R, ln, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    # the grip: a blade standing UP off the PORT pin line, so the pull goes straight up
+    pl += Rot(0, ang, 0) * Pos(PIN_X_PORT, 0, COVER_T / 2) * Box(
+        GRIP_T, GRIP_L, GRIP_H, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    return Pos(cx, COVER_CY, cz) * pl
 
-    ⚠️ The first version hulled the arm circle with the PACK TUBE's circle, which made
-    the cuff wrap around the tube — "nothing should cover the fronts of the housing".
-    It also had to cut into the housing to keep a clean semi-cylinder, which is the same
-    fault seen from the other side. Now the hull is the arm circle with a THIN BAR at the
-    mounting plane, the width of the flat band the housing actually sits on. That gives a
-    section round at the bottom and flared to the housing's width at the top — it meets
-    the bottom and flows, and never rises past it.
+
+def cover(t: float = 0.0) -> Part:
+    """t=0 shut (nested in the surround), t=1 open (port pins free, lying on the tube)."""
+    ang = OPEN_ANGLE * min(1.0, t / 0.30)
+    sbx, sbz = _sb(t)
+    cx = sbx - PIN_X_SB * math.cos(math.radians(ang))
+    cz = sbz + PIN_X_SB * math.sin(math.radians(ang))
+    return _plate(cx, cz, ang)
+
+
+def _slot(a, b, rad: float, detents) -> Part:
+    """A smooth swept slot from a to b (each an (x, z)), with material bumps at `detents`
+    — a list of (x, z) where the slot pinches so a pin clicks past and seats."""
+    import math as _m
+    dx, dz = b[0] - a[0], b[1] - a[1]
+    ln = _m.hypot(dx, dz)
+    ang = _m.degrees(_m.atan2(dz, dx))
+    mid = ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)
+    prof = Pos(mid[0], mid[1]) * Rot(0, 0, ang) * SlotCenterToCenter(ln, 2 * rad)
+    for dx_, dz_ in detents:
+        for side in (+1, -1):
+            prof -= Pos(dx_, dz_ + side * rad) * Circle(DETENT_R)
+    return prof
+
+
+def cover_slots() -> Part:
+    """The channel and the escape branches, cut into BOTH end walls.
+
+    ★ ONLY THE STARBOARD PINS GET A CHANNEL — the port pins are FREE the moment they leave,
+    so all they need is the way out. ⚠️ I once cut a channel for them too, running to X -84,
+    clean off the part.
+      - CHANNEL: horizontal, blind at the port end, DEEP (7.0), SMOOTH, with a detent at
+        each end so the door clicks shut and clicks open.
+      - BRANCH: vertical, at the port pin's SHUT position only, SHALLOW (3.8) — 2.7 mm of
+        solid behind it, so a 6.5 mm starboard pin can never climb out. That is the lock.
+        Its own detent holds the port pin down in the shut position.
     """
-    secs = []
-    n = 7
-    for i in range(n):
-        t = i / (n - 1)
-        c = a + (b - a) * t
-        r = ARM_R_WRIST + t * (ARM_R_ELBOW - ARM_R_WRIST) + SLEEVE_WALL
-        # ⚠️ PIN THE PLANE'S LOCAL AXES. Plane(z_dir=...) alone lets build123d choose its
-        # own x/y, so "up" in the section is not global Z — the flare was being placed
-        # sideways and changing its width did nothing at all. x_dir horizontal and
-        # perpendicular to the arm makes local Y point (near enough) up.
-        ax = (b - a).normalized()
-        xd = Vector(0, 0, 1).cross(ax).normalized()
-        pl = Plane(origin=Vector(c.X, c.Y, c.Z), z_dir=ax, x_dir=xd)
-        arm = pl * Circle(r)
-        # the flare: a thin bar up at the mounting plane, as wide as the flat band
-        lift = MOUNT_Z - c.Z
-        flare = pl * Pos(0, lift - 1.0) * Rectangle(MOUNT_BAND, 2.0)
-        secs.append(make_hull((arm + flare).edges()))
-    body = loft(secs)
-    # hollow it: the arm bore, then everything above the crown, then the housing itself
-    inner = []
-    for i in range(n):
-        t = i / (n - 1)
-        c = a + (b - a) * t
-        r = ARM_R_WRIST + t * (ARM_R_ELBOW - ARM_R_WRIST)
-        inner.append(Plane(origin=Vector(c.X, c.Y, c.Z),
-                           z_dir=(b - a).normalized()) * Circle(r))
-    body -= loft(inner)
-    body -= Pos(0, SLEEVE_Y0 - 80, MOUNT_Z - SLEEVE_OPEN * ARM_R_WRIST - 200) * Box(
-        500, (SLEEVE_Y1 - SLEEVE_Y0) + 200, 200, align=(Align.CENTER, Align.MIN, Align.MIN))
-    body -= Pos(0, SLEEVE_Y0 - 80, MOUNT_Z) * Box(
-        500, (SLEEVE_Y1 - SLEEVE_Y0) + 200, 200, align=(Align.CENTER, Align.MIN, Align.MIN))
-    body -= build()
-    solids = sorted(body.solids(), key=lambda q: q.volume, reverse=True)
-    if len(solids) > 1:
-        print(f"  sleeve: dropped {len(solids)-1} fragment(s), "
-              f"{sum(q.volume for q in solids[1:])/1000:.2f} cm3")
-    return Part() + solids[0]
+    rad = COVER_PIN_R + SLOT_CLR
+    chan = _slot((SB_X_BLIND, CHAN_Z), (SB_X_SHUT, CHAN_Z), rad,
+                 [(SB_X_BLIND + DETENT_IN, CHAN_Z), (SB_X_SHUT - DETENT_IN, CHAN_Z)])
+    branch = _slot((PIN_X_PORT, CHAN_Z), (PIN_X_PORT, BRANCH_TOP), rad,
+                   [(PIN_X_PORT, CHAN_Z + DETENT_IN)])
+    cut = Part()
+    for sy in (-1, 1):
+        face = COVER_CY + sy * COVER_L / 2
+        amt = CHAN_DEEP if sy < 0 else -CHAN_DEEP
+        bamt = BRANCH_DEEP if sy < 0 else -BRANCH_DEEP
+        cut += Pos(0, face, 0) * extrude(Plane.XZ * chan, amount=amt)
+        cut += Pos(0, face, 0) * extrude(Plane.XZ * branch, amount=bamt)
+    return cut
 
 
-def sleeve() -> Part:
-    """★ Half-circle arm sleeve, cut against the housing so it mates flush."""
-    # ★ axis defined by its two END POINTS, so the crown rides the mounting plane the
-    # whole way — same technique as the eStack drum's angled anchor, for the same reason:
-    # a rotation I have to derive is a rotation I get wrong.
-    # yaw the axis end points about the housing's mid-length, so the cant pivots about
-    # the middle of the device rather than swinging one end out into space
-    def _yaw(v):
-        c = math.cos(math.radians(SLEEVE_YAW)); sn = math.sin(math.radians(SLEEVE_YAW))
-        py = (SLEEVE_Y0 + SLEEVE_Y1) / 2
-        dx, dy = v.X, v.Y - py
-        return Vector(dx * c - dy * sn, py + dx * sn + dy * c, v.Z)
-    dx_w = ARM_R_WRIST * math.sin(math.radians(SCREEN_TILT))
-    dx_e = ARM_R_ELBOW * math.sin(math.radians(SCREEN_TILT))
-    a = _yaw(Vector(dx_w, SLEEVE_Y0, MOUNT_Z - ARM_R_WRIST * math.cos(math.radians(SCREEN_TILT))))
-    b = _yaw(Vector(dx_e, SLEEVE_Y1, MOUNT_Z - ARM_R_ELBOW * math.cos(math.radians(SCREEN_TILT))))
-    if ORGANIC:
-        return _organic(a, b)
-    axis = (b - a).normalized()
-    ln = (b - a).length
-    pl = Plane(origin=a, z_dir=axis)
-    shell = pl * Cone(ARM_R_WRIST + SLEEVE_WALL, ARM_R_ELBOW + SLEEVE_WALL, ln,
-                      align=(Align.CENTER, Align.CENTER, Align.MIN))
-    shell -= (Plane(origin=a - axis * EPS, z_dir=axis)
-              * Cone(ARM_R_WRIST, ARM_R_ELBOW, ln + 2 * EPS,
-                     align=(Align.CENTER, Align.CENTER, Align.MIN)))
-    # ★ open the sleeve to SLEEVE_OPEN. ⚠️ The box must span Y generously: once the axis
-    # slopes, the cone reaches past SLEEVE_Y1, and a box sized to the nominal length left
-    # a 0.0 cm³ sliver stranded above the plane — two solids, and invisible in a volume.
-    # ★ take the BOTTOM off, not the top: everything below the cut line goes, so what is
-    # left hangs from the housing and is open underneath for the arm.
-    cut_z = MOUNT_Z - SLEEVE_OPEN * ARM_R_WRIST
-    shell -= Pos(0, SLEEVE_Y0 - 60, cut_z - 200) * Box(
-        400, (SLEEVE_Y1 - SLEEVE_Y0) + 160, 200, align=(Align.CENTER, Align.MIN, Align.MIN))
-    # and the wall still pokes above the crown, where the housing lives
-    shell -= Pos(0, SLEEVE_Y0 - 60, MOUNT_Z) * Box(
-        400, (SLEEVE_Y1 - SLEEVE_Y0) + 160, 200, align=(Align.CENTER, Align.MIN, Align.MIN))
-    # ★★ cut against the REAL housing — the sleeve conforms to the tube and the rail
-    # wherever they intrude, instead of me assuming a flat underside that is not there.
-    shell -= build()
-    # ★ TWO SLOTS PER STRAP, one at each side edge — the webbing goes out one slot,
-    # around the arm, in the other, and velcros to itself. ⚠️ NOT an annular cut: a band
-    # taken right round removes the whole wall and severs the sleeve into three pieces,
-    # which is exactly what the first attempt did.
-    # ⚠️ Slots must follow the SLOPED axis and the LOCAL radius. Placed off the wrist
-    # radius alone they miss the wall entirely at the elbow end, where the axis has
-    # already dropped 10 mm and the wall moved 10 mm outboard.
-    # ⚠️ Slots ride the AXIS, not absolute Y — once the sleeve is yawed, a slot pinned to
-    # a Y value walks off the side of the part.
-    for t in STRAP_AT:
-        rl = ARM_R_WRIST + t * (ARM_R_ELBOW - ARM_R_WRIST)
-        ctr = a + (b - a) * t
-        zs = ctr.Z + STRAP_FRAC * rl
-        xw = math.sqrt(max(0.0, rl * rl - (zs - ctr.Z) ** 2))
-        side = Vector(math.cos(math.radians(SLEEVE_YAW)),
-                      math.sin(math.radians(SLEEVE_YAW)), 0)   # across the arm
-        for sx in (-1, 1):
-            pt = ctr + side * (sx * xw)
-            shell -= (Plane(origin=Vector(pt.X, pt.Y, zs), z_dir=Vector(0, 0, 1),
-                            x_dir=side)
-                      * Box(2 * SLEEVE_WALL + 10, STRAP_W, STRAP_T,
-                            align=(Align.CENTER, Align.CENTER, Align.CENTER)))
-    # ⚠️ KEEP ONLY THE LARGEST SOLID. The hood is ~43 mm wide either side of its crown,
-    # so its flank always runs under the pack tube and the rail wherever those dip below
-    # the mounting plane — and cutting against the housing therefore strands a crumb or
-    # two (0.0–1.3 cm³) that nobody would print. Checking that the CROWN clears the tube
-    # is not enough; the flank is what fouls. Reported, not silently dropped.
-    solids = sorted(shell.solids(), key=lambda q: q.volume, reverse=True)
-    if len(solids) > 1:
-        dropped = sum(q.volume for q in solids[1:]) / 1000
-        print(f"  sleeve: dropped {len(solids)-1} stranded fragment(s), {dropped:.2f} cm3")
-    return Part() + solids[0]
+# ================================================================ THE ARMBAND
+# ★★ STEP 7. ⚠️ NOT GENERATED ANY MORE — his geometry, loaded from `ref/armband.step`.
+# Every parametric cuff constant that used to live here (ARM_R_WRIST/ELBOW, SLEEVE_WALL,
+# SLEEVE_YAW, STRAP_*, SLEEVE_OPEN, ORGANIC, CUFF_*, BLEND_*) is DELETED along with the
+# three builders that used them. They described four failed attempts at a shape he had
+# already solved. ARM_R was always the one number I could not derive — "that's a fitment
+# dance we can do later" — and his model simply contains the answer.
+# ★★ SCREEN_TILT IS REAL GEOMETRY NOW, not a viewing trick. Measured off HIS armband:
+# every major planar face in `RoamTouchSimpleSampleArmband.step` reads roll +10.00°, so
+# his band is built for a housing canted 10° toward port. The housing is still modelled
+# flat — that is right, it is a phone tray — and the ASSEMBLY rolls it onto the band.
+# ⚠️ Earlier I "had" a 10° tilt as a 6.9 mm sideways offset of a round arm bore, which is
+# no tilt at all: a cylinder has no up. Then I mounted a flat housing on his band and
+# threw his tilt away. This is the version with material behind it.
+SCREEN_TILT = 10.0
+MOUNT_Z = RAIL_TOP            # the housing's flat mounting face, in its own frame
+# ⚠️ THERE IS NO SEATING OFFSET. I looked for one and briefly believed I had found it at
+# -1.00 mm, because the intersection returned 0.000 there — but that was the BOOLEAN
+# FAILING and returning no solids, not a fit, and 22.68 -> 0.000 across 0.2 mm was never
+# physical. Swept properly, the interference falls smoothly and NEVER reaches zero
+# (3.8 cm3 still at +8 mm), because his band was modelled around HIS housing: my pack
+# tube and side rail pass through it at every offset. No rigid transform fixes that.
+# ★ So the band is RELIEVED for the housing instead — which is what a mount is for.
+SEAT_SLIDE = 0.0
+
+
+# ★★ CARD SLOT — his call: "the top bit of that we can hollow and make a card holder slot
+# again". The band arrives as a SOLID 355 cm3 / 451 g block, of which a 22 mm thick,
+# 88 mm wide slab running Y 20..140 is pure dead material under the screen. A card is
+# ISO 7810 ID-1: 85.60 x 53.98 x 0.76, so the dead volume holds several with room over.
+# ★ It opens at the STERN so the end cap closes it — no separate lid, no catch.
+CARD_W, CARD_L, CARD_H = 56.0, 92.0, 3.2   # 54 + clr, 85.6 + finger room, ~3 cards
+CARD_X = 7.0                  # centred on the SLAB (X -37..51.5), not on the housing
+CARD_Z = -4.6                 # top of the cavity, leaving 3.8 of roof under the slab top
+
+
+# ★ And the rest of the slab is just mass. A second, larger cavity under the card slot,
+# ALSO open at the stern — an enclosed void would be a trapped-support problem, and both
+# cavities venting out the same face means one flat aft opening for the cap to close.
+# ⚠️ 70 x 130 broke the band into 4 solids — the slab narrows along its length and the
+# void burst out through the sides. Swept it: 60 x 120 is the largest that stays ONE piece.
+VOID_W, VOID_L, VOID_H = 60.0, 120.0, 11.0
+VOID_Z = CARD_Z - CARD_H - 2.0      # 2.0 floor between the card and the void
+
+
+def card_slot() -> Part:
+    """The card cavity + the lightening void beneath it, both open at the stern face."""
+    cut = Pos(CARD_X, -EPS, CARD_Z - CARD_H) * Box(
+        CARD_W, CARD_L, CARD_H, align=(Align.CENTER, Align.MIN, Align.MIN))
+    cut += Pos(CARD_X, -EPS, VOID_Z - VOID_H) * Box(
+        VOID_W, VOID_L, VOID_H, align=(Align.CENTER, Align.MIN, Align.MIN))
+    return cut
+
+
+def armband() -> Part:
+    """★ HIS armband — imported, not generated. `ref/armband.step`.
+
+    ⚠️ EVERY GENERATED CUFF IS DELETED (his call). I tried four in one night — a
+    semi-cylinder the housing carved, a flare bar, two fixed anchor corners, then a
+    crescent plus a fore-aft skirt — and each one fought the housing instead of fitting
+    it. He modelled the answer himself and put it in the Collab space; this loads that.
+    ★ Extracted from `RoamTouchSimpleSampleArmband.step` by keeping everything below the
+    mounting plane and clearing the pack tube, which is what separates his band from the
+    housing he built it around. Two bands near the ends, middle open.
+    ⚠️ CAD comes from ~/Collab ONLY. It is not fetched from his laptop, ever.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    return import_step(os.path.join(here, "ref", "armband.step")) - card_slot()
 
 
 def build() -> Part:
@@ -1127,25 +1189,226 @@ def build() -> Part:
     return p
 
 
+
+# ---------------------------------------------------------------- renders
+# ★ Headless Blender beauty shots, folded in here so this file stays the ONE file.
+#     python roam.py --shot            # the worn views
+#     python roam.py --shot iso
+# ⚠️ Hard key + dark ground on purpose: a flat ambient dome makes every facet return the
+# same value and the creases vanish, which is exactly what is being judged.
+BLENDER = "/Applications/Blender.app/Contents/MacOS/Blender"
+VIEWS = [                       # name -> (model, elev, azim). azim 0 looks down -Y.
+    ("worn_bow",  "roam_worn.stl", 0, 180),
+    ("worn_iso",  "roam_worn.stl", 22, 145),
+    ("worn_stbd", "roam_worn.stl", 10, 270),
+    ("worn_under", "roam_worn.stl", -40, 200),
+    ("mic_sb",  "roam_worn.stl", 6, 90),
+    ("mic_q",   "roam_worn.stl", 28, 60),
+    ("slots_i", "slots_only.stl", 22, 150),
+    ("wall_e",  "housing_slots.stl", 2, 0),
+    ("wall_q",  "housing_slots.stl", 18, 25),
+    ("cov_shut_e", "roam_cover_shut.stl", 4, 0),
+    ("cov_open_e", "roam_cover_open.stl", 4, 0),
+    ("cov_open_i", "roam_cover_open.stl", 24, 140),
+    ("cc_iso",   "RoamTouchConcept.stl", 26, 140),
+    ("cc_top",   "RoamTouchConcept.stl", 86, 0),
+    ("cc_end",   "RoamTouchConcept.stl", 4, 0),
+    ("hg_iso",   "RoamTouchHighGuardDemo.stl", 26, 140),
+    ("hg_end",   "RoamTouchHighGuardDemo.stl", 6, 0),
+    ("hg_top",   "RoamTouchHighGuardDemo.stl", 84, 0),
+    # ★ HIS sample armband from the Collab space — the reference for the band.
+    ("band_iso",  "sample_band.stl", 24, 140),
+    ("band_end",  "sample_band.stl", 2, 0),
+    ("band_bow",  "sample_band.stl", 0, 180),
+]
+SCRIPT = r'''
+import bpy, sys, math, mathutils
+a = sys.argv[sys.argv.index("--")+1:]
+path, outfile, elev, azim, res = a[0], a[1], float(a[2]), float(a[3]), int(a[4])
+
+bpy.ops.wm.read_factory_settings(use_empty=True)
+try: bpy.ops.wm.stl_import(filepath=path)
+except AttributeError: bpy.ops.import_mesh.stl(filepath=path)
+obj = bpy.context.selected_objects[0]
+bpy.ops.object.shade_flat()
+bpy.ops.object.origin_set(type='ORIGIN_GEOMETRY', center='BOUNDS')
+obj.location = (0, 0, 0)
+dim = max(obj.dimensions)
+
+mat = bpy.data.materials.new("m"); mat.use_nodes = True
+n = mat.node_tree.nodes["Principled BSDF"]
+n.inputs["Base Color"].default_value = (0.44, 0.47, 0.52, 1)
+n.inputs["Roughness"].default_value = 0.42
+if "Metallic" in n.inputs: n.inputs["Metallic"].default_value = 0.25
+obj.data.materials.append(mat)
+
+# dark ground so the silhouette reads. read_factory_settings(use_empty=True)
+# leaves the scene with NO world at all, so make one.
+w = bpy.context.scene.world
+if w is None:
+    w = bpy.data.worlds.new("w"); bpy.context.scene.world = w
+w.use_nodes = True
+w.node_tree.nodes["Background"].inputs[0].default_value = (0.04, 0.045, 0.05, 1)
+w.node_tree.nodes["Background"].inputs[1].default_value = 1.0
+
+e, z = math.radians(elev), math.radians(azim)
+d = dim * 2.6
+cloc = mathutils.Vector((d*math.cos(e)*math.sin(z), -d*math.cos(e)*math.cos(z),
+                         d*math.sin(e)))
+cam_data = bpy.data.cameras.new("c"); cam_data.type = 'ORTHO'
+cam_data.ortho_scale = dim * 1.18
+cam = bpy.data.objects.new("c", cam_data); bpy.context.scene.collection.objects.link(cam)
+cam.location = cloc
+cam.rotation_mode = 'QUATERNION'
+cam.rotation_quaternion = cloc.to_track_quat('Z', 'Y')
+bpy.context.scene.camera = cam
+
+# ★ Hard key up-and-left of camera, soft fill opposite, rim behind. A single
+# ambient dome is exactly what hides facets.
+def lamp(name, loc, energy, size, kind='AREA'):
+    ld = bpy.data.lights.new(name, kind); ld.energy = energy
+    if kind == 'AREA': ld.size = size
+    ob = bpy.data.objects.new(name, ld)
+    bpy.context.scene.collection.objects.link(ob)
+    ob.location = loc
+    ob.rotation_quaternion = mathutils.Vector(loc).to_track_quat('Z', 'Y')
+    ob.rotation_mode = 'QUATERNION'
+    return ob
+
+# ⚠️ Lights are placed in the CAMERA's frame, not the world's. Keyed off world
+# +Z, any view from below (the underside/cuff shots) puts the key behind the
+# part and the render comes back black.
+side = cloc.normalized().cross(mathutils.Vector((0, 0, 1))).normalized()
+up = side.cross(cloc.normalized()).normalized()
+# ⚠️ Blender units are the STL's millimetres, so the inverse-square falloff is
+# over hundreds of units and the wattage has to scale with dim^2 or the part
+# renders black. Positions are normalised to a fixed radius for the same reason.
+LD = dim * 2.4
+def place(v):
+    return v.normalized() * LD
+lamp("key",  place(cloc.normalized()*1.3 - side*1.0 + up*1.3), dim*dim*260, dim*0.55)
+lamp("fill", place(cloc.normalized()*1.2 + side*1.7 - up*0.1), dim*dim*70,  dim*1.7)
+lamp("rim",  place(-cloc.normalized()*1.5 + up*1.1),           dim*dim*130, dim*0.5)
+
+s = bpy.context.scene
+for eng in ('BLENDER_EEVEE_NEXT', 'BLENDER_EEVEE', 'CYCLES'):
+    try:
+        s.render.engine = eng
+        break
+    except TypeError:
+        continue
+s.render.resolution_x = s.render.resolution_y = res
+s.render.film_transparent = False
+try:
+    s.view_settings.look = 'AgX - Medium High Contrast'
+except TypeError:
+    pass
+s.render.filepath = outfile
+bpy.ops.render.render(write_still=True)
+print("BLENDER_DONE")
+'''
+
+def shot(only=None, res=900):
+    import subprocess, tempfile
+    here = os.path.dirname(os.path.abspath(__file__))
+    out = os.path.join(here, "out")
+    with tempfile.TemporaryDirectory() as td:
+        sp = os.path.join(td, "s.py")
+        open(sp, "w").write(SCRIPT)
+        for name, model, elev, azim in VIEWS:
+            if only and only not in name:
+                continue
+            src = os.path.join(out, model)
+            if not os.path.exists(src):
+                continue
+            dst = os.path.join(out, f"view_{name}.png")
+            r = subprocess.run([BLENDER, "--background", "--python", sp, "--", src, dst,
+                                str(elev), str(azim), str(res)],
+                               capture_output=True, text=True)
+            if "BLENDER_DONE" not in r.stdout:
+                sys.exit(r.stdout[-800:])
+            print("wrote", dst)
+
+
 if __name__ == "__main__":
-    import os
-    part = build()
+    if "--shot" in sys.argv:
+        k = sys.argv.index("--shot")
+        shot(sys.argv[k + 1] if len(sys.argv) > k + 1 else None)
+        sys.exit()
+    part = build() - cover_slots()
     here = os.path.dirname(os.path.abspath(__file__))
     out = os.path.join(here, "out")
     os.makedirs(out, exist_ok=True)
     plate = service_plate()
     cap = end_cap()
-    slv = sleeve()
+    band = armband()
+    btns = buttons()
+    cov = cover(COVER_AT)
     export_step(part, os.path.join(out, "roam_step3.step"))
     export_stl(part, os.path.join(out, "roam_step3.stl"))
     export_step(plate, os.path.join(out, "roam_plate.step"))
     export_stl(plate, os.path.join(out, "roam_plate.stl"))
     export_step(cap, os.path.join(out, "roam_cap.step"))
     export_stl(cap, os.path.join(out, "roam_cap.stl"))
-    export_step(slv, os.path.join(out, "roam_sleeve.step"))
-    export_stl(slv, os.path.join(out, "roam_sleeve.stl"))
-    export_step(Compound(children=[part, plate, cap, slv]),
-                os.path.join(out, "roam_assembly.step"))
+    # ★ roll the housing group onto his band. The band is already at its attitude.
+    _n = Vector(math.sin(math.radians(SCREEN_TILT)), 0, math.cos(math.radians(SCREEN_TILT)))
+    _seat = lambda q: Pos(_n * SEAT_SLIDE) * (Rot(0, SCREEN_TILT, 0) * q)
+    part, plate, cap, btns = _seat(part), _seat(plate), _seat(cap), _seat(btns)
+    cov = _seat(cov)
+    # ★ clearance for what it carries. ⚠️ The relief chips slivers off his band, so keep
+    # only the main solid and SAY what was dropped — a silent 13-body export reads as
+    # "fine" right up until someone prints it.
+    # ⚠️ TRIM THE BAND FLUSH ON STARBOARD. His band was modelled around HIS housing, so its
+    # starboard flank lands 0.17 outside mine — two near-coincident faces, which reads as a
+    # doubled edge on the SB side. Cut it back to the housing's own outer face.
+    # ⚠️ measure the SEATED housing, not the raw one — the 10 deg cant pulls its starboard
+    # face in from 52.00 to 51.14, so trimming to the untilted number leaves 0.86 proud.
+    _hx = part.bounding_box().max.X
+    band = band & Pos(_hx - 300, 0, 0) * Box(600, 600, 600)
+    # ★★ THE BAND IS PART OF THE HOUSING — his call: "they are different bodies when they
+    # probably don't need to be". One printed part, so one body.
+    # ⚠️ This also DELETES a whole class of problem rather than managing it. As separate
+    # bodies they needed a relief cut, which left faces exactly coincident with the
+    # housing's (gap 0.000 over 635 mm2 — the "doubled SB face"), which needed a dilated
+    # subtraction to avoid, which chipped slivers off his band. Unioned, none of it exists:
+    # no relief, no coincident faces, no slivers, no clearance to tune.
+    part = part + band
+    _ps = part.solids()
+    if len(_ps) > 1:
+        print(f"  ⚠️ housing+band came out as {len(_ps)} solids — they should fuse to one")
+    # ★ ONE STEP, ALL THE PARTS, as separate bodies — his standing rule. Nothing is
+    # fused: the cap's spigot fills the pack BORE, which is a void, so the parts mate
+    # with 0.000 cm3 of overlap. A flush cap that mates perfectly reads as one slab in a
+    # viewer, which is exactly what it is meant to do.
+    asm = Compound(children=[part, plate, cap, btns, cov])
+    export_step(asm, os.path.join(out, "roam_assembly.step"))
+    export_stl(asm, os.path.join(out, "roam_assembly.stl"))
+    # ★ THE WORN VIEW. Everything else is modelled in the HOUSING's frame, where the
+    # housing is flat BY DEFINITION and the screen tilt is therefore invisible no matter
+    # how real it is — which is exactly what he called out. Rolling the assembly by
+    # -SCREEN_TILT levels the ARM instead, so the model is seen the way it is worn and
+    # the cant is judgeable by eye.
+    # ⚠️ NO separate "worn" transform any more — the cant is IN the model, so what is
+    # exported is what is worn. Same filename so his link does not move.
+    worn = asm
+    export_step(worn, os.path.join(out, "roam_worn.step"))
+    export_stl(worn, os.path.join(out, "roam_worn.stl"))   # local only, for --shot
+    # ★ the cover, both ends of its travel, as their own views
+    for _t, _lbl in ((0.0, "shut"), (1.0, "open")):
+        export_stl(Compound(children=[_seat(build() - cover_slots()), _seat(end_cap()),
+                                      _seat(cover(_t)), armband()]),
+                   os.path.join(out, f"roam_cover_{_lbl}.stl"))
+    # ★ ONE file goes to the wrist, and it is the WORN one — everything else is the same
+    # geometry in a different frame or a subset of it. He reads STEP; the STL stays here.
+    share = os.path.expanduser("~/Collab/CAD/roam-touch")
+    if os.path.isdir(share):
+        export_step(worn, os.path.join(share, "roam_worn.step"))
+        # ⚠️ THE MESH SHIPS TOO, ALWAYS. He reads the STEP, but the hub's viewer resolves
+        # `path.with_suffix(".stl")` (files.py) — no sibling mesh, and the wrist just says
+        # "no mesh". I stopped publishing STLs when he said he did not need them; that
+        # broke the viewer for every file I touched afterwards.
+        export_stl(worn, os.path.join(share, "roam_worn.stl"))
+        print(f"  shared     roam_worn.step + .stl -> {share}")
 
     bb = part.bounding_box()
     print(f"STEP 3 — housing + pack tube")
@@ -1230,13 +1493,14 @@ if __name__ == "__main__":
     print(f"             ⚠️ overall length {OUT_L:.1f} -> {OUT_L + CAP_L:.1f}")
     print(f"  plate      {PL_Y1 - PL_Y0:.0f} mm long, {PLATE_T:.1f} thick, "
           f"{len(SCREWS)} x M2 — plate volume {plate.volume / 1000:.2f} cm3")
-    _sb = slv.bounding_box()
-    print(f"  SLEEVE     {_sb.size.X:.1f} wide x {_sb.size.Y:.1f} long x {_sb.size.Z:.1f} deep, "
-          f"{slv.volume/1000:.0f} cm3 ~= {slv.volume/1000*1.27:.0f} g PETG")
-    print(f"             arm r{ARM_R:.1f} inside, crown AT the mounting plane Z {MOUNT_Z:.1f} "
-          f"-> ZERO standoff, which is the whole point")
-    print(f"             {2*len(STRAP_AT)} strap slots {STRAP_W:.0f} x {STRAP_T:.0f}, yaw {SLEEVE_YAW:.0f} deg")
-    print(f"             ⚠️ ARM_R IS A GUESS (bracer.py nominal) — measure the forearm")
+    _sb = part.bounding_box()
+    print(f"  HOUSING+BAND  one body, {part.volume/1000:.0f} cm3, "
+          f"{_sb.size.X:.1f} x {_sb.size.Y:.1f} x {_sb.size.Z:.1f}")
+    print(f"             ★ band is HIS geometry (ref/armband.step), fused — not a "
+          f"separate body, so no relief cut and no coincident faces")
+    _bb = btns.bounding_box()
+    print(f"  buttons    {len(btns.solids())} plungers, {btns.volume/1000:.2f} cm3, "
+          f"standing {BTN_PROUD:.1f} proud at X {_bb.max.X:.2f} — the bores were empty until now")
     print(f"  screen ap. {sx1 - sx0:.1f} x {sy1 - sy0:.1f} "
           f"(margins L/R {fx(SCREEN_SVG[0]) + PH_W / 2:.2f} / "
           f"{PH_W / 2 - fx(SCREEN_SVG[2]):.2f})")

@@ -39,6 +39,7 @@ import com.roam.touch.channels.Roam
 import com.roam.touch.channels.controls.ControlAction
 import com.roam.touch.channels.controls.ControlSurface
 import com.roam.touch.channels.stt.PttState
+import com.roam.touch.settings.SettingsShelf
 import com.roam.touch.channels.stt.PttTarget
 import kotlinx.coroutines.delay
 
@@ -69,6 +70,19 @@ fun installChannelsUi(activity: ComponentActivity) {
 enum class Screen {
     Channels,
     Apps,
+
+    /**
+     * ★ The device's own settings, as widgets. Owner, 2026-08-15: *"we'll need our own
+     * settings so might as well just start making widgets there, of which headphones is
+     * one setting."* See [SettingsScreen] and [com.roam.touch.settings.SettingsShelf].
+     */
+    Settings,
+
+    /**
+     * ⚠️ Not on the rail, and no longer a destination: it is reached from [Settings] and
+     * returns there. See [Nav.parentOf] — it is now the second screen with a parent, which
+     * is what generalised that rule.
+     */
     HomeAssistant,
     Controls,
 
@@ -103,6 +117,10 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
     val nowMs = rememberTicker()
     val requestMic = rememberMicPermission(vm)
     val shell = rememberShell()
+
+    // ★★ The rail's fold, from disk. Not `rememberSaveable`: a launcher's process is killed
+    // routinely, and a shape he chose must survive that — see [ChannelsViewModel.railCollapsed].
+    val railCollapsed by vm.railCollapsed.collectAsStateWithLifecycle()
 
     // ★★ Saveable, not merely remembered — and that is a landscape requirement, not a
     // nicety. Rotating the device destroys and recreates the activity, so with plain
@@ -211,7 +229,13 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
             // [HubBrowserScreen] installs its own handler and walks the page's history
             // first, so this fires only once there is nowhere left to go back to — or if
             // the WebView never came up at all, which is exactly when a way out matters.
-            Back.CloseHubBrowser -> { hubPage = null; screen = Screen.Apps }
+            // ⚠️ Back to the screen he opened it from — the shelf for a hub page, Settings
+            // for the headset. `hubPage` is cleared either way; it is only ever set by the
+            // browser, so clearing it on the way out of anything else is a no-op.
+            Back.CloseSubScreen -> {
+                hubPage = null
+                screen = Nav.parentOf(screen) ?: Screen.Channels
+            }
             Back.CloseDetour -> screen = Screen.Channels
             Back.CloseThread -> { openPane = null; vm.stopSpeaking(); vm.pttCancel() }
             null -> Unit
@@ -331,6 +355,8 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
             screen = screen,
             openPane = openPane,
             sending = outbox != null,
+            collapsed = railCollapsed,
+            onToggleCollapse = { vm.setRailCollapsed(!railCollapsed) },
             onOpenChannel = {
                 readingEventId = null
                 openPane = it.paneId
@@ -343,8 +369,9 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
                 screen = Screen.Channels
             },
             onOpenApps = { screen = Screen.Apps },
-            onOpenHomeAssistant = { screen = Screen.HomeAssistant },
-            onOpenControls = { screen = Screen.Controls },
+            // ⚠️ Settings, not Controls. The headset is one widget *inside* settings now —
+            // see [SettingsShelf]. The rail no longer knows it exists.
+            onOpenSettings = { screen = Screen.Settings },
             onVoice = openForVoice,
             onQuickSend = { reply -> openPane?.let { vm.send(it, reply) } },
         )
@@ -417,11 +444,30 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
                     onTap = vm::tapHa,
                 )
 
+                // ★ The device's own settings. Widgets, because he asked for widgets —
+                // and because this is the same shelf idiom two taps from the same thumb.
+                Screen.Settings -> SettingsScreen(
+                    onBack = { screen = Screen.Channels },
+                    onOpen = { id ->
+                        when (id) {
+                            SettingsShelf.HEADSET -> screen = Screen.Controls
+                            // ⚠️ Unreachable while every widget opens a screen this knows,
+                            // and it stays here so adding one that does not is a visible
+                            // message rather than a tap that does nothing.
+                            else -> toast = Toast("no screen for that setting", bad = true)
+                        }
+                    },
+                )
+
+                // ⚠️ Reached from [Screen.Settings] and returns there — see [Nav.parentOf].
+                // It moved off the rail on 2026-08-15 and nothing about the screen itself
+                // changed; only how it is reached and where Back lands.
                 Screen.Controls -> ControlsScreen(
                     profile = headset,
                     seen = seenKeys,
                     learningFor = learningFor,
-                    onBack = { screen = Screen.Channels },
+                    onBack = { screen = Screen.Settings },
+                    backLabel = "SETTINGS",
                     onLearn = { action -> learningFor = action; controls.learnNext() },
                     onCancelLearn = { learningFor = null; controls.cancelLearning() },
                     onUnbind = controls::unbind,
@@ -478,13 +524,24 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
             )
             }
         } else {
-            // Nothing open and no detour: the list itself, or the prompt to pick from it.
-            // ⚠️ In Wide the queue is already in the rail, so re-drawing it here would be
-            // the same list twice. The content pane says what to do instead of showing a
-            // copy — see [NoChannelOpen].
-            if (shell == Shell.Wide) {
-                NoChannelOpen(hasChannels = state.channels.isNotEmpty())
-            } else ChannelListScreen(
+            // ★★ **Home is the channel list.** Owner, 2026-08-15: *"home should just be
+            // 'Channels' … by default if i click home, it just lists all the channels, lets
+            // me dive into one and has a 'back' button to take me back to the channel
+            // list."* And: *"no the main feature is channels, Home is channels."*
+            //
+            // ⚠️⚠️ **One list, one condition — none.** This branch used to fork three ways:
+            // a `NoChannelOpen` prompt in Wide (now deleted), the list in Narrow, and then
+            // the list again when the rail was folded. Two of those were the same list
+            // reached by different reasoning, and the third was a screen that told him to
+            // pick from a column he may have put away. [Nav.pane] already answers this —
+            // `Pane.List` means
+            // *nothing is open* — so the pane draws the list, full width, in every shell and
+            // every fold state. There is nothing left here to disagree with itself.
+            //
+            // ★ The rail's own queue is now a *duplicate on purpose*: it is the quick-switch
+            // column, and he asked for it to be optional. Two views of one
+            // [com.roam.touch.channels.Queue] order, never two lists.
+            ChannelListScreen(
                 state = state,
                 link = link,
                 nowMs = nowMs,
