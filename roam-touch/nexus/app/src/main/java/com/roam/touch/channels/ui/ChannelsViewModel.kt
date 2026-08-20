@@ -339,13 +339,13 @@ class ChannelsViewModel(
      * for; a failure stays in the dialog's hands via [creating] and a toast that says
      * why.
      */
-    fun createSession(label: String, onOpened: (String) -> Unit) {
+    fun createSession(label: String, command: String = "claude", onOpened: (String) -> Unit) {
         val title = label.trim()
         if (title.isBlank() || _creating.value) return
         _creating.value = true
         viewModelScope.launch {
             try {
-                when (val result = repo.createSession(title)) {
+                when (val result = repo.createSession(title, command)) {
                     is CreateResult.Created -> onOpened(result.channel.paneId)
                     is CreateResult.Failed ->
                         toasts.send(Toast("not started — ${result.message}", bad = true))

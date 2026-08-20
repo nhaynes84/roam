@@ -773,9 +773,19 @@ private fun RailNewSession(shell: Shell, onClick: () -> Unit) {
 }
 
 /**
- * ★ One field, one button. The label becomes the pane title — the thing that stops
- * every new pane reading as the hostname — and the command is always `claude` for now:
- * the dialog offers what he actually spawns, not a terminal.
+ * The agents that exist on this box. The chip row is the whole surface — the shell
+ * command is an implementation detail nobody types.
+ */
+enum class SessionAgent(val label: String, val command: String) {
+    CLAUDE("CLAUDE", "claude"),
+    CODEX("CODEX", "codex"),
+}
+
+/**
+ * ★ One label field, an agent chip, one button. The label becomes the pane title —
+ * the thing that stops every new pane reading as the hostname — and the agent picks
+ * the command under the hood: the dialog offers what he actually spawns, not a
+ * terminal.
  *
  * ⚠️ It stays open until the hub answers. START goes dead while the create is in
  * flight ([creating]) and the caller closes the dialog on success — so a refused spawn
@@ -785,9 +795,10 @@ private fun RailNewSession(shell: Shell, onClick: () -> Unit) {
 fun NewSessionDialog(
     creating: Boolean,
     onDismiss: () -> Unit,
-    onStart: (String) -> Unit,
+    onStart: (String, SessionAgent) -> Unit,
 ) {
     var label by rememberSaveable { mutableStateOf("") }
+    var agent by rememberSaveable { mutableStateOf(SessionAgent.CLAUDE) }
     val canStart = !creating && label.isNotBlank()
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -800,6 +811,23 @@ fun NewSessionDialog(
             )
         },
         text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SessionAgent.entries.forEach { a ->
+                    val on = agent == a
+                    Text(
+                        a.label,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = if (on) RoamColors.Attention else RoamColors.TextSecondary,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(11.dp))
+                            .background(if (on) RoamColors.Surface else Color.Transparent)
+                            .clickable(enabled = !creating) { agent = a }
+                            .padding(horizontal = 14.dp, vertical = 8.dp)
+                            .testTag("$NEW_SESSION_AGENT-${a.command}"),
+                    )
+                }
+            }
             OutlinedTextField(
                 value = label,
                 onValueChange = { label = it },
@@ -825,9 +853,10 @@ fun NewSessionDialog(
                 ),
                 modifier = Modifier.fillMaxWidth().testTag(NEW_SESSION_LABEL),
             )
+            }
         },
         confirmButton = {
-            TextButton(onClick = { onStart(label) }, enabled = canStart) {
+            TextButton(onClick = { onStart(label, agent) }, enabled = canStart) {
                 Text(
                     if (creating) "STARTING…" else "START",
                     style = MaterialTheme.typography.labelLarge,
@@ -854,4 +883,5 @@ const val RAIL_COUNT = "rail-count"
 const val RAIL_TALK = "rail-talk"
 const val RAIL_NEW = "rail-new-session"
 const val NEW_SESSION_LABEL = "new-session-label"
+const val NEW_SESSION_AGENT = "new-session-agent"
 const val RAIL_STATUS = "rail-status"

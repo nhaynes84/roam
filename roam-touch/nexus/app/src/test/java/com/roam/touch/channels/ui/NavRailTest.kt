@@ -18,6 +18,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
 import com.roam.touch.channels.BatteryState
 import com.roam.touch.channels.ChannelReducer
 import com.roam.touch.channels.ChannelsState
@@ -535,4 +536,56 @@ class NavRailTest {
         ChannelsState(channels = listOf(dead, live)),
         Fx.event(id = 900, pane = "%2", kind = "outcome"),
     )
+}
+
+/**
+ * ★ The dialog offers agents, not a terminal: CLAUDE and CODEX as chips, the shell
+ * command decided under the hood. One label field, START hands back both.
+ */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [29])
+class NewSessionDialogTest {
+
+    @get:Rule
+    val compose = createComposeRule()
+
+    private var started: Pair<String, SessionAgent>? = null
+
+    private fun render(creating: Boolean = false) {
+        compose.setContent {
+            NewSessionDialog(
+                creating = creating,
+                onDismiss = {},
+                onStart = { label, agent -> started = label to agent },
+            )
+        }
+    }
+
+    @Test
+    fun `both agents are offered and claude is the default`() {
+        render()
+        compose.onNodeWithTag("$NEW_SESSION_AGENT-claude", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithTag("$NEW_SESSION_AGENT-codex", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithTag(NEW_SESSION_LABEL).performTextInput("rail work")
+        compose.onNodeWithText("START").performClick()
+        assertEquals("rail work" to SessionAgent.CLAUDE, started)
+    }
+
+    @Test
+    fun `picking codex starts codex — the command is under the hood`() {
+        render()
+        compose.onNodeWithTag("$NEW_SESSION_AGENT-codex", useUnmergedTree = true).performClick()
+        compose.onNodeWithTag(NEW_SESSION_LABEL).performTextInput("try the other one")
+        compose.onNodeWithText("START").performClick()
+        assertEquals(SessionAgent.CODEX, started?.second)
+        assertEquals("codex", started?.second?.command)
+    }
+
+    @Test
+    fun `mid-flight the chips go inert with START`() {
+        render(creating = true)
+        compose.onNodeWithTag("$NEW_SESSION_AGENT-codex", useUnmergedTree = true).performClick()
+        compose.onNodeWithText("STARTING…").assertIsDisplayed()
+        assertNull(started)
+    }
 }

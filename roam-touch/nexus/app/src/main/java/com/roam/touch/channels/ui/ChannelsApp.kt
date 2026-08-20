@@ -579,8 +579,8 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
             NewSessionDialog(
                 creating = creating,
                 onDismiss = { newSession = false },
-                onStart = { label ->
-                    vm.createSession(label) { pane ->
+                onStart = { label, agent ->
+                    vm.createSession(label, agent.command) { pane ->
                         newSession = false
                         readingEventId = null
                         openPane = pane
