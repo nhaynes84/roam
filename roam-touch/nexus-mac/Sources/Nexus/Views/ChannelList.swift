@@ -4,6 +4,10 @@ struct ChannelList: View {
     @Bindable var store: HubStore
     /// Re-render tick so liveness ages between activity frames.
     @State private var now = Date()
+    @State private var showNewSession = false
+    @State private var paneToKill: String?
+    @State private var actionFailure: String?
+    @Environment(\.openWindow) private var openWindow
     private let tick = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
@@ -12,10 +16,58 @@ struct ChannelList: View {
                        liveness: store.liveness(channel),
                        unread: store.unreadCount(channel.paneId))
                 .tag(channel.paneId)
+                .contextMenu { menu(for: channel) }
         }
         .listStyle(.sidebar)
         .navigationTitle("Nexus")
         .onReceive(tick) { now = $0 }
+        .toolbar {
+            Button { showNewSession = true } label: {
+                Image(systemName: "plus")
+            }
+            .help("New session — spawn an agent pane on talos")
+            Button { openWindow(id: "files") } label: {
+                Image(systemName: "folder")
+            }
+            .help("Browse the hub's shared folders (CAD, Photos)")
+        }
+        .sheet(isPresented: $showNewSession) { NewSessionSheet(store: store) }
+        .confirmationDialog(
+            "Kill this session?",
+            isPresented: Binding(get: { paneToKill != nil },
+                                 set: { if !$0 { paneToKill = nil } })
+        ) {
+            Button("Kill \(paneToKill ?? "")", role: .destructive) {
+                if let pane = paneToKill { run { try await store.killSession(pane) } }
+            }
+        } message: {
+            Text("Ends the pane and whatever runs in it. The thread and its history stay.")
+        }
+        .alert("Action failed", isPresented: Binding(get: { actionFailure != nil },
+                                                     set: { if !$0 { actionFailure = nil } })) {
+            Button("OK") { actionFailure = nil }
+        } message: {
+            Text(actionFailure ?? "")
+        }
+    }
+
+    @ViewBuilder
+    private func menu(for channel: Channel) -> some View {
+        if channel.live && channel.paneId != "@host" {
+            Button("Kill session…", role: .destructive) { paneToKill = channel.paneId }
+        }
+        if !channel.live {
+            Button("Archive") { run { try await store.archiveChannel(channel.paneId) } }
+        }
+        Button("Clear history") { run { try await store.clearHistory(channel.paneId) } }
+        Button("Mark read") { store.markRead(channel.paneId) }
+    }
+
+    private func run(_ body: @escaping () async throws -> Void) {
+        Task {
+            do { try await body() }
+            catch { actionFailure = "\(error)" }
+        }
     }
 }
 

@@ -212,3 +212,30 @@ extension JSONDecoder {
         return d
     }
 }
+
+// MARK: - Files (~/Collab browse)
+
+struct FileEntry: Decodable, Sendable, Identifiable, Hashable {
+    var name: String
+    var path: String
+    var kind: String    // dir | image | mesh | cad | file
+    var size: Int
+    var mtime: Double
+    var meshPath: String?  // on a cad entry: the renderable STL beside it
+
+    var id: String { path }
+    var isDir: Bool { kind == "dir" }
+    /// The path a 3D viewer can actually load: STL only — a STEP is a b-rep
+    /// needing an OCCT-class kernel (the hub's rule, API.md).
+    var renderablePath: String? {
+        if kind == "mesh" { return path }
+        if kind == "cad" { return meshPath }
+        return nil
+    }
+}
+
+struct FilesResponse: Decodable, Sendable {
+    var path: String
+    var parent: String?
+    var entries: [FileEntry]
+}

@@ -115,3 +115,27 @@ import Foundation
         #expect(h.build?.commit == "99bb9f2")
     }
 }
+
+@Suite struct FilesDecoding {
+    @Test func cadEntryCarriesItsMeshPath() throws {
+        // Verbatim from API.md: mesh_path appears on a cad entry when the
+        // build pipeline has dropped an .stl beside it.
+        let json = """
+        {"path": "CAD/roam-touch", "parent": "CAD", "entries": [
+          {"name": "archive", "path": "CAD/roam-touch/archive", "kind": "dir",
+           "size": 0, "mtime": 1786760296.9},
+          {"name": "bracer.step", "path": "CAD/roam-touch/bracer.step", "kind": "cad",
+           "size": 963991, "mtime": 1786762523.9,
+           "mesh_path": "CAD/roam-touch/bracer.stl"}
+        ]}
+        """
+        let r = try JSONDecoder.hub.decode(FilesResponse.self, from: Data(json.utf8))
+        #expect(r.entries[0].isDir)
+        #expect(r.entries[0].renderablePath == nil)
+        #expect(r.entries[1].renderablePath == "CAD/roam-touch/bracer.stl")
+        // A step with no mesh built renders nothing rather than attempting a b-rep.
+        var bare = r.entries[1]
+        bare.meshPath = nil
+        #expect(bare.renderablePath == nil)
+    }
+}

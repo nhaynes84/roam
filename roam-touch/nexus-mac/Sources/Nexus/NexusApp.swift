@@ -10,6 +10,11 @@ struct NexusApp: App {
                 .frame(minWidth: 760, minHeight: 480)
         }
         .windowResizability(.contentMinSize)
+
+        WindowGroup("Files", id: "files") {
+            FilesWindow(model: model)
+        }
+        .windowResizability(.contentMinSize)
     }
 }
 

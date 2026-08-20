@@ -13,7 +13,13 @@ enum ConnectionState: Equatable {
 struct ChannelThread: Sendable {
     var events: [Event] = []
     var delivered: Set<Int> = []
-    var historyLoaded = false
+    var historyLoaded: Bool = false
+
+    init(events: [Event] = [], delivered: Set<Int> = [], historyLoaded: Bool = false) {
+        self.events = events
+        self.delivered = delivered
+        self.historyLoaded = historyLoaded
+    }
 
     mutating func upsert(_ event: Event) -> Bool {
         if let echoOf = event.echoOf {
@@ -131,7 +137,10 @@ final class HubStore {
             channels = list
 
         case .channel(let c):
-            if let i = channels.firstIndex(where: { $0.paneId == c.paneId }) {
+            if c.archived == true {
+                channels.removeAll { $0.paneId == c.paneId }
+                if selectedPane == c.paneId { selectedPane = nil }
+            } else if let i = channels.firstIndex(where: { $0.paneId == c.paneId }) {
                 channels[i] = c
             } else {
                 channels.append(c)
@@ -242,6 +251,38 @@ final class HubStore {
     func interrupt(_ pane: String, action: String = "escape") async throws {
         let r = try await api.interrupt(pane: pane, action: action)
         integrate(r.event, advanceCursor: true)
+    }
+
+    /// Spawn a new agent pane and land on it. The hub's channels frame will
+    /// bring the authoritative list; the upsert here is just immediacy.
+    func createSession(command: String, label: String?, cwd: String?) async throws {
+        let channel = try await api.createChannel(command: command, label: label, cwd: cwd)
+        if !channels.contains(where: { $0.paneId == channel.paneId }) {
+            channels.insert(channel, at: 0)
+        }
+        markRead(channel.paneId)
+        selectedPane = channel.paneId
+    }
+
+    /// Ends the pane; thread and history survive (contract: kill is not
+    /// destructive of data).
+    func killSession(_ pane: String) async throws {
+        let r = try await api.kill(pane: pane)
+        integrate(r.event, advanceCursor: true)
+        if let i = channels.firstIndex(where: { $0.paneId == pane }) {
+            channels[i] = r.channel
+        }
+    }
+
+    func archiveChannel(_ pane: String) async throws {
+        _ = try await api.archive(pane: pane, archived: true)
+        channels.removeAll { $0.paneId == pane }
+        if selectedPane == pane { selectedPane = nil }
+    }
+
+    func clearHistory(_ pane: String) async throws {
+        _ = try await api.clearHistory(pane: pane)
+        threads[pane] = ChannelThread(historyLoaded: true)
     }
 
     func expand(_ event: Event) async -> Event {

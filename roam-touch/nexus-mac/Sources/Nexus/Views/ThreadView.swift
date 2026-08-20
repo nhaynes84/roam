@@ -9,6 +9,7 @@ struct ThreadView: View {
     @State private var newCount = 0
     /// Initial positioning done; only then do new arrivals auto-follow.
     @State private var positioned = false
+    @State private var showCapture = false
 
     private var channel: Channel? { store.channels.first { $0.paneId == pane } }
     private var thread: ChannelThread { store.threads[pane] ?? ChannelThread() }
@@ -47,7 +48,14 @@ struct ThreadView: View {
                         }
                         .help("Jump to the first unread message")
                     }
+                    if channel?.live == true && pane != "@host" {
+                        Button { showCapture = true } label: {
+                            Image(systemName: "terminal")
+                        }
+                        .help("Show the pane's screen")
+                    }
                 }
+                .sheet(isPresented: $showCapture) { CaptureSheet(store: store, pane: pane) }
             }
             Divider()
             Composer(store: store, pane: pane, sendable: channel?.live == true && pane != "@host")

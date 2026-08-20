@@ -120,3 +120,79 @@ struct HubAPI: Sendable {
         _ = try await run(request("DELETE", "/presence/nexus-mac"), as: Ack.self)
     }
 }
+
+// MARK: - Session lifecycle (hub 1.5.0)
+
+extension HubAPI {
+    struct CreateChannelBody: Encodable {
+        var command: String
+        var label: String?
+        var cwd: String?
+        var origin = "nexus-mac"
+    }
+
+    func createChannel(command: String = "claude", label: String? = nil,
+                       cwd: String? = nil) async throws -> Channel {
+        struct Created: Decodable { var channel: Channel }
+        let body = CreateChannelBody(command: command,
+                                     label: label?.trimmed.isEmpty == false ? label?.trimmed : nil,
+                                     cwd: cwd?.trimmed.isEmpty == false ? cwd?.trimmed : nil)
+        return try await run(request("POST", "/channels", body: body), as: Created.self).channel
+    }
+
+    struct KillBody: Encodable { var origin = "nexus-mac" }
+    /// Ends the pane; the channel and its history survive (contract).
+    func kill(pane: String) async throws -> SendResponse {
+        try await run(request("POST", "/channels/\(panePath(pane))/kill", body: KillBody()),
+                      as: SendResponse.self)
+    }
+
+    struct ArchiveBody: Encodable { var archived: Bool }
+    func archive(pane: String, archived: Bool = true) async throws -> Channel {
+        struct Wrapped: Decodable { var channel: Channel }
+        return try await run(request("POST", "/channels/\(panePath(pane))/archive",
+                                     body: ArchiveBody(archived: archived)),
+                             as: Wrapped.self).channel
+    }
+
+    struct ClearedResponse: Decodable { var paneId: String; var archived: Int }
+    /// Soft-clear: rows are flagged, never deleted (contract).
+    func clearHistory(pane: String) async throws -> ClearedResponse {
+        try await run(request("DELETE", "/channels/\(panePath(pane))/history"),
+                      as: ClearedResponse.self)
+    }
+}
+
+// MARK: - Files
+
+extension HubAPI {
+    func files(path: String = "") async throws -> FilesResponse {
+        try await run(request("GET", "/files",
+                              query: [URLQueryItem(name: "path", value: path)]),
+                      as: FilesResponse.self)
+    }
+
+    /// Raw bytes with the token in the header (never the URL where avoidable).
+    func fileData(path: String) async throws -> Data {
+        try await rawData("/files/raw", query: [URLQueryItem(name: "path", value: path)])
+    }
+
+    func thumbData(path: String, size: Int = 320) async throws -> Data {
+        try await rawData("/files/thumb", query: [
+            URLQueryItem(name: "path", value: path),
+            URLQueryItem(name: "size", value: String(size)),
+        ])
+    }
+
+    private func rawData(_ apiPath: String, query: [URLQueryItem]) async throws -> Data {
+        let req = try request("GET", apiPath, query: query)
+        let (data, response) = try await session.data(for: req)
+        guard let http = response as? HTTPURLResponse else { throw HubError.badPayload("no HTTP response") }
+        guard (200..<300).contains(http.statusCode) else {
+            if http.statusCode == 401 { throw HubError.unauthorised }
+            throw HubError.http(status: http.statusCode,
+                                detail: String(data: data, encoding: .utf8) ?? "")
+        }
+        return data
+    }
+}
