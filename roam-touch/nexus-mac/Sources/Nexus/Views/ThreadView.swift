@@ -4,6 +4,12 @@ struct ThreadView: View {
     @Bindable var store: HubStore
     var pane: String
 
+    /// Unread boundary, snapshotted when the channel opens — before markRead.
+    @State private var newMarkerId: Int?
+    @State private var newCount = 0
+    /// Initial positioning done; only then do new arrivals auto-follow.
+    @State private var positioned = false
+
     private var channel: Channel? { store.channels.first { $0.paneId == pane } }
     private var thread: ChannelThread { store.threads[pane] ?? ChannelThread() }
 
@@ -13,6 +19,9 @@ struct ThreadView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 10) {
                         ForEach(thread.events) { event in
+                            if event.id == newMarkerId {
+                                NewMarker(count: newCount).id("new-marker")
+                            }
                             EventRow(store: store, event: event,
                                      delivered: thread.delivered.contains(event.id))
                                 .id(event.id)
@@ -20,8 +29,24 @@ struct ThreadView: View {
                     }
                     .padding(12)
                 }
-                .onChange(of: thread.events.last?.id, initial: true) { _, last in
-                    if let last { proxy.scrollTo(last, anchor: .bottom) }
+                .task(id: pane) { await openChannel(proxy) }
+                .onChange(of: thread.events.last?.id) { _, last in
+                    // Follow new arrivals only once the opening scroll landed,
+                    // so history inserts don't yank the view around.
+                    if positioned, let last {
+                        withAnimation { proxy.scrollTo(last, anchor: .bottom) }
+                    }
+                }
+                .toolbar {
+                    if newCount > 0 {
+                        Button {
+                            withAnimation { proxy.scrollTo("new-marker", anchor: .center) }
+                        } label: {
+                            Label("\(newCount) new", systemImage: "arrow.down.to.line")
+                                .font(.system(size: 14))
+                        }
+                        .help("Jump to the first unread message")
+                    }
                 }
             }
             Divider()
@@ -29,16 +54,52 @@ struct ThreadView: View {
         }
         .navigationTitle(channel?.label ?? pane)
         .navigationSubtitle(subtitle)
-        .task(id: pane) {
-            await store.loadHistoryIfNeeded(pane)
-            store.markRead(pane)
+    }
+
+    /// Snapshot what is unread, THEN mark read, THEN land the scroll on the
+    /// divider (or the bottom when nothing is new). Order matters: marking
+    /// read first would erase the very thing being shown.
+    private func openChannel(_ proxy: ScrollViewProxy) async {
+        let readUpTo = store.readUpTo(pane)
+        await store.loadHistoryIfNeeded(pane)
+        let events = store.threads[pane]?.events ?? []
+        let fresh = events.filter { $0.id > readUpTo }
+        newMarkerId = fresh.first?.id
+        newCount = fresh.count
+        store.markRead(pane)
+
+        // Let the lazy list lay out before asking it to scroll — a scrollTo
+        // issued during load is silently dropped, which left threads at the top.
+        try? await Task.sleep(for: .milliseconds(80))
+        if newMarkerId != nil {
+            proxy.scrollTo("new-marker", anchor: .top)
+        } else if let last = events.last {
+            proxy.scrollTo(last.id, anchor: .bottom)
         }
+        positioned = true
     }
 
     private var subtitle: String {
         guard let channel else { return "" }
         let liveness = store.liveness(channel).text
         return liveness.isEmpty ? channel.status : liveness
+    }
+}
+
+/// The unread boundary: everything below arrived since the last visit.
+struct NewMarker: View {
+    var count: Int
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Rectangle().fill(.tint).frame(height: 1)
+            Text(count == 1 ? "1 new" : "\(count) new")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.tint)
+                .fixedSize()
+            Rectangle().fill(.tint).frame(height: 1)
+        }
+        .padding(.vertical, 2)
     }
 }
 

@@ -39,11 +39,10 @@ final class HubStore {
     var connection: ConnectionState = .connecting
     var hubVersion: String?
     var pendingEvents = 0
+    // Selection does NOT mark read here: the thread view snapshots the unread
+    // boundary first (to place the NEW divider), then marks read itself.
     var selectedPane: String? {
-        didSet {
-            if let pane = selectedPane { markRead(pane) }
-            presenceDirty = true
-        }
+        didSet { presenceDirty = true }
     }
     /// Set by the UI when the app is frontmost; gates read-tracking and presence.
     var appActive = false { didSet { presenceDirty = true } }
@@ -189,6 +188,8 @@ final class HubStore {
     }
 
     // MARK: - Read state / unread badges
+
+    func readUpTo(_ pane: String) -> Int { readCursors[pane] ?? 0 }
 
     func markRead(_ pane: String) {
         let latest = max(threads[pane]?.events.last?.id ?? 0,
