@@ -2,16 +2,26 @@ import SwiftUI
 
 struct ChannelList: View {
     @Bindable var store: HubStore
+    @Binding var destination: MainDestination?
     /// Re-render tick so liveness ages between activity frames.
     @State private var now = Date()
     @State private var showNewSession = false
     @State private var paneToKill: String?
     @State private var actionFailure: String?
-    @Environment(\.openWindow) private var openWindow
     private let tick = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
+    private var selectedChannel: Binding<String?> {
+        Binding(
+            get: {
+                if case .channel(let p) = destination { return p }
+                return nil
+            },
+            set: { destination = $0.map { .channel($0) } }
+        )
+    }
+
     var body: some View {
-        List(store.channels, selection: $store.selectedPane) { channel in
+        List(store.channels, selection: selectedChannel) { channel in
             ChannelRow(channel: channel,
                        liveness: store.liveness(channel),
                        unread: store.unreadCount(channel.paneId),
@@ -29,10 +39,6 @@ struct ChannelList: View {
                 Image(systemName: "plus")
             }
             .help("New session — spawn an agent pane on talos")
-            Button { openWindow(id: "files") } label: {
-                Image(systemName: "folder")
-            }
-            .help("Browse the hub's shared folders (CAD, Photos)")
         }
         .sheet(isPresented: $showNewSession) { NewSessionSheet(store: store) }
         .confirmationDialog(
@@ -82,19 +88,28 @@ struct ChannelRow: View {
     var onDismiss: (() -> Void)?
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(alignment: .top, spacing: 8) {
             Circle()
                 .fill(statusColor)
-                .frame(width: 9, height: 9)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(channel.label)
-                    .font(.system(size: 14, weight: unread > 0 ? .semibold : .regular))
-                    .lineLimit(1)
+                .frame(width: 8, height: 8)
+                .padding(.top, 5)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(channel.label)
+                        .font(.system(size: 14, weight: unread > 0 ? .semibold : .medium))
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    if let ts = channel.lastEvent?.ts {
+                        Text(Date(timeIntervalSince1970: ts), style: .time)
+                            .font(.system(size: 14))
+                            .foregroundStyle(.quaternary)
+                    }
+                }
                 HStack(spacing: 6) {
                     if !liveness.text.isEmpty {
                         Text(liveness.text)
-                            .font(.system(size: 14))
-                            .foregroundStyle(liveness == .dead ? .red : .secondary)
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(livenessColor)
                     }
                     if let last = channel.lastEvent, liveness != .dead {
                         Text(last.summary)
@@ -102,26 +117,35 @@ struct ChannelRow: View {
                             .foregroundStyle(.tertiary)
                             .lineLimit(1)
                     }
+                    Spacer(minLength: 4)
+                    if unread > 0 {
+                        Text("\(unread)")
+                            .font(.system(size: 14, weight: .semibold))
+                            .padding(.horizontal, 7).padding(.vertical, 1)
+                            .background(Capsule().fill(.tint))
+                            .foregroundStyle(.white)
+                    }
+                    if let onDismiss {
+                        Button(action: onDismiss) {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Dismiss — archives this dead channel; history stays readable")
+                    }
                 }
-            }
-            Spacer(minLength: 4)
-            if unread > 0 {
-                Text("\(unread)")
-                    .font(.system(size: 14, weight: .semibold))
-                    .padding(.horizontal, 7).padding(.vertical, 1)
-                    .background(Capsule().fill(.tint))
-                    .foregroundStyle(.white)
-            }
-            if let onDismiss {
-                Button(action: onDismiss) {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .help("Dismiss — archives this dead channel; history stays readable")
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 4)
+    }
+
+    private var livenessColor: Color {
+        switch liveness {
+        case .dead: return .red
+        case .working: return .cyan
+        case .quiet: return .orange
+        case .idle, .none: return .secondary
+        }
     }
 
     private var statusColor: Color {

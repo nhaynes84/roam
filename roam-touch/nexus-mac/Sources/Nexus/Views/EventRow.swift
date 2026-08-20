@@ -1,4 +1,5 @@
 import SwiftUI
+import MarkdownUI
 
 /// Summary first, details on demand — the house rule for every event.
 /// Expanding a truncated event fetches GET /events/{id}, never re-derives.
@@ -88,7 +89,9 @@ struct EventRow: View {
                 Text(role).font(.system(size: 14, weight: .semibold)).foregroundStyle(.secondary)
             }
             if expanded {
-                bodyText(fullBody ?? event.body)
+                Markdown(fullBody ?? event.body)
+                    .markdownTheme(.nexus)
+                    .textSelection(.enabled)
             } else {
                 Text(event.summary).font(.system(size: 14))
             }
@@ -138,4 +141,18 @@ struct EventRow: View {
         .font(.system(size: 14))
         .foregroundStyle(.tertiary)
     }
+}
+
+
+/// House theme: GitHub's block styling at the 14pt floor, monospaced code.
+/// Only ever read from SwiftUI body evaluation, hence MainActor.
+extension MarkdownUI.Theme {
+    @MainActor static let nexus = MarkdownUI.Theme.gitHub
+        .text {
+            FontSize(14)
+        }
+        .code {
+            FontFamilyVariant(.monospaced)
+            FontSize(14)
+        }
 }

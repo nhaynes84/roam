@@ -15,8 +15,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundleName</key><string>Nexus</string>
     <key>CFBundleDisplayName</key><string>Nexus</string>
     <key>CFBundleIdentifier</key><string>com.roam.nexus</string>
-    <key>CFBundleVersion</key><string>5</string>
-    <key>CFBundleShortVersionString</key><string>0.2.1</string>
+    <key>CFBundleVersion</key><string>6</string>
+    <key>CFBundleShortVersionString</key><string>0.3.0</string>
     <key>CFBundleExecutable</key><string>Nexus</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>

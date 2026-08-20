@@ -5,21 +5,8 @@ import SwiftUI
 import SceneKit.ModelIO
 import ModelIO
 
-/// A read-only window onto the hub's shared folders (CAD / Photos).
-/// Roots are named, not paths; a browse path is "<root>/<relative>".
-struct FilesWindow: View {
-    var model: AppModel
-
-    var body: some View {
-        if let store = model.store {
-            FilesBrowser(api: store.api)
-                .frame(minWidth: 780, minHeight: 480)
-        } else {
-            ContentUnavailableView("No hub configuration", systemImage: "key.slash")
-        }
-    }
-}
-
+/// A read-only browser onto the hub's shared folders (CAD / Photos),
+/// living in the main window's detail pane. Roots are named, not paths.
 struct FilesBrowser: View {
     var api: HubAPI
     @State private var path = ""
