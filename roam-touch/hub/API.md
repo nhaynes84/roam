@@ -421,11 +421,16 @@ true`).
 * Everything is optional; an empty body (or none) spawns `claude` in a new
   window of the first existing tmux session, in the hub's default directory.
 * `command` — what to run. The token holder can already type into any agent
-  pane, so this is not a privilege boundary; it is a convenience.
+  pane, so this is not a privilege boundary; it is a convenience. It runs
+  through an **interactive zsh** (`zsh -ic`), because a new pane inherits the
+  tmux *client's* environment and the hub is a launchd daemon — a bare exec
+  would miss everything `.zshrc` sets (nodenv shims included, which is exactly
+  how `claude` failed to spawn before this was learned the hard way).
 * `label` — the pane title. Set it: unnamed panes all read as the hostname.
 * `session` — a tmux session name. Omit to use the first that exists; with no
   tmux server at all, a fresh `agents` session is created to hold the pane.
-* `cwd` — working directory for the command.
+* `cwd` — working directory for the command. Defaults to `$HOME` — never to
+  wherever the hub process happens to live.
 
 Always a **new window, never a split** — splitting would carve up whatever the
 owner is looking at — and always detached (`-d`), so the tmux client he is

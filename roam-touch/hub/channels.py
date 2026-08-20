@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import socket
+import os
 import subprocess
 from dataclasses import dataclass, asdict
 
@@ -229,9 +230,15 @@ def spawn(
         args = ["new-window", "-d", "-P", "-F", "#{pane_id}", "-t", f"{session}:"]
     else:
         args = ["new-session", "-d", "-P", "-F", "#{pane_id}", "-s", "agents"]
-    if cwd:
-        args += ["-c", cwd]
-    args.append(command)
+    # A new pane inherits the CLIENT's environment and cwd -- and this client
+    # is a launchd daemon, whose PATH has no nodenv shims, so a bare `claude`
+    # exec-fails and the pane dies within milliseconds of being created.
+    # Running the command through an interactive zsh gives a spawned session
+    # exactly what the owner's own terminal panes get (.zshrc: nodenv, PATH,
+    # aliases), and $HOME beats "wherever the hub happens to live" as the
+    # workspace for a fresh agent.
+    args += ["-c", os.path.expanduser(cwd or "~")]
+    args += ["zsh", "-ic", command]
     pane_id = _tmux(*args).strip()
     if label:
         # The default pane title is the hostname, which reads as "talos" for

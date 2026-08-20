@@ -923,7 +923,13 @@ def test_create_channel_spawns_a_detached_window(client, auth, fake_tmux):
     # A new window, detached, never a split of what the owner is looking at.
     (argv,) = fake_tmux.argv_for("new-window")
     assert "-d" in argv
+    # Through an interactive zsh: the tmux client is a launchd daemon whose
+    # PATH has no nodenv shims, so a bare exec of `claude` dies instantly.
+    assert argv[-3:-1] == ("zsh", "-ic")
     assert argv[-1] == "claude"
+    # And in $HOME, not wherever the hub process happens to live.
+    import os
+    assert argv[argv.index("-c") + 1] == os.path.expanduser("~")
     # Named while we know what it is for -- unnamed panes all read as "talos".
     assert fake_tmux.argv_for("select-pane")
 
