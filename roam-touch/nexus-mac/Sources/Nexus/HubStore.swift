@@ -51,7 +51,14 @@ final class HubStore {
         didSet { presenceDirty = true }
     }
     /// Set by the UI when the app is frontmost; gates read-tracking and presence.
-    var appActive = false { didSet { presenceDirty = true } }
+    var appActive = false {
+        didSet {
+            presenceDirty = true
+            // Coming back to the app (wake, unhide) with a broken link: don't
+            // wait out the watchdog + backoff — reconnect right now.
+            if appActive, !oldValue, connection != .connected { nudgeReconnect() }
+        }
+    }
 
     let api: HubAPI
     private let kv: KVStore
@@ -75,6 +82,13 @@ final class HubStore {
         guard connectionTask == nil else { return }
         connectionTask = Task { await runConnectionLoop() }
         presenceTask = Task { await runPresenceLoop() }
+    }
+
+    /// Tear down the current socket and start over immediately, keeping the
+    /// cursor. Safe to call any time; the store replays whatever was missed.
+    func nudgeReconnect() {
+        connectionTask?.cancel()
+        connectionTask = Task { await runConnectionLoop() }
     }
 
     func stop() {

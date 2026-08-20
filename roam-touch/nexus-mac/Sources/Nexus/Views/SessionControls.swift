@@ -16,9 +16,10 @@ enum Agent: String, CaseIterable, Identifiable {
     }
 }
 
-/// Model aliases the claude CLI accepts. Default = whatever the box's
-/// settings say (currently Fable 5); mid-session, typing /model <alias>
-/// into the composer switches the running session.
+/// Model aliases the claude CLI accepts. Opus is the spawn default —
+/// owner: "fable is too heavy handed for most things"; Default = the box's
+/// settings model (Fable 5). Mid-session, /model <alias> in the composer
+/// switches the running session.
 enum ClaudeModel: String, CaseIterable, Identifiable {
     case `default` = "Default"
     case fable = "Fable"
@@ -34,7 +35,7 @@ struct NewSessionSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var label = ""
     @State private var agent: Agent = .claude
-    @State private var model: ClaudeModel = .default
+    @State private var model: ClaudeModel = .opus
     @State private var cwd = ""
     @State private var failure: String?
     @State private var creating = false
