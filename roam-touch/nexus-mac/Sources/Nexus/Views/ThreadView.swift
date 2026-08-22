@@ -27,10 +27,23 @@ struct ThreadView: View {
                                      delivered: thread.delivered.contains(event.id))
                                 .id(event.id)
                         }
+                        // ★ Owner: "i'd like to see the in message 'Working…'".
+                        //   The status bar and the subtitle already carry it, but the
+                        //   thread is where he is actually looking while he waits.
+                        //   Sits after the last event, where the reply will appear.
+                        if let channel, store.liveness(channel).isActive {
+                            WorkingRow(text: store.liveness(channel).text)
+                                .id("working")
+                        }
                     }
                     .padding(12)
                 }
                 .task(id: pane) { await openChannel(proxy) }
+                .onChange(of: channel.map { store.liveness($0).isActive } ?? false) { _, active in
+                    if positioned, active {
+                        withAnimation { proxy.scrollTo("working", anchor: .bottom) }
+                    }
+                }
                 .onChange(of: thread.events.last?.id) { _, last in
                     // Follow new arrivals only once the opening scroll landed,
                     // so history inserts don't yank the view around.
@@ -93,6 +106,31 @@ struct ThreadView: View {
         return liveness.isEmpty ? channel.status : liveness
     }
 }
+
+/// The live "the agent is on it" row, shown at the tail of the thread.
+///
+/// ⚠️ No number, ever — idle_s is time-since-output-changed sampled live, so a working
+/// pane reads 0.3, 2.1, 0.2… and floored to seconds it looks stuck at 0,1,0,1. That was
+/// already fixed for the labels; this row inherits the same rule via Liveness.text.
+struct WorkingRow: View {
+    var text: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ProgressView()
+                .controlSize(.small)
+                .progressViewStyle(.circular)
+            Text(text)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .transition(.opacity)
+    }
+}
+
 
 /// The unread boundary: everything below arrived since the last visit.
 struct NewMarker: View {

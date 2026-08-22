@@ -7,8 +7,14 @@ struct EventRow: View {
     var store: HubStore
     var event: Event
     var delivered: Bool
-    @State private var expanded = false
+    /// Owner: "i don't like collapse / expand on macbook, leave it an option for
+    /// consistency but default me to expanded mode." So the DEFAULT is expanded and
+    /// the toggle stays; `userToggled` is nil until he actually clicks one.
+    @AppStorage("defaultExpanded") private var defaultExpanded = true
+    @State private var userToggled: Bool?
     @State private var fullBody: String?
+
+    private var expanded: Bool { userToggled ?? defaultExpanded }
 
     var body: some View {
         switch event.kind {
@@ -31,7 +37,9 @@ struct EventRow: View {
             VStack(alignment: .trailing, spacing: 3) {
                 bodyText(event.body)
                     .padding(.horizontal, 10).padding(.vertical, 6)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(.tint.opacity(0.18)))
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Bubble.mineFill))
+                    .overlay(RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(Bubble.mineEdge, lineWidth: 1))
                 metaLine(trailing: delivered ? "delivered" : nil)
             }
         }
@@ -44,7 +52,9 @@ struct EventRow: View {
             VStack(alignment: .trailing, spacing: 3) {
                 bodyText(event.body)
                     .padding(.horizontal, 10).padding(.vertical, 6)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(.secondary.opacity(0.15)))
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Bubble.typedFill))
+                    .overlay(RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(Bubble.typedEdge, lineWidth: 1))
                 metaLine(trailing: "typed in tmux")
             }
         }
@@ -101,10 +111,8 @@ struct EventRow: View {
                         .font(.system(size: 14)).foregroundStyle(.orange)
                 }
                 Button(expanded ? "collapse" : expandLabel) {
-                    expanded.toggle()
-                    if expanded, event.isTruncated, fullBody == nil {
-                        Task { fullBody = await store.expand(event).body }
-                    }
+                    userToggled = !expanded
+                    Task { await loadFullIfNeeded() }
                 }
                 .buttonStyle(.link).font(.system(size: 14))
                 Spacer()
@@ -113,7 +121,18 @@ struct EventRow: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.5)))
+        .background(
+            RoundedRectangle(cornerRadius: 8).fill(Bubble.agentFill)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8).strokeBorder(Bubble.agentEdge, lineWidth: 1)
+        )
+        .task { await loadFullIfNeeded() }
+    }
+
+    private func loadFullIfNeeded() async {
+        guard expanded, event.isTruncated, fullBody == nil else { return }
+        fullBody = await store.expand(event).body
     }
 
     private var expandLabel: String {
@@ -155,4 +174,30 @@ extension MarkdownUI.Theme {
             FontFamilyVariant(.monospaced)
             FontSize(14)
         }
+}
+
+
+/// Bubble palette.
+///
+/// Owner: "make your response bubbles and mine different colors; this dark grey on
+/// darker grey and dark blue on darker grey just doesn't pop enough."
+///
+/// Two things were wrong: the fills sat only a few percent off the window ground, and
+/// BOTH sides were desaturated, so the only cue separating his words from the agent's
+/// was which edge they hugged. Now the sides differ in HUE as well as luminance —
+/// his are blue, the agent's are a warm graphite — and every bubble carries a 1px
+/// border, which is what actually reads as an edge on a dark ground.
+enum Bubble {
+    /// His messages — accent blue, carried well clear of the ground.
+    static let mineFill = Color.accentColor.opacity(0.28)
+    static let mineEdge = Color.accentColor.opacity(0.55)
+
+    /// The agent's replies — warm graphite, deliberately NOT the accent hue.
+    static let agentFill = Color(red: 0.55, green: 0.50, blue: 0.44).opacity(0.20)
+    static let agentEdge = Color(red: 0.62, green: 0.56, blue: 0.48).opacity(0.42)
+
+    /// Typed straight into tmux — his words, but not sent from here, so it reads as
+    /// his side muted rather than as a third party.
+    static let typedFill = Color.accentColor.opacity(0.13)
+    static let typedEdge = Color.accentColor.opacity(0.30)
 }

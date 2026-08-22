@@ -34,4 +34,17 @@ import Testing
         // @host: no screen to fingerprint; never a fake zero.
         #expect(Liveness.of(status: "idle", live: true, idleS: nil) == .none)
     }
+
+    /// The in-thread WorkingRow shows only while the agent is actually on the job —
+    /// it must not linger on an idle or dead pane, and must not appear on @host's
+    /// null idle_s.
+    @Test func onlyWorkingAndQuietDriveTheThreadIndicator() {
+        #expect(Liveness.working.isActive)
+        #expect(Liveness.quiet(245).isActive)
+        #expect(!Liveness.idle(30).isActive)
+        #expect(!Liveness.dead.isActive)
+        #expect(!Liveness.none.isActive)
+        // a dead pane reporting "working" is still dead, so no spinner
+        #expect(!Liveness.of(status: "working", live: false, idleS: 0.3).isActive)
+    }
 }

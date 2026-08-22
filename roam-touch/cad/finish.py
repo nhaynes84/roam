@@ -49,7 +49,12 @@ def step(shape, new, label, sign):
 # Measured: tongue end face x 36.60..36.75, block face x 36.85, 5.65-9.60 mm solid behind.
 DET_STATIONS = (-280.0, -250.0, -190.0, -160.0)
 DET_Z = -7.40                     # tongue mid-height (tongue spans z -6.60..-8.20)
-RIDGE_R, RIDGE_TIP, RIDGE_LEN = 0.50, 37.15, 10.0
+# ★ RIDGE_TIP is the ONE fit constant for the base-plate soft locks:
+#   interference = RIDGE_TIP - BLOCK_FACE (36.85). 37.15 = 0.30, which he printed and
+#   called "just too tight" (2026-08-21). Overridable so gauge.py can sweep it WITHOUT
+#   touching roam_worn.step.
+RIDGE_R, RIDGE_LEN = 0.50, 10.0
+RIDGE_TIP = float(os.environ.get("ROAM_RIDGE_TIP", 37.15))
 GROOVE_R, GROOVE_BOT, GROOVE_LEN = 0.65, 37.40, 14.0
 BLOCK_FACE = 36.85
 
@@ -775,8 +780,9 @@ def main():
     out = Compound(children=[drawer, housing, endcap, base, faceplate, rail, g5, g6] + rest)
     bb = out.bounding_box()
     print(f"\nenvelope x {bb.min.X:.2f}..{bb.max.X:.2f}  y {bb.min.Y:.2f}..{bb.max.Y:.2f}  z {bb.min.Z:.2f}..{bb.max.Z:.2f}")
-    export_step(out, os.path.join(SHARE, "roam_worn.step"))
-    export_stl(out, os.path.join(SHARE, "roam_worn.stl"))
+    dest = os.environ.get("ROAM_OUT", SHARE)   # gauge sweeps redirect; default is the law
+    export_step(out, os.path.join(dest, "roam_worn.step"))
+    export_stl(out, os.path.join(dest, "roam_worn.stl"))
     print(f"roam_worn.step + .stl   {out.volume/1000:.1f} cm3   {len(out.solids())} solids")
 
 

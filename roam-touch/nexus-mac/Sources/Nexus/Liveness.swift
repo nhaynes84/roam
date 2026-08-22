@@ -27,6 +27,14 @@ enum Liveness: Equatable {
         return idleS >= idleThresholdS ? .idle(Int(idleS)) : .none
     }
 
+    /// Worth showing a live indicator in the thread: the agent is on the job.
+    var isActive: Bool {
+        switch self {
+        case .working, .quiet: return true
+        default: return false
+        }
+    }
+
     var text: String {
         switch self {
         case .working: return "working…"

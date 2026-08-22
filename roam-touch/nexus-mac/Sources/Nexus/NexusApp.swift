@@ -10,6 +10,21 @@ struct NexusApp: App {
                 .frame(minWidth: 760, minHeight: 480)
         }
         .windowResizability(.contentMinSize)
+        .commands { ViewCommands() }
+    }
+}
+
+/// ★ Owner: "leave it an option for consistency but default me to expanded mode."
+/// The per-row expand/collapse link stays exactly as it was; this only moves which way
+/// a row starts, and a row he has clicked keeps his choice for as long as it is on screen.
+struct ViewCommands: Commands {
+    @AppStorage("defaultExpanded") private var defaultExpanded = true
+
+    var body: some Commands {
+        CommandGroup(after: .toolbar) {
+            Toggle("Expand responses by default", isOn: $defaultExpanded)
+                .keyboardShortcut("e", modifiers: [.command, .shift])
+        }
     }
 }
 
