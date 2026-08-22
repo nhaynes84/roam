@@ -247,3 +247,52 @@ private func hello(latest: Int, channels: [Channel] = []) -> Frame {
         #expect(s.openPrompts["%2"] != nil, "closing one must not close the other")
     }
 }
+
+/// Session restore: "cache my current session, so i open up to the spot i was at."
+@Suite struct SessionRestoreTests {
+    @MainActor private func store(_ kv: KVStore) -> HubStore {
+        HubStore(api: HubAPI(config: HubConfig(baseURL: URL(string: "http://x")!, token: "t")),
+                 kv: kv)
+    }
+
+    private func ch(_ pane: String) -> Channel {
+        Channel(paneId: pane, label: pane, session: "agents",
+                live: true, status: "idle", archived: false)
+    }
+
+    @MainActor @Test func reopensTheChannelHeWasOn() {
+        let kv = MemoryKV()
+        store(kv).selectedPane = "%2"
+        let next = store(kv)                 // relaunch
+        next.channels = [ch("%1"), ch("%2")]
+        #expect(next.restoreSession() == "%2")
+    }
+
+    @MainActor @Test func aPaneThatDiedOvernightIsNotRestored() {
+        let kv = MemoryKV()
+        store(kv).selectedPane = "%9"
+        let next = store(kv)
+        next.channels = [ch("%1")]
+        #expect(next.restoreSession() == nil, "never open onto a channel that is gone")
+    }
+
+    @MainActor @Test func restoringIsOnceOnly() {
+        let kv = MemoryKV()
+        store(kv).selectedPane = "%1"
+        let next = store(kv)
+        next.channels = [ch("%1")]
+        #expect(next.restoreSession() == "%1")
+        #expect(next.restoreSession() == nil, "must not yank him back later")
+    }
+
+    @MainActor @Test func scrollAnchorsSurviveAndAreScopedPerChannel() {
+        let kv = MemoryKV()
+        let s = store(kv)
+        s.setScrollAnchor(41, for: "%1")
+        s.setScrollAnchor(77, for: "%2")
+        let next = store(kv)
+        #expect(next.scrollAnchor(for: "%1") == 41)
+        #expect(next.scrollAnchor(for: "%2") == 77)
+        #expect(next.scrollAnchor(for: "%3") == nil)
+    }
+}

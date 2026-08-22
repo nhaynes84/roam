@@ -55,8 +55,16 @@ final class HubStore {
     // Selection does NOT mark read here: the thread view snapshots the unread
     // boundary first (to place the NEW divider), then marks read itself.
     var selectedPane: String? {
-        didSet { presenceDirty = true }
+        didSet {
+            presenceDirty = true
+            // ★ "cache my current session, so i open up to the spot i was at".
+            //   Persisted on every change rather than at quit: a crash or a reboot
+            //   never runs a quit handler, and those are the cases worth surviving.
+            if selectedPane != oldValue { persistSession() }
+        }
     }
+    /// Where he was reading in each channel — the id of the topmost visible event.
+    var scrollAnchors: [String: Int] = [:]
     /// Set by the UI when the app is frontmost; gates read-tracking and presence.
     var appActive = false {
         didSet {
@@ -83,6 +91,8 @@ final class HubStore {
         self.readCursors = kv.intDict(forKey: "hub.readCursors")
         self.channelOrder = kv.strings(forKey: "hub.channelOrder")
         self.drafts = kv.stringDict(forKey: "hub.drafts")
+        self.scrollAnchors = kv.intDict(forKey: "hub.scrollAnchors")
+        self.restoredPane = kv.stringDict(forKey: "hub.session")["pane"]
     }
 
     // MARK: - Connection loop
@@ -290,6 +300,35 @@ final class HubStore {
     func respond(pane: String, option: Int) async throws {
         _ = try await api.respond(pane: pane, option: option)
         openPrompts.removeValue(forKey: pane)
+    }
+
+    // MARK: - Session restore
+
+    /// The channel he was last looking at, read once at launch. Nil on a first run
+    /// or if that pane is gone by the time we connect.
+    private(set) var restoredPane: String?
+
+    /// Reopen where he left off. Called once the channel list is known, because a
+    /// pane that no longer exists must not leave the app pointing at nothing.
+    func restoreSession() -> String? {
+        defer { restoredPane = nil }
+        guard let pane = restoredPane,
+              channels.contains(where: { $0.paneId == pane }) else { return nil }
+        return pane
+    }
+
+    func scrollAnchor(for pane: String) -> Int? { scrollAnchors[pane] }
+
+    /// ⚠️ Only ever moves to an event that exists; a stale anchor would silently
+    /// dump him at the top of a thread with no explanation.
+    func setScrollAnchor(_ id: Int?, for pane: String) {
+        guard scrollAnchors[pane] != id else { return }
+        if let id { scrollAnchors[pane] = id } else { scrollAnchors.removeValue(forKey: pane) }
+        kv.set(scrollAnchors, forKey: "hub.scrollAnchors")
+    }
+
+    private func persistSession() {
+        kv.set(selectedPane.map { ["pane": $0] } ?? [:], forKey: "hub.session")
     }
 
     // MARK: - Drafts

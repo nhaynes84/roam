@@ -15,6 +15,7 @@ struct ThreadView: View {
     /// command sets a request and the reader performs it.
     @State private var scrollRequest: ScrollRequest?
     @State private var dropped: URL?
+    @State private var visible: Set<Int> = []
     @State private var dropTargeted = false
 
     enum ScrollRequest { case top, bottom }
@@ -34,6 +35,10 @@ struct ThreadView: View {
                             EventRow(store: store, event: event,
                                      delivered: thread.delivered.contains(event.id))
                                 .id(event.id)
+                                // Row visibility is the cheapest honest reading of
+                                // "where is he"; the topmost visible id is the anchor.
+                                .onAppear { visible.insert(event.id) }
+                                .onDisappear { visible.remove(event.id) }
                         }
                         // ★ Owner: "i'd like to see the in message 'Working…'".
                         //   The status bar and the subtitle already carry it, but the
@@ -51,6 +56,13 @@ struct ThreadView: View {
                     if positioned, active {
                         withAnimation { proxy.scrollTo("working", anchor: .bottom) }
                     }
+                }
+                .onChange(of: visible) { _, ids in
+                    // ⚠️ Guarded on `positioned`: during the opening scroll the set
+                    //    churns through rows he never looked at, and saving those
+                    //    would overwrite the very anchor we just restored.
+                    guard positioned, let top = ids.min() else { return }
+                    store.setScrollAnchor(top, for: pane)
                 }
                 .onChange(of: scrollRequest) { _, req in
                     guard let req else { return }
@@ -133,7 +145,13 @@ struct ThreadView: View {
         // issued during load is silently dropped, which left threads at the top.
         try? await Task.sleep(for: .milliseconds(80))
         if newMarkerId != nil {
+            // Unread wins: the divider IS the spot worth landing on.
             proxy.scrollTo("new-marker", anchor: .top)
+        } else if let anchor = store.scrollAnchor(for: pane),
+                  events.contains(where: { $0.id == anchor }) {
+            // ★ Back where he was reading. Only if the event still exists — a stale
+            //   anchor would dump him at the top of a thread with no explanation.
+            proxy.scrollTo(anchor, anchor: .top)
         } else if let last = events.last {
             proxy.scrollTo(last.id, anchor: .bottom)
         }

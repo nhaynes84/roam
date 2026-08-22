@@ -51,6 +51,14 @@ struct ContentView: View {
             store.appActive = (state != .inactive)
         }
         .focusedSceneValue(\.channelNav, store)
+        // ★ Reopen where he left off — but only once the channel list has arrived,
+        //   so a pane that died overnight leaves him on the picker rather than on a
+        //   dead thread.
+        .onChange(of: store.channels.isEmpty, initial: true) { _, empty in
+            guard !empty, destination == nil,
+                  let pane = store.restoreSession() else { return }
+            destination = .channel(pane)
+        }
     }
 }
 
