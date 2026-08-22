@@ -1,12 +1,6 @@
 import Foundation
 import Observation
 
-enum ConnectionState: Equatable {
-    case connecting
-    case connected
-    case reconnecting(detail: String)
-}
-
 /// One channel's thread as held in memory. `delivered` is the set of `sent`
 /// event ids whose echo receipt has come back — rendered once, as delivered,
 /// never as a second row.
@@ -80,6 +74,8 @@ final class HubStore {
     private var clockSkew: Double = 0  // serverTime - local now, from hello
     private(set) var cursor: Int?
     private var readCursors: [String: Int]
+    /// When the link last worked, so the bar can say how long it has been down.
+    private(set) var lastConnected: Date?
     private var connectionTask: Task<Void, Never>?
     private var presenceTask: Task<Void, Never>?
     private var presenceDirty = false
@@ -118,21 +114,32 @@ final class HubStore {
 
     private func runConnectionLoop() async {
         var backoff = 1.0
+        var attempt = 0
         while !Task.isCancelled {
             connection = cursor == nil ? .connecting : connection
+            var reason = "connection closed"
             do {
                 for try await frame in HubSocket.frames(config: api.config, since: cursor) {
                     if case .hello = frame {
+                        // ⚠️ Reset the ATTEMPT COUNT as well as the backoff. Leaving
+                        //    it climbing meant a link that dropped once an hour all
+                        //    day eventually rendered as "attempt 40" on a healthy
+                        //    connection.
                         backoff = 1
+                        attempt = 0
+                        lastConnected = Date()
                         connection = .connected
                         Task { await self.refreshStatus() }
                     }
                     apply(frame)
                 }
-                connection = .reconnecting(detail: "connection closed")
             } catch {
-                connection = .reconnecting(detail: "\(error)")
+                reason = ConnectionReason.describe(error)
             }
+            guard !Task.isCancelled else { return }
+            attempt += 1
+            connection = .reconnecting(reason: reason, attempt: attempt,
+                                       retryAt: Date().addingTimeInterval(backoff))
             try? await Task.sleep(for: .seconds(backoff))
             backoff = min(backoff * 2, 30)
         }
