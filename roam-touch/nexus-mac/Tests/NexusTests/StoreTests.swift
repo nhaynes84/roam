@@ -167,3 +167,46 @@ private func hello(latest: Int, channels: [Channel] = []) -> Frame {
         #expect(s.liveIdleS(s.channels[0])! < 1.0)
     }
 }
+
+/// Drafts: "so when you kill my screen on reboot or anything else does, i don't
+/// lose partly typed messages."
+@Suite struct DraftTests {
+    @MainActor private func store(_ kv: KVStore) -> HubStore {
+        HubStore(api: HubAPI(config: HubConfig(baseURL: URL(string: "http://x")!, token: "t")),
+                 kv: kv)
+    }
+
+    @MainActor @Test func aDraftSurvivesANewStore() {
+        let kv = MemoryKV()
+        store(kv).setDraft("half a thought", for: "%1")
+        // same persistence, brand new process
+        #expect(store(kv).draft(for: "%1") == "half a thought")
+    }
+
+    @MainActor @Test func draftsAreKeptPerChannel() {
+        let kv = MemoryKV()
+        let s = store(kv)
+        s.setDraft("for one", for: "%1")
+        s.setDraft("for two", for: "%2")
+        #expect(s.draft(for: "%1") == "for one")
+        #expect(s.draft(for: "%2") == "for two")
+        #expect(s.draft(for: "%3") == "")
+    }
+
+    @MainActor @Test func clearingRemovesItFromStorage() {
+        let kv = MemoryKV()
+        let s = store(kv)
+        s.setDraft("typed", for: "%1")
+        s.clearDraft(for: "%1")
+        #expect(store(kv).draft(for: "%1") == "")
+        #expect(kv.stringDict(forKey: "hub.drafts")["%1"] == nil, "no empty leftovers")
+    }
+
+    @MainActor @Test func emptyingTheFieldDoesNotLeaveAGhostEntry() {
+        let kv = MemoryKV()
+        let s = store(kv)
+        s.setDraft("abc", for: "%1")
+        s.setDraft("", for: "%1")
+        #expect(kv.stringDict(forKey: "hub.drafts").isEmpty)
+    }
+}

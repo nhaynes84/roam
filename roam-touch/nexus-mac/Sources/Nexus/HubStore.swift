@@ -43,6 +43,8 @@ final class HubStore {
     var channels: [Channel] = []
     /// His running order for the sidebar. Activity never touches it.
     var channelOrder: [String] = []
+    /// Half-typed messages, per channel, persisted.
+    var drafts: [String: String] = [:]
     var threads: [String: ChannelThread] = [:]
     var connection: ConnectionState = .connecting
     var hubVersion: String?
@@ -77,6 +79,7 @@ final class HubStore {
         self.cursor = kv.int(forKey: "hub.cursor")
         self.readCursors = kv.intDict(forKey: "hub.readCursors")
         self.channelOrder = kv.strings(forKey: "hub.channelOrder")
+        self.drafts = kv.stringDict(forKey: "hub.drafts")
     }
 
     // MARK: - Connection loop
@@ -275,6 +278,26 @@ final class HubStore {
         else { return }
         selectedPane = next
     }
+
+    // MARK: - Drafts
+
+    /// ★ "let's start caching drafts so when you kill my screen on reboot or anything
+    /// else does, i don't lose partly typed messages." Earned: I quit Nexus under him
+    /// twice in one session to land deploys, and each time a half-typed message would
+    /// have gone with it.
+    ///
+    /// Written on EVERY keystroke rather than on a timer or at teardown — a crash, a
+    /// force-quit or a reboot gives no teardown, and those are exactly the cases this
+    /// exists for. UserDefaults coalesces the writes; a draft is a few hundred bytes.
+    func draft(for pane: String) -> String { drafts[pane] ?? "" }
+
+    func setDraft(_ text: String, for pane: String) {
+        if text.isEmpty { drafts.removeValue(forKey: pane) } else { drafts[pane] = text }
+        kv.set(drafts, forKey: "hub.drafts")
+    }
+
+    /// Only on a send the pane actually accepted — a failed send puts the text back.
+    func clearDraft(for pane: String) { setDraft("", for: pane) }
 
     private func persistChannelOrder() {
         kv.set(channelOrder, forKey: "hub.channelOrder")

@@ -194,9 +194,13 @@ struct Composer: View {
     var pane: String
     var sendable: Bool
     @Binding var dropped: URL?
-    @State private var draft = ""
     @State private var failure: String?
     @State private var attaching = false
+    /// Survives view teardown, app quit, crash and reboot — see HubStore.setDraft.
+    private var draft: Binding<String> {
+        Binding(get: { store.draft(for: pane) },
+                set: { store.setDraft($0, for: pane) })
+    }
     @State private var attached: String?
     @FocusState private var focused: Bool
 
@@ -222,7 +226,7 @@ struct Composer: View {
             GlassEffectContainer(spacing: 10) {
                 HStack(alignment: .bottom, spacing: 10) {
                     TextField(sendable ? "Message this channel" : "Channel is not live",
-                              text: $draft, axis: .vertical)
+                              text: draft, axis: .vertical)
                         .textFieldStyle(.plain)
                         .font(.system(size: 14))
                         .lineLimit(1...8)
@@ -277,7 +281,7 @@ struct Composer: View {
                     .buttonStyle(.glassProminent)
                     .controlSize(.large)
                     .tint(.accentColor)
-                    .disabled(!sendable || draft.trimmed.isEmpty)
+                    .disabled(!sendable || draft.wrappedValue.trimmed.isEmpty)
                     .keyboardShortcut(.return, modifiers: .command)
                     .help("Send (⌘↩)")
                 }
@@ -342,9 +346,9 @@ struct Composer: View {
     }
 
     private func send() {
-        let text = draft.trimmed
+        let text = draft.wrappedValue.trimmed
         guard sendable, !text.isEmpty else { return }
-        draft = ""
+        store.clearDraft(for: pane)
         failure = nil
         focused = true
         Task {
@@ -352,7 +356,7 @@ struct Composer: View {
             catch {
                 // The message did not reach the pane; put it back rather than lose it.
                 failure = "send failed: \(error)"
-                if draft.isEmpty { draft = text }
+                if store.draft(for: pane).isEmpty { store.setDraft(text, for: pane) }
             }
         }
     }

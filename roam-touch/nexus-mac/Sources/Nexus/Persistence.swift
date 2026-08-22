@@ -8,6 +8,8 @@ protocol KVStore: AnyObject, Sendable {
     func set(_ value: [String: Int], forKey key: String)
     func strings(forKey key: String) -> [String]
     func set(_ value: [String], forKey key: String)
+    func stringDict(forKey key: String) -> [String: String]
+    func set(_ value: [String: String], forKey key: String)
 }
 
 final class DefaultsKV: KVStore, @unchecked Sendable {
@@ -26,16 +28,23 @@ final class DefaultsKV: KVStore, @unchecked Sendable {
         defaults.array(forKey: key) as? [String] ?? []
     }
     func set(_ value: [String], forKey key: String) { defaults.set(value, forKey: key) }
+    func stringDict(forKey key: String) -> [String: String] {
+        (defaults.dictionary(forKey: key) as? [String: String]) ?? [:]
+    }
+    func set(_ value: [String: String], forKey key: String) { defaults.set(value, forKey: key) }
 }
 
 final class MemoryKV: KVStore, @unchecked Sendable {
     private var ints: [String: Int] = [:]
     private var dicts: [String: [String: Int]] = [:]
     private var lists: [String: [String]] = [:]
+    private var strs: [String: [String: String]] = [:]
     func int(forKey key: String) -> Int? { ints[key] }
     func set(_ value: Int, forKey key: String) { ints[key] = value }
     func intDict(forKey key: String) -> [String: Int] { dicts[key] ?? [:] }
     func set(_ value: [String: Int], forKey key: String) { dicts[key] = value }
     func strings(forKey key: String) -> [String] { lists[key] ?? [] }
     func set(_ value: [String], forKey key: String) { lists[key] = value }
+    func stringDict(forKey key: String) -> [String: String] { strs[key] ?? [:] }
+    func set(_ value: [String: String], forKey key: String) { strs[key] = value }
 }
