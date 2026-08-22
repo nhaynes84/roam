@@ -21,17 +21,26 @@ struct ChannelList: View {
     }
 
     var body: some View {
-        List(store.channels, selection: selectedChannel) { channel in
-            ChannelRow(channel: channel,
-                       liveness: store.liveness(channel),
-                       unread: store.unreadCount(channel.paneId),
-                       onDismiss: channel.live ? nil : {
-                           run { try await store.archiveChannel(channel.paneId) }
-                       })
-                .tag(channel.paneId)
-                .contextMenu { menu(for: channel) }
+        // ForEach (not List's data initialiser) because onMove needs it — and the
+        // order rendered is HIS, not the hub's arrival order.
+        List(selection: selectedChannel) {
+            ForEach(store.orderedChannels) { channel in
+                ChannelRow(channel: channel,
+                           liveness: store.liveness(channel),
+                           unread: store.unreadCount(channel.paneId),
+                           onDismiss: channel.live ? nil : {
+                               run { try await store.archiveChannel(channel.paneId) }
+                           })
+                    .tag(channel.paneId)
+                    .contextMenu { menu(for: channel) }
+            }
+            .onMove { store.moveChannels(from: $0, to: $1) }
         }
         .listStyle(.sidebar)
+        .onChange(of: store.channels.map(\.paneId), initial: true) { _, _ in
+            // A pane the order has never seen gets a slot at the bottom.
+            store.adoptNewChannels()
+        }
         .navigationTitle("Nexus")
         .onReceive(tick) { now = $0 }
         .toolbar {

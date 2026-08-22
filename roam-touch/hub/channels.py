@@ -33,6 +33,7 @@ _FMT = "\t".join(
         "#{pane_current_command}",
         "#{pane_title}",
         "#{@roam_label}",
+        "#{pane_current_path}",
     )
 )
 
@@ -54,6 +55,12 @@ class Channel:
     #: overwrites it with its own summary within seconds, which is how a
     #: freshly labelled channel ended up named after its latest message.
     roam_label: str = ""
+    #: `pane_current_path` -- the pane's working directory. The one anchor for
+    #: "which project is this channel about" that no agent can rewrite: the
+    #: title is overwritten by Claude within seconds and `roam_label` only
+    #: exists when the owner set one at spawn. A pane opened by hand in
+    #: ~/Projects/liveroasted says what it is about without anyone naming it.
+    cwd: str = ""
 
     @property
     def label(self) -> str:
@@ -123,6 +130,7 @@ def list_channels() -> list[Channel]:
                 command=command,
                 title=rest[0] if rest else "",
                 roam_label=rest[1] if len(rest) > 1 else "",
+                cwd=rest[2] if len(rest) > 2 else "",
             )
         )
     return channels

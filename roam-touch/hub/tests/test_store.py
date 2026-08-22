@@ -83,7 +83,7 @@ def test_every_event_carries_a_speakable_summary(store: Store):
     body = "## Result\n\nAll **green**.\n\n```bash\nnpm test\n```\n"
     event = store.append("%0", EventKind.OUTCOME, body)
     assert event.body == body, "the full answer is never lost"
-    assert event.summary == "Result All green. [code, 1 line]"
+    assert event.summary == "Result. All green. [code, 1 line]"
     assert store.history("%0")[-1].summary == event.summary
 
 

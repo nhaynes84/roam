@@ -300,15 +300,35 @@ def summarise(text: str, limit: int = MAX_SUMMARY_CHARS) -> str:
     out = "\n".join(kept)
 
     out = _HRULE_RE.sub(" ", out)
-    out = _HEADING_RE.sub("", out)
+    # ⚠️ Headings and bullets must be TERMINATED, not just unmarked. Stripping "## "
+    #    leaves the heading as a bare line, and _WS_RE then eats the newline — so
+    #    "## The first message doesn't make it" welds onto the paragraph under it and
+    #    reads as "...doesn't make it spawn() creates the tmux pane...". The owner
+    #    caught exactly that on the panel. A structural line that does not already end
+    #    in punctuation gets a full stop, which also gives Piper somewhere to breathe.
+    lines, kept = out.splitlines(), []
+    for line in lines:
+        if _HEADING_RE.match(line):
+            line = _terminate(_HEADING_RE.sub("", line))
+        elif _BULLET_RE.match(line):
+            line = _terminate(_BULLET_RE.sub("", line))
+        kept.append(line)
+    out = "\n".join(kept)
     out = _QUOTE_RE.sub("", out)
-    out = _BULLET_RE.sub("", out)
     out = _LINK_RE.sub(r"\1", out)
     out = _INLINE_CODE_RE.sub(r"\1", out)
     out = _EMPHASIS_RE.sub("", out)
     out = _strip_symbols(out)
     out = _WS_RE.sub(" ", out).strip()
     return _truncate(out, limit)
+
+
+def _terminate(line: str) -> str:
+    """End a structural line so it cannot weld onto the next one."""
+    t = line.rstrip()
+    if not t:
+        return t
+    return t if t[-1] in ".!?:;," else t + "."
 
 
 def _table_note(rows: int) -> str:

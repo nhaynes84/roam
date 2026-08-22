@@ -380,7 +380,7 @@ def test_ends_with_text_distinguishes_a_finished_turn(tmp_path):
 def test_summary_strips_markdown_scaffolding():
     body = "## Heading\n\n- **bold** point with `inline code`\n- [a link](http://x)\n"
     out = summarise(body)
-    assert out == "Heading bold point with inline code a link"
+    assert out == "Heading. bold point with inline code. a link."
 
 
 def test_summary_notes_code_blocks_instead_of_reading_them_out():
@@ -492,3 +492,23 @@ def test_every_real_transcript_on_this_box_yields_clean_text(path):
     short = summarise(answer)
     assert short and len(short) <= MAX_SUMMARY_CHARS + 1
     assert "```" not in short
+
+
+def test_a_heading_never_welds_onto_the_paragraph_under_it():
+    """The owner read this off the panel: a heading ran straight into the body.
+
+    "## The first message doesn't make it" + "spawn() creates the tmux pane"
+    summarised as "...doesn't make it spawn() creates the tmux pane...", because
+    the heading marker was stripped and the newline then collapsed to a space.
+    """
+    out = summarise(
+        "## The first message doesn't make it\n\n"
+        "spawn() creates the tmux pane and returns immediately.\n"
+    )
+    assert "make it spawn()" not in out, "heading welded onto the body"
+    assert out.startswith("The first message doesn't make it.")
+
+
+def test_bullets_are_terminated_so_they_do_not_run_together():
+    out = summarise("- first point\n- second point\n")
+    assert out == "first point. second point."

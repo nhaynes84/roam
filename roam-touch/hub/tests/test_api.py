@@ -386,7 +386,7 @@ def test_an_outcome_carries_the_answer_and_a_speakable_summary(client, auth):
     event = resp.json()["event"]
     assert event["body"] == answer, "the full text is kept"
     assert event["summary"] == (
-        "Done The suite is green — 122 tests. [code, 1 line] Nothing else to do."
+        "Done. The suite is green — 122 tests. [code, 1 line] Nothing else to do."
     ), "punctuation stays; only markdown and unspeakable symbols go"
     assert "```" not in event["summary"]
 

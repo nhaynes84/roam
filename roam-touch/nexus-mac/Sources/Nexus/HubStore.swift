@@ -41,6 +41,8 @@ struct ChannelThread: Sendable {
 @MainActor @Observable
 final class HubStore {
     var channels: [Channel] = []
+    /// His running order for the sidebar. Activity never touches it.
+    var channelOrder: [String] = []
     var threads: [String: ChannelThread] = [:]
     var connection: ConnectionState = .connecting
     var hubVersion: String?
@@ -74,6 +76,7 @@ final class HubStore {
         self.kv = kv
         self.cursor = kv.int(forKey: "hub.cursor")
         self.readCursors = kv.intDict(forKey: "hub.readCursors")
+        self.channelOrder = kv.strings(forKey: "hub.channelOrder")
     }
 
     // MARK: - Connection loop
@@ -239,6 +242,42 @@ final class HubStore {
 
     private func persistReadCursors() {
         kv.set(readCursors, forKey: "hub.readCursors")
+    }
+
+    // MARK: - Sidebar order (his, not the hub's)
+
+    /// What the sidebar renders. The hub's arrival order is advisory only.
+    var orderedChannels: [Channel] {
+        ChannelOrder.apply(channelOrder, to: channels)
+    }
+
+    /// Drag-to-reorder from the sidebar.
+    func moveChannels(from offsets: IndexSet, to destination: Int) {
+        channelOrder = ChannelOrder.move(channelOrder, channels: channels,
+                                         from: offsets, to: destination)
+        persistChannelOrder()
+    }
+
+    /// Adopt any pane the order has not seen yet, so a new channel gets a slot
+    /// at the bottom and keeps it. Cheap and idempotent; safe to call on render.
+    func adoptNewChannels() {
+        let reconciled = ChannelOrder.reconciled(channelOrder, with: channels)
+        guard reconciled != channelOrder else { return }
+        channelOrder = reconciled
+        persistChannelOrder()
+    }
+
+    /// ⌘⇧↑ / ⌘⇧↓ — step to the neighbouring channel. No wrapping: running off
+    /// the end should feel like a wall, not teleport you to the far end.
+    func selectNeighbour(delta: Int) {
+        guard let next = ChannelOrder.neighbour(of: selectedPane, in: channels,
+                                                order: channelOrder, delta: delta)
+        else { return }
+        selectedPane = next
+    }
+
+    private func persistChannelOrder() {
+        kv.set(channelOrder, forKey: "hub.channelOrder")
     }
 
     // MARK: - History
