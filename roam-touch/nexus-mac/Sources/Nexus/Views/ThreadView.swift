@@ -10,6 +10,11 @@ struct ThreadView: View {
     /// Initial positioning done; only then do new arrivals auto-follow.
     @State private var positioned = false
     @State private var showCapture = false
+    /// ⌘↑ / ⌘↓ land here; the proxy only exists inside ScrollViewReader, so the
+    /// command sets a request and the reader performs it.
+    @State private var scrollRequest: ScrollRequest?
+
+    enum ScrollRequest { case top, bottom }
 
     private var channel: Channel? { store.channels.first { $0.paneId == pane } }
     private var thread: ChannelThread { store.threads[pane] ?? ChannelThread() }
@@ -44,6 +49,18 @@ struct ThreadView: View {
                         withAnimation { proxy.scrollTo("working", anchor: .bottom) }
                     }
                 }
+                .onChange(of: scrollRequest) { _, req in
+                    guard let req else { return }
+                    scrollRequest = nil
+                    withAnimation {
+                        switch req {
+                        case .top:
+                            if let first = thread.events.first { proxy.scrollTo(first.id, anchor: .top) }
+                        case .bottom:
+                            if let last = thread.events.last { proxy.scrollTo(last.id, anchor: .bottom) }
+                        }
+                    }
+                }
                 .onChange(of: thread.events.last?.id) { _, last in
                     // Follow new arrivals only once the opening scroll landed,
                     // so history inserts don't yank the view around.
@@ -75,6 +92,9 @@ struct ThreadView: View {
         }
         .navigationTitle(channel?.label ?? pane)
         .navigationSubtitle(subtitle)
+        .focusedSceneValue(\.threadScroll, ThreadScrollAction(
+            toTop: { scrollRequest = .top },
+            toBottom: { scrollRequest = .bottom }))
     }
 
     /// Snapshot what is unread, THEN mark read, THEN land the scroll on the
@@ -164,30 +184,59 @@ struct Composer: View {
                     .font(.system(size: 14))
                     .foregroundStyle(.red)
             }
-            HStack(alignment: .bottom, spacing: 8) {
-                TextField(sendable ? "Message this channel" : "Channel is not live",
-                          text: $draft, axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 14))
-                    .lineLimit(1...8)
-                    .focused($focused)
+            // ★ The composer is the NAVIGATION layer, so this is where glass belongs —
+            //   not on the bubbles. `.roundedBorder` was the ugly bit: a 2005 bezel with
+            //   a hairline that vanishes on a dark ground. A glass slab with a real focus
+            //   ring reads as a place to type.
+            GlassEffectContainer(spacing: 10) {
+                HStack(alignment: .bottom, spacing: 10) {
+                    TextField(sendable ? "Message this channel" : "Channel is not live",
+                              text: $draft, axis: .vertical)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 14))
+                        .lineLimit(1...8)
+                        .focused($focused)
+                        .disabled(!sendable)
+                        .onSubmit(send)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 9)
+                        .glassEffect(.regular, in: .rect(cornerRadius: Theme.composerRadius))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: Theme.composerRadius)
+                                .strokeBorder(focused ? Color.accentColor.opacity(0.65)
+                                                      : Theme.railHairline,
+                                              lineWidth: focused ? 2 : 1)
+                        )
+                        .animation(.easeOut(duration: 0.12), value: focused)
+
+                    Button {
+                        Task {
+                            do { try await store.interrupt(pane) }
+                            catch { failure = "interrupt failed: \(error)" }
+                        }
+                    } label: {
+                        Image(systemName: "stop.fill").frame(width: 16, height: 16)
+                    }
+                    .buttonStyle(.glass)
+                    .controlSize(.large)
                     .disabled(!sendable)
-                    .onSubmit(send)
-                Button(action: send) { Image(systemName: "paperplane.fill") }
+                    .help("Interrupt — sends Escape to the agent")
+
+                    Button(action: send) {
+                        Image(systemName: "arrow.up").fontWeight(.semibold)
+                            .frame(width: 16, height: 16)
+                    }
+                    .buttonStyle(.glassProminent)
+                    .controlSize(.large)
+                    .tint(.accentColor)
                     .disabled(!sendable || draft.trimmed.isEmpty)
                     .keyboardShortcut(.return, modifiers: .command)
                     .help("Send (⌘↩)")
-                Button {
-                    Task {
-                        do { try await store.interrupt(pane) }
-                        catch { failure = "interrupt failed: \(error)" }
-                    }
-                } label: { Image(systemName: "stop.fill") }
-                    .disabled(!sendable)
-                    .help("Interrupt — sends Escape to the agent")
+                }
             }
         }
-        .padding(10)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
     }
 
     private func send() {

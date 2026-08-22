@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "NexusMac",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS("26.0")],
     dependencies: [
         // Block-level markdown (code fences, tables, lists) — the hand-rolled
         // inline-only AttributedString showed raw ``` fences in outcomes.

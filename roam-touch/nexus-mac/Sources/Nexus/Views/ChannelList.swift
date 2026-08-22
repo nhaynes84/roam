@@ -98,14 +98,18 @@ struct ChannelRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
+            // a ring rather than a dot: reads as a state light, and the halo keeps it
+            // visible against both the vibrant rail and a selected row
             Circle()
                 .fill(statusColor)
                 .frame(width: 8, height: 8)
-                .padding(.top, 5)
+                .overlay(Circle().stroke(statusColor.opacity(0.30), lineWidth: 3))
+                .padding(.top, 6)
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(channel.label)
-                        .font(.system(size: 14, weight: unread > 0 ? .semibold : .medium))
+                        .font(.system(size: 15, weight: unread > 0 ? .bold : .medium))
+                        .foregroundStyle(unread > 0 ? Color.primary : Color.primary.opacity(0.85))
                         .lineLimit(1)
                     Spacer(minLength: 4)
                     if let ts = channel.lastEvent?.ts {
@@ -128,10 +132,12 @@ struct ChannelRow: View {
                     }
                     Spacer(minLength: 4)
                     if unread > 0 {
+                        // the one saturated thing in the column, so the eye lands on it
                         Text("\(unread)")
-                            .font(.system(size: 14, weight: .semibold))
-                            .padding(.horizontal, 7).padding(.vertical, 1)
-                            .background(Capsule().fill(.tint))
+                            .font(.system(size: 13, weight: .bold))
+                            .monospacedDigit()
+                            .padding(.horizontal, 7).padding(.vertical, 2)
+                            .background(Capsule().fill(Color.accentColor))
                             .foregroundStyle(.white)
                     }
                     if let onDismiss {
@@ -145,7 +151,9 @@ struct ChannelRow: View {
                 }
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 6)
+        .padding(.horizontal, 2)
+        .contentShape(.rect)
     }
 
     private var livenessColor: Color {

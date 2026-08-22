@@ -37,9 +37,8 @@ struct EventRow: View {
             VStack(alignment: .trailing, spacing: 3) {
                 bodyText(event.body)
                     .padding(.horizontal, 10).padding(.vertical, 6)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(Bubble.mineFill))
-                    .overlay(RoundedRectangle(cornerRadius: 8)
-                        .strokeBorder(Bubble.mineEdge, lineWidth: 1))
+                    .background(BubbleShape(mine: true).fill(Theme.mineFill))
+                    .overlay(BubbleShape(mine: true).strokeBorder(Theme.mineEdge, lineWidth: 1))
                 metaLine(trailing: delivered ? "delivered" : nil)
             }
         }
@@ -52,9 +51,8 @@ struct EventRow: View {
             VStack(alignment: .trailing, spacing: 3) {
                 bodyText(event.body)
                     .padding(.horizontal, 10).padding(.vertical, 6)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(Bubble.typedFill))
-                    .overlay(RoundedRectangle(cornerRadius: 8)
-                        .strokeBorder(Bubble.typedEdge, lineWidth: 1))
+                    .background(BubbleShape(mine: true).fill(Theme.typedFill))
+                    .overlay(BubbleShape(mine: true).strokeBorder(Theme.typedEdge, lineWidth: 1))
                 metaLine(trailing: "typed in tmux")
             }
         }
@@ -119,14 +117,19 @@ struct EventRow: View {
                 metaLine(trailing: nil)
             }
         }
-        .padding(10)
+        .padding(.vertical, 10)
+        .padding(.leading, 13)
+        .padding(.trailing, 11)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 8).fill(Bubble.agentFill)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8).strokeBorder(Bubble.agentEdge, lineWidth: 1)
-        )
+        .background(BubbleShape(mine: false).fill(Theme.agentFill))
+        .overlay(alignment: .leading) {
+            // the rail says "agent" before a single word is read
+            Theme.agentRail
+                .frame(width: Theme.railWidth)
+                .clipShape(.rect(topLeadingRadius: Theme.bubbleRadius,
+                                 bottomLeadingRadius: Theme.bubbleRadius / 4))
+        }
+        .overlay(BubbleShape(mine: false).strokeBorder(Theme.agentEdge, lineWidth: 1))
         .task { await loadFullIfNeeded() }
     }
 
@@ -174,30 +177,4 @@ extension MarkdownUI.Theme {
             FontFamilyVariant(.monospaced)
             FontSize(14)
         }
-}
-
-
-/// Bubble palette.
-///
-/// Owner: "make your response bubbles and mine different colors; this dark grey on
-/// darker grey and dark blue on darker grey just doesn't pop enough."
-///
-/// Two things were wrong: the fills sat only a few percent off the window ground, and
-/// BOTH sides were desaturated, so the only cue separating his words from the agent's
-/// was which edge they hugged. Now the sides differ in HUE as well as luminance —
-/// his are blue, the agent's are a warm graphite — and every bubble carries a 1px
-/// border, which is what actually reads as an edge on a dark ground.
-enum Bubble {
-    /// His messages — accent blue, carried well clear of the ground.
-    static let mineFill = Color.accentColor.opacity(0.28)
-    static let mineEdge = Color.accentColor.opacity(0.55)
-
-    /// The agent's replies — warm graphite, deliberately NOT the accent hue.
-    static let agentFill = Color(red: 0.55, green: 0.50, blue: 0.44).opacity(0.20)
-    static let agentEdge = Color(red: 0.62, green: 0.56, blue: 0.48).opacity(0.42)
-
-    /// Typed straight into tmux — his words, but not sent from here, so it reads as
-    /// his side muted rather than as a third party.
-    static let typedFill = Color.accentColor.opacity(0.13)
-    static let typedEdge = Color.accentColor.opacity(0.30)
 }

@@ -35,19 +35,6 @@ struct ContentView: View {
             Divider()
             StatusBar(store: store)
         }
-        // ⌘⇧↑ / ⌘⇧↓ quick channel switch. Zero-sized buttons rather than a
-        // Commands menu because the shortcut needs the store, and the store
-        // lives here — a menu command would have to reach across the scene.
-        .background {
-            VStack {
-                Button("") { store.selectNeighbour(delta: -1) }
-                    .keyboardShortcut(.upArrow, modifiers: [.command, .shift])
-                Button("") { store.selectNeighbour(delta: 1) }
-                    .keyboardShortcut(.downArrow, modifiers: [.command, .shift])
-            }
-            .opacity(0)
-            .accessibilityHidden(true)
-        }
         .onChange(of: destination) { _, dest in
             if case .channel(let pane) = dest { store.selectedPane = pane }
             else { store.selectedPane = nil }
@@ -59,6 +46,7 @@ struct ContentView: View {
         .onChange(of: activeState, initial: true) { _, state in
             store.appActive = (state != .inactive)
         }
+        .focusedSceneValue(\.channelNav, store)
     }
 }
 
