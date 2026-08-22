@@ -10,7 +10,26 @@ struct Coverage: Decodable, Sendable, Equatable {
     var lastInput: String?
 }
 
+/// One option on an interactive selector the agent is showing.
+struct PromptOption: Decodable, Sendable, Equatable, Identifiable {
+    var n: Int
+    var text: String
+    var selected: Bool
+    var id: Int { n }
+}
+
+/// A question a pane is waiting on. See the hub's prompts.py.
+struct PromptPayload: Decodable, Sendable, Equatable {
+    var question: String
+    var options: [PromptOption]
+}
+
 struct EventMeta: Decodable, Sendable, Equatable {
+    /// Present on `prompt` events: what was being asked at the time.
+    var prompt: PromptPayload?
+    /// Present on the `sent` event that records an answer.
+    var answered: PromptPayload?
+    var option: Int?
     var source: String?
     var sessionId: String?
     var echoOf: Int?
@@ -157,6 +176,8 @@ enum Frame: Sendable {
     case channels([Channel], serverTime: Double?)
     case channel(Channel)
     case activity(panes: [String: Double], serverTime: Double)
+    /// Live selector state for one pane; nil `prompt` means the question is gone.
+    case prompt(pane: String, prompt: PromptPayload?)
     case historyCleared(paneId: String)
     case presence
     case ping
@@ -173,6 +194,7 @@ enum FrameDecoder {
     private struct ChannelsPayload: Decodable { var channels: [Channel]; var serverTime: Double? }
     private struct ChannelPayload: Decodable { var channel: Channel }
     private struct ActivityPayload: Decodable { var panes: [String: Double]; var serverTime: Double }
+    private struct PromptFramePayload: Decodable { var pane: String; var prompt: PromptPayload? }
     private struct HistoryClearedPayload: Decodable { var paneId: String }
     private struct DesyncPayload: Decodable { var latestEventId: Int }
     private struct ErrorPayload: Decodable { var detail: String }
@@ -193,6 +215,9 @@ enum FrameDecoder {
         case "activity":
             let p = try decoder.decode(ActivityPayload.self, from: data)
             return .activity(panes: p.panes, serverTime: p.serverTime)
+        case "prompt":
+            let p = try decoder.decode(PromptFramePayload.self, from: data)
+            return .prompt(pane: p.pane, prompt: p.prompt)
         case "history_cleared":
             return .historyCleared(paneId: try decoder.decode(HistoryClearedPayload.self, from: data).paneId)
         case "presence": return .presence

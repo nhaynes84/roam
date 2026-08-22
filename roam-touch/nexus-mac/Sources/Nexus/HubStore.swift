@@ -45,6 +45,9 @@ final class HubStore {
     var channelOrder: [String] = []
     /// Half-typed messages, per channel, persisted.
     var drafts: [String: String] = [:]
+    /// The question each pane is waiting on right now, if any. Live state, not
+    /// history: an answered question must stop being answerable immediately.
+    var openPrompts: [String: PromptPayload] = [:]
     var threads: [String: ChannelThread] = [:]
     var connection: ConnectionState = .connecting
     var hubVersion: String?
@@ -166,6 +169,9 @@ final class HubStore {
                 channels.append(c)
             }
 
+        case .prompt(let pane, let prompt):
+            if let prompt { openPrompts[pane] = prompt } else { openPrompts.removeValue(forKey: pane) }
+
         case .activity(let panes, let serverTime):
             clockSkew = serverTime - Date().timeIntervalSince1970
             for (pane, t) in panes {
@@ -277,6 +283,13 @@ final class HubStore {
                                                 order: channelOrder, delta: delta)
         else { return }
         selectedPane = next
+    }
+
+    /// Answer the selector on `pane`. The hub validates against the LIVE prompt,
+    /// so a stale click cannot type a bare number into a working agent.
+    func respond(pane: String, option: Int) async throws {
+        _ = try await api.respond(pane: pane, option: option)
+        openPrompts.removeValue(forKey: pane)
     }
 
     // MARK: - Drafts

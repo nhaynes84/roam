@@ -68,6 +68,12 @@ enum Theme {
         light: NSColor(srgbRed: 0.16, green: 0.44, blue: 0.90, alpha: 0.20),
         dark:  NSColor(srgbRed: 0.45, green: 0.66, blue: 1.00, alpha: 0.28))
 
+    /// A question awaiting an answer — warmer than the agent's own surface so an
+    /// unanswered prompt is findable by scrolling, not just by reading.
+    static let promptFill = dynamic(
+        light: NSColor(srgbRed: 0.95, green: 0.72, blue: 0.28, alpha: 0.14),
+        dark:  NSColor(srgbRed: 0.98, green: 0.76, blue: 0.32, alpha: 0.14))
+
     // MARK: sidebar
 
     /// "the left pane is dark and drab" — the rail is a flat wash of window colour

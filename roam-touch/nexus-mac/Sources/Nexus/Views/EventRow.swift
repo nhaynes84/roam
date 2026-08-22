@@ -13,6 +13,7 @@ struct EventRow: View {
     @AppStorage("defaultExpanded") private var defaultExpanded = true
     @State private var userToggled: Bool?
     @State private var fullBody: String?
+    @State private var answerFailure: String?
 
     private var expanded: Bool { userToggled ?? defaultExpanded }
 
@@ -25,6 +26,7 @@ struct EventRow: View {
         case "opened": chipRow(icon: "plus.circle", text: "channel opened — \(event.summary)", tint: .secondary)
         case "closed": chipRow(icon: "xmark.circle", text: "pane closed", tint: .secondary)
         case "notice": noticeRow
+        case "prompt": promptRow
         default: expandableRow(role: event.kind == "outcome" ? nil : event.kind)
         }
     }
@@ -56,6 +58,66 @@ struct EventRow: View {
                 metaLine(trailing: "typed in tmux")
             }
         }
+    }
+
+    /// ★ The whole point of the feature: the agent's question rendered as a question,
+    /// with its options as buttons, instead of being flattened into text that the next
+    /// message would then be typed on top of.
+    ///
+    /// ⚠️ Only the LIVE prompt is actionable. A question already answered stays in the
+    /// thread as a record — clicking it again would type a bare number into a working
+    /// agent, so the buttons go away with the question.
+    private var promptRow: some View {
+        let asked = event.meta?.prompt
+        let live = store.openPrompts[event.paneId]
+        let answerable = live != nil && live?.question == asked?.question
+
+        return VStack(alignment: .leading, spacing: 8) {
+            Label(answerable ? "Waiting on you" : "Asked",
+                  systemImage: answerable ? "hand.raised.fill" : "checkmark.circle")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(answerable ? Color.accentColor : .secondary)
+
+            if let question = asked?.question, !question.isEmpty {
+                bodyText(question)
+            }
+
+            ForEach(asked?.options ?? []) { option in
+                Button {
+                    Task {
+                        do { try await store.respond(pane: event.paneId, option: option.n) }
+                        catch { answerFailure = "\(error)" }
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        Text("\(option.n)")
+                            .font(.system(size: 13, weight: .bold)).monospacedDigit()
+                            .foregroundStyle(.secondary)
+                        Text(option.text).font(.system(size: 14))
+                        Spacer(minLength: 0)
+                        if option.selected && answerable {
+                            Image(systemName: "return").foregroundStyle(.tertiary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.glass)
+                .controlSize(.large)
+                .disabled(!answerable)
+            }
+
+            if let answerFailure {
+                Text(answerFailure).font(.system(size: 14)).foregroundStyle(.red)
+            }
+            metaLine(trailing: answerable ? nil : "no longer open")
+        }
+        .padding(.vertical, 10)
+        .padding(.leading, 13)
+        .padding(.trailing, 11)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(BubbleShape(mine: false).fill(Theme.promptFill))
+        .overlay(BubbleShape(mine: false).strokeBorder(
+            answerable ? Color.accentColor.opacity(0.55) : Theme.agentEdge, lineWidth: 1))
     }
 
     private var noticeRow: some View {

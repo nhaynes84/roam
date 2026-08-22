@@ -211,6 +211,15 @@ struct Composer: View {
                     .font(.system(size: 14))
                     .foregroundStyle(.red)
             }
+            if store.openPrompts[pane] != nil {
+                // ⚠️ Say it BEFORE he sends, not after. His words are safe either way
+                //    — the hub holds them — but a message that appears to vanish is
+                //    indistinguishable from the bug this feature exists to fix.
+                Label("There's a question above — this will be held until you answer it",
+                      systemImage: "hand.raised.fill")
+                    .font(.system(size: 14))
+                    .foregroundStyle(Color.accentColor)
+            }
             if let attached {
                 // ⚠️ The honest promise: the inbox is SWEPT by the prompt hook, not
                 //    watched. It is in front of Claude on the NEXT message, not now.

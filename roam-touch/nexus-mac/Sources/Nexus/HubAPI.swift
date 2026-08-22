@@ -142,6 +142,13 @@ extension HubAPI {
 
     struct KillBody: Encodable { var origin = "nexus-mac" }
     /// Ends the pane; the channel and its history survive (contract).
+    /// Choose an option on a pane's open selector.
+    func respond(pane: String, option: Int) async throws -> RespondResponse {
+        try await run(request("POST", "/channels/\(panePath(pane))/respond",
+                              body: RespondBody(option: option)),
+                      as: RespondResponse.self)
+    }
+
     /// Hand Claude a file from THIS machine.
     ///
     /// ★ `/share` on the hub can only pass along something already on talos, inside
@@ -221,4 +228,13 @@ extension HubAPI {
         }
         return data
     }
+}
+
+private struct RespondBody: Encodable { var option: Int }
+
+struct RespondResponse: Decodable, Sendable {
+    var answered: String
+    var option: Int
+    /// How many held messages are being flushed once the pane settles.
+    var flushing: Int?
 }

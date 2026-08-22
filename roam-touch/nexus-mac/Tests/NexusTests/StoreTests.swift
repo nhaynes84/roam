@@ -210,3 +210,40 @@ private func hello(latest: Int, channels: [Channel] = []) -> Frame {
         #expect(kv.stringDict(forKey: "hub.drafts").isEmpty)
     }
 }
+
+/// Live selector state: "we should be able to pipe that experience in and out."
+@Suite struct PromptFrameTests {
+    @MainActor private func store() -> HubStore {
+        HubStore(api: HubAPI(config: HubConfig(baseURL: URL(string: "http://x")!, token: "t")),
+                 kv: MemoryKV())
+    }
+
+    private func payload(_ q: String) -> PromptPayload {
+        PromptPayload(question: q, options: [
+            PromptOption(n: 1, text: "Yes", selected: true),
+            PromptOption(n: 2, text: "No", selected: false),
+        ])
+    }
+
+    @MainActor @Test func aPromptFrameOpensTheQuestion() {
+        let s = store()
+        s.apply(.prompt(pane: "%1", prompt: payload("trust this folder?")))
+        #expect(s.openPrompts["%1"]?.options.count == 2)
+    }
+
+    @MainActor @Test func aNilPromptClosesIt() {
+        let s = store()
+        s.apply(.prompt(pane: "%1", prompt: payload("trust this folder?")))
+        s.apply(.prompt(pane: "%1", prompt: nil))
+        #expect(s.openPrompts["%1"] == nil, "an answered question stops being answerable")
+    }
+
+    @MainActor @Test func promptsAreTrackedPerPane() {
+        let s = store()
+        s.apply(.prompt(pane: "%1", prompt: payload("one?")))
+        s.apply(.prompt(pane: "%2", prompt: payload("two?")))
+        s.apply(.prompt(pane: "%1", prompt: nil))
+        #expect(s.openPrompts["%1"] == nil)
+        #expect(s.openPrompts["%2"] != nil, "closing one must not close the other")
+    }
+}
