@@ -995,3 +995,54 @@ def test_kill_a_dead_pane_is_404(client, auth):
 def test_kill_at_host_is_404(client, auth):
     # @host has no pane; killing it would claim the box was stoppable.
     assert client.post("/channels/@host/kill", headers=auth).status_code == 404
+
+
+# ------------------------------------------------ interactive prompt piping
+
+
+def _open_prompt(client):
+    """Put a live selector on pane %1, as the poller would."""
+    app = client.app
+    app.state.prompts["%1"] = {
+        "question": "Is this a project you trust?",
+        "options": [
+            {"n": 1, "text": "Yes, I trust this folder", "selected": True},
+            {"n": 2, "text": "No, exit", "selected": False},
+        ],
+    }
+
+
+def test_a_message_sent_while_a_prompt_is_open_is_held_not_typed(client, auth):
+    """The bug this whole feature exists for: typing into a menu picks an option."""
+    _open_prompt(client)
+    app = client.app
+    res = client.post("/channels/1/send", json={"text": "hello"}, headers=auth)
+    assert res.status_code == 200
+    body = res.json()
+    assert body["queued"] is True
+    assert body["waiting_on"]["options"][0]["n"] == 1
+    assert app.state.queued["%1"] == ["hello"]
+
+
+def test_responding_to_nothing_is_a_conflict(client, auth):
+    """A stale client must not type a bare number into a working agent."""
+    app = client.app
+    app.state.prompts.pop("%1", None)
+    res = client.post("/channels/1/respond", json={"option": 1}, headers=auth)
+    assert res.status_code == 409
+
+
+def test_responding_with_an_option_that_is_not_offered_is_rejected(client, auth):
+    _open_prompt(client)
+    app = client.app
+    res = client.post("/channels/1/respond", json={"option": 9}, headers=auth)
+    assert res.status_code in (400, 422)
+
+
+def test_answering_closes_the_prompt_everywhere(client, auth):
+    _open_prompt(client)
+    app = client.app
+    res = client.post("/channels/1/respond", json={"option": 1}, headers=auth)
+    assert res.status_code == 200, res.text
+    assert res.json()["answered"] == "Yes, I trust this folder"
+    assert "%1" not in app.state.prompts, "an answered question stops being answerable"

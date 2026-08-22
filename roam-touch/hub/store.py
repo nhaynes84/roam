@@ -66,6 +66,10 @@ class EventKind(str, Enum):
     CLOSED = "closed"    # the pane went away (channel is dead)
     CONTROL = "control"  # a control key was sent (escape, interrupt)
     NOTE = "note"        # free-form hub/agent note
+    #: The pane is showing an interactive selector and is waiting on a human.
+    #: `meta.prompt` carries {question, options:[{n,text,selected}]}; answering
+    #: goes back through POST /channels/{pane}/respond. See prompts.py.
+    PROMPT = "prompt"
     #: A tool saying something to the wearer -- `roam-msg "build finished"`.
     #: Not part of the conversation: it never makes a channel owe an answer and
     #: never moves `last_input_source`. It is pushed like an outcome, and

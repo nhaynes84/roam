@@ -15,6 +15,7 @@ import hashlib
 import socket
 import os
 import subprocess
+import time
 from dataclasses import dataclass, asdict
 
 #: tmux gives every pane the local hostname as its default title, so a bare
@@ -214,11 +215,49 @@ def screen_digest(pane_id: str) -> str:
     Visible screen only -- no scrollback -- so this stays a few milliseconds.
     Returns "" if the pane is gone; callers treat that as "no reading".
     """
-    try:
-        content = _tmux("capture-pane", "-p", "-t", pane_id)
-    except TmuxError:
+    content = screen(pane_id)
+    if not content:
         return ""
     return hashlib.sha1(content.encode("utf-8", "replace")).hexdigest()
+
+
+def screen(pane_id: str) -> str:
+    """The pane's VISIBLE screen, no scrollback. "" if the pane is gone.
+
+    Split out of `screen_digest` so one capture can serve both the liveness hash
+    and prompt detection -- the alternative is two `capture-pane` calls per pane
+    per poll, which doubles the only per-pane cost in the loop.
+    """
+    try:
+        return _tmux("capture-pane", "-p", "-t", pane_id)
+    except TmuxError:
+        return ""
+
+
+def settled(pane_id: str, tries: int = 25, gap_s: float = 0.4,
+            stable_needed: int = 2) -> bool:
+    """Block until the pane's screen stops changing. False on timeout.
+
+    ⚠️⚠️ EARNED THE HARD WAY. `send-keys` returning cleanly means tmux accepted the
+    keystrokes, NOT that the program consumed them. Flushing a queued message the
+    instant a gate cleared reported "flushed: 1" and the text never arrived --
+    verified on a live pane 2026-08-21, 0 occurrences anywhere in the scrollback.
+    That is the very bug the queue exists to prevent, reappearing inside the fix.
+
+    A TUI paints in stages, so "unchanged twice in a row" is the honest signal that
+    it has finished drawing and is listening.
+    """
+    last, stable = None, 0
+    for _ in range(tries):
+        digest = screen_digest(pane_id)
+        if not digest:
+            return False
+        stable = stable + 1 if digest == last else 0
+        last = digest
+        if stable >= stable_needed:
+            return True
+        time.sleep(gap_s)
+    return False
 
 
 def capture(pane_id: str, lines: int = 200) -> str:

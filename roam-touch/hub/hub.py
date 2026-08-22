@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import json
 import logging
 import os
@@ -47,6 +48,7 @@ from starlette.concurrency import run_in_threadpool
 
 import channels as channels_mod
 import files as files_mod
+import prompts as prompts_mod
 import radio as radio_mod
 from channels import Channel, TmuxError
 from presence import DEFAULT_TTL_S, UNKNOWN_COVERAGE, Presence
@@ -366,6 +368,12 @@ class ArchiveRequest(BaseModel):
     archived: bool = True
 
 
+class RespondRequest(BaseModel):
+    """Choose one option on a pane's open selector."""
+
+    option: int = Field(ge=1, le=12, description="The option number, as displayed.")
+
+
 class ShareRequest(BaseModel):
     """Hand a browsed file to Claude.
 
@@ -576,6 +584,11 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
         app.state.build = build_identity()
         app.state.tmux_ok = True
         app.state.live_channels = []
+        #: pane_id -> the selector it is showing right now, or absent. Live state,
+        #: so an answered question stops being answerable everywhere at once.
+        app.state.prompts = {}
+        #: pane_id -> messages held while that pane was asking a question.
+        app.state.queued = {}
         app.state.poller = asyncio.create_task(_poll_forever(app))
         try:
             yield
@@ -885,6 +898,79 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
         }
 
     @app.post(
+        "/channels/{pane}/respond",
+        tags=["channels"],
+        dependencies=[Depends(require_auth)],
+    )
+    async def respond_endpoint(payload: RespondRequest, pane: str = PathParam(...)):
+        """Answer the selector a pane is showing.
+
+        ★ Answered by DIGIT, never by counting arrow presses: the cursor's position
+        is read off a screen that can repaint between the read and the write, while
+        the digit is absolute and idempotent.
+        ⚠️ Validated against the LIVE prompt, so a stale client cannot answer a
+        question that has already gone -- which would otherwise type a bare number
+        into a working agent.
+        """
+        pane_id = normalise_pane_id(pane)
+        st = _store()
+        current = app.state.prompts.get(pane_id)
+        if current is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"channel {pane_id} is not asking anything right now",
+            )
+        prompt = prompts_mod.Prompt(
+            question=current["question"],
+            options=tuple(
+                prompts_mod.Option(o["n"], o["text"], o.get("selected", False))
+                for o in current["options"]
+            ),
+        )
+        try:
+            keys = prompts_mod.answer_keys(prompt, payload.option)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
+
+        chosen = next(o for o in prompt.options if o.n == payload.option)
+        try:
+            for key in keys:
+                await run_in_threadpool(channels_mod.press, pane_id, key)
+        except (TmuxError, ValueError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+            ) from exc
+
+        # It is answered: stop offering it everywhere, at once.
+        app.state.prompts.pop(pane_id, None)
+        event = st.append(
+            pane_id,
+            EventKind.SENT,
+            f"answered: {chosen.text}",
+            meta={"answered": prompt.to_dict(), "option": payload.option},
+        )
+        app.state.broadcaster.publish({"type": "event", "event": event.to_dict()})
+        app.state.broadcaster.publish(
+            {"type": "prompt", "pane": pane_id, "prompt": None}
+        )
+
+        # ★ Whatever he typed while the question was up goes now -- but NOT inline.
+        #   Flushing here reported success and lost the message: the gate had only
+        #   just cleared and the TUI was still painting. The flush waits for the pane
+        #   to settle, which takes seconds, so it runs as a task and the answer
+        #   returns immediately.
+        held = app.state.queued.get(pane_id, [])
+        if held:
+            asyncio.create_task(_flush_when_ready(app, pane_id))
+        return {
+            "answered": chosen.text,
+            "option": payload.option,
+            "flushing": len(held),
+        }
+
+    @app.post(
         "/channels/{pane}/send",
         tags=["channels"],
         dependencies=[Depends(require_auth)],
@@ -908,6 +994,20 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"channel {pane_id} is not live; nothing was sent",
             )
+        # ★★ HOLD, do not type. The pane is showing a selector, so `send-keys` would
+        #    type his words INTO the menu and the Enter would pick whatever is
+        #    highlighted -- which is exactly the bug that ate his first message and
+        #    the one that told Codex to run `npm install -g`. His call between
+        #    queueing and blocking the composer: "queue is friendlier and never loses
+        #    your words". Flushed by /respond once the question is answered.
+        if pane_id in app.state.prompts:
+            app.state.queued.setdefault(pane_id, []).append(payload.text)
+            return {
+                "queued": True,
+                "pane": pane_id,
+                "waiting_on": app.state.prompts[pane_id],
+                "detail": "held until the open prompt is answered",
+            }
         try:
             await run_in_threadpool(
                 channels_mod.send, pane_id, payload.text, payload.enter
@@ -1545,7 +1645,11 @@ def _remember_all(store: Store, live: list[Channel]) -> None:
 
 
 def _sample_activity(
-    store: Store, live: list[Channel], digests: dict[str, str], now: float
+    store: Store,
+    live: list[Channel],
+    digests: dict[str, str],
+    now: float,
+    screens: dict[str, str] | None = None,
 ) -> dict[str, float]:
     """Hash every live pane's screen; record the ones that changed.
 
@@ -1553,13 +1657,20 @@ def _sample_activity(
     Returns `{pane_id: timestamp}` for panes whose output moved, which is what
     gets pushed as the liveness heartbeat.
     """
+    screens = {} if screens is None else screens
     moved: dict[str, float] = {}
     for ch in live:
-        digest = channels_mod.screen_digest(ch.pane_id)
-        if not digest:
+        content = channels_mod.screen(ch.pane_id)
+        if not content:
             continue
+        digest = hashlib.sha1(content.encode("utf-8", "replace")).hexdigest()
         previous = digests.get(ch.pane_id)
         digests[ch.pane_id] = digest
+        # ★ Prompt detection rides the SAME capture as the liveness hash, and only
+        #   when the screen actually moved: a selector cannot appear or disappear
+        #   without the screen changing, so this adds no tmux calls at all.
+        if previous != digest:
+            screens[ch.pane_id] = content
         # A pane we have never sampled counts as active now: it is the best
         # reading available, and claiming "idle for hours" would be a lie.
         if previous is None or previous != digest:
@@ -1568,6 +1679,100 @@ def _sample_activity(
     for pane_id in set(digests) - {c.pane_id for c in live}:
         digests.pop(pane_id, None)
     return moved
+
+
+async def _flush_when_ready(app: FastAPI, pane_id: str) -> None:
+    """Send what was held, once the pane is actually listening.
+
+    ⚠️⚠️ The whole reason this is not a plain loop at the end of /respond: a pane
+    whose gate just cleared is still drawing, and `send-keys` into it succeeds and
+    is discarded. Measured on a live pane -- "flushed: 1", 0 occurrences in the
+    scrollback. Waiting for two identical screens is the difference between a queue
+    that protects his words and one that eats them more politely than before.
+    """
+    store: Store = app.state.store
+    broadcaster: Broadcaster = app.state.broadcaster
+    ready = await run_in_threadpool(channels_mod.settled, pane_id)
+    held = app.state.queued.pop(pane_id, [])
+    if not held:
+        return
+    if not ready:
+        app.state.queued.setdefault(pane_id, []).extend(held)
+        log.warning("pane %s never settled; %d message(s) still held",
+                    pane_id, len(held))
+        return
+    for i, text in enumerate(held):
+        try:
+            await run_in_threadpool(channels_mod.send, pane_id, text, True)
+        except (TmuxError, ValueError) as exc:
+            # Never silently eat them: put the rest back and say so in the thread.
+            app.state.queued.setdefault(pane_id, []).extend(held[i:])
+            event = store.append(
+                pane_id,
+                EventKind.ERROR,
+                f"held message could not be sent: {exc}",
+                meta={"attempted": text},
+            )
+            broadcaster.publish({"type": "event", "event": event.to_dict()})
+            return
+
+
+def _watch_prompts(
+    app: FastAPI,
+    store: Store,
+    broadcaster: Broadcaster,
+    screens: dict[str, str],
+    open_prompts: dict[str, str],
+) -> None:
+    """Notice a pane asking a question, and notice when it stops.
+
+    ★ The prompt is LIVE STATE, not only history: `app.state.prompts` is what a
+    client renders as buttons, and it is cleared the moment the selector leaves the
+    screen -- an answered question must stop being answerable, including when it was
+    answered at the keyboard rather than from a client.
+    ★ An event is appended too, so the thread still shows that the question happened
+    after it is gone.
+
+    ⚠️ Keyed on the prompt's fingerprint, which excludes the cursor position, so
+    arrowing up and down a menu at the keyboard does not emit a storm of events.
+    """
+    prompts_state: dict[str, dict] = app.state.prompts
+    for pane_id, content in screens.items():
+        found = prompts_mod.parse(content)
+        previous = open_prompts.get(pane_id)
+
+        if found is None:
+            if previous is not None:
+                open_prompts.pop(pane_id, None)
+                prompts_state.pop(pane_id, None)
+                broadcaster.publish(
+                    {"type": "prompt", "pane": pane_id, "prompt": None}
+                )
+            continue
+
+        if found.fingerprint == previous:
+            # same question, cursor may have moved -- refresh the selection only
+            prompts_state[pane_id] = found.to_dict()
+            continue
+
+        open_prompts[pane_id] = found.fingerprint
+        prompts_state[pane_id] = found.to_dict()
+        event = store.append(
+            pane_id,
+            EventKind.PROMPT,
+            found.summary(),
+            meta={"prompt": found.to_dict()},
+        )
+        broadcaster.publish({"type": "event", "event": event.to_dict()})
+        broadcaster.publish(
+            {"type": "prompt", "pane": pane_id, "prompt": found.to_dict()}
+        )
+
+    # a pane that vanished takes its question with it
+    for pane_id in set(open_prompts) - set(screens):
+        if not channels_mod.exists(pane_id):
+            open_prompts.pop(pane_id, None)
+            prompts_state.pop(pane_id, None)
 
 
 async def _poll_forever(app: FastAPI) -> None:
@@ -1584,6 +1789,7 @@ async def _poll_forever(app: FastAPI) -> None:
     presence: Presence = app.state.presence
     known: dict[str, str] | None = None  # pane_id -> label
     digests: dict[str, str] = {}  # pane_id -> last screen fingerprint
+    open_prompts: dict[str, str] = {}  # pane_id -> fingerprint of the live selector
     while True:
         try:
             # ★ Adopt anything written straight to the ledger while this process
@@ -1650,9 +1856,11 @@ async def _poll_forever(app: FastAPI) -> None:
                 broadcaster.publish({"type": "presence", **presence.snapshot()})
 
             if settings.activity_polling and live:
+                screens: dict[str, str] = {}
                 moved = await run_in_threadpool(
-                    _sample_activity, store, live, digests, time.time()
+                    _sample_activity, store, live, digests, time.time(), screens
                 )
+                _watch_prompts(app, store, broadcaster, screens, open_prompts)
                 if moved:
                     broadcaster.publish(
                         {
