@@ -37,6 +37,10 @@ struct ChannelList: View {
             .onMove { store.moveChannels(from: $0, to: $1) }
         }
         .listStyle(.sidebar)
+        // ★ Tint OVER the window material, not instead of it: the rail keeps macOS
+        //   vibrancy but stops being the same grey wash as the thread beside it.
+        .scrollContentBackground(.hidden)
+        .background { Theme.railTint.ignoresSafeArea() }
         .onChange(of: store.channels.map(\.paneId), initial: true) { _, _ in
             // A pane the order has never seen gets a slot at the bottom.
             store.adoptNewChannels()

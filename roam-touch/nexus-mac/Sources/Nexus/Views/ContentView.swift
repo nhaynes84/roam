@@ -19,6 +19,10 @@ struct ContentView: View {
             NavigationSplitView {
                 Sidebar(store: store, destination: $destination)
                     .navigationSplitViewColumnWidth(min: 250, ideal: 300)
+                    // the edge that makes it a panel rather than a region
+                    .overlay(alignment: .trailing) {
+                        Rectangle().fill(Theme.railEdge).frame(width: 1).ignoresSafeArea()
+                    }
             } detail: {
                 switch destination {
                 case .channel(let pane):

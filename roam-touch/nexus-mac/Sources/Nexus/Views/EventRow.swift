@@ -121,13 +121,17 @@ struct EventRow: View {
         .padding(.leading, 13)
         .padding(.trailing, 11)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(BubbleShape(mine: false).fill(Theme.agentFill))
-        .overlay(alignment: .leading) {
-            // the rail says "agent" before a single word is read
-            Theme.agentRail
-                .frame(width: Theme.railWidth)
-                .clipShape(.rect(topLeadingRadius: Theme.bubbleRadius,
-                                 bottomLeadingRadius: Theme.bubbleRadius / 4))
+        // ⚠️ The rail must be clipped by the BUBBLE's own path, not by a rounded rect
+        //    of its own. It is 3pt wide against a 12pt corner radius, so a private
+        //    clip shape has a radius larger than the strip is wide — which is why it
+        //    "cut out of the bubble at the top". Fill, overlay, THEN clip as one.
+        .background {
+            BubbleShape(mine: false)
+                .fill(Theme.agentFill)
+                .overlay(alignment: .leading) {
+                    Theme.agentRail.frame(width: Theme.railWidth)
+                }
+                .clipShape(BubbleShape(mine: false))
         }
         .overlay(BubbleShape(mine: false).strokeBorder(Theme.agentEdge, lineWidth: 1))
         .task { await loadFullIfNeeded() }

@@ -39,19 +39,26 @@ enum Theme {
         light: NSColor(srgbRed: 0.16, green: 0.44, blue: 0.90, alpha: 0.38),
         dark:  NSColor(srgbRed: 0.45, green: 0.66, blue: 1.00, alpha: 0.55))
 
-    /// The agent: a raised graphite surface. Warm, so it cannot be mistaken for the
-    /// blue side, and neutral, so it cannot be mistaken for a status.
+    /// The agent: VIOLET, not graphite.
+    ///
+    /// ⚠️ The first pass made this a warm grey and he was blunt: "we're still looking
+    /// at grey on grey which i don't love, the blue one is fine." A neutral surface on
+    /// a neutral ground can only separate by luminance, and on a dark window there is
+    /// not enough headroom for that to carry. Violet is the one hue that is (a) not his
+    /// blue, (b) not a status colour — cyan working, orange quiet, red dead, green live
+    /// — and (c) already the rail he said to keep, so the side reads as one thing.
     static let agentFill = dynamic(
-        light: NSColor(srgbRed: 0.44, green: 0.41, blue: 0.37, alpha: 0.10),
-        dark:  NSColor(srgbRed: 0.62, green: 0.58, blue: 0.52, alpha: 0.16))
+        light: NSColor(srgbRed: 0.42, green: 0.33, blue: 0.76, alpha: 0.13),
+        dark:  NSColor(srgbRed: 0.50, green: 0.40, blue: 0.82, alpha: 0.24))
     static let agentEdge = dynamic(
-        light: NSColor(srgbRed: 0.40, green: 0.37, blue: 0.33, alpha: 0.24),
-        dark:  NSColor(srgbRed: 0.70, green: 0.65, blue: 0.57, alpha: 0.30))
-    /// The leading rail that says "this side is the agent" at a glance, from across
-    /// the room, without reading a word of it.
+        light: NSColor(srgbRed: 0.40, green: 0.31, blue: 0.72, alpha: 0.36),
+        dark:  NSColor(srgbRed: 0.64, green: 0.55, blue: 0.96, alpha: 0.50))
+    /// The leading rail — "indigo rail is fine", so it stays. Fully saturated against
+    /// the tinted surface it now sits on, which is what keeps it reading as an edge
+    /// marker rather than as part of the fill.
     static let agentRail = dynamic(
         light: NSColor(srgbRed: 0.40, green: 0.31, blue: 0.72, alpha: 1.0),
-        dark:  NSColor(srgbRed: 0.60, green: 0.51, blue: 0.95, alpha: 1.0))
+        dark:  NSColor(srgbRed: 0.66, green: 0.56, blue: 1.00, alpha: 1.0))
 
     /// Typed straight into tmux: his words, but not from here — his hue, muted.
     static let typedFill = dynamic(
@@ -69,6 +76,16 @@ enum Theme {
     static let railSelection = dynamic(
         light: NSColor(srgbRed: 0.16, green: 0.44, blue: 0.90, alpha: 0.14),
         dark:  NSColor(srgbRed: 0.36, green: 0.60, blue: 1.00, alpha: 0.22))
+    /// ★ "on the left panel it's also the same grey, it doesn't pop as an obvious nav
+    /// panel." A translucent tint OVER the window material rather than an opaque fill,
+    /// so the rail keeps macOS vibrancy but stops being the same wash as the content.
+    static let railTint = dynamic(
+        light: NSColor(srgbRed: 0.29, green: 0.36, blue: 0.52, alpha: 0.10),
+        dark:  NSColor(srgbRed: 0.16, green: 0.20, blue: 0.34, alpha: 0.45))
+    /// The edge that makes it a panel instead of a region.
+    static let railEdge = dynamic(
+        light: NSColor(white: 0.0, alpha: 0.12),
+        dark:  NSColor(white: 1.0, alpha: 0.11))
     static let railHairline = dynamic(
         light: NSColor(white: 0.0, alpha: 0.07),
         dark:  NSColor(white: 1.0, alpha: 0.07))
