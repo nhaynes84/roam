@@ -258,6 +258,46 @@ def share(
     return target
 
 
+def deposit(
+    name: str,
+    data: bytes,
+    inbox: Path = DEFAULT_INBOX,
+    max_bytes: int = MAX_SHARE_BYTES,
+) -> Path:
+    """Put BYTES from a client into the inbox. Returns where they landed.
+
+    ★ `share` above can only hand over a file that is already on talos, inside the
+    shared folders. That is useless for "here is a photo from my laptop" -- the file
+    is on the laptop. This is the same door, opened from the other side, so an
+    attachment does not have to go via Google Photos or a screenshot.
+
+    ⚠️ The name is taken as a SUGGESTION and reduced to its basename. A client is
+    not trusted to pick a path: "../../.zshrc" must land as ".zshrc" in the inbox
+    and nowhere else. Same `.part`-then-rename as `share`, per the inbox contract --
+    the prompt hook must never see a half-written file.
+    """
+    if len(data) > max_bytes:
+        raise BrowseError(f"file is too large to share ({len(data)} bytes)")
+    if not data:
+        raise BrowseError("refusing to share an empty file")
+    # basename only, and never a dotfile-escape or an empty stem
+    safe = os.path.basename(name).strip().lstrip(".") or "attachment"
+    safe = safe.replace("/", "_").replace("\\", "_")[:120]
+    inbox.mkdir(parents=True, exist_ok=True)
+    target = _unique(inbox, safe)
+    part = target.with_name(target.name + ".part")
+    try:
+        part.write_bytes(data)
+        part.replace(target)
+    except OSError:
+        try:
+            part.unlink()
+        except OSError:
+            pass
+        raise
+    return target
+
+
 # --------------------------------------------------------------- thumbnails
 
 

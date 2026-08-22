@@ -142,6 +142,32 @@ extension HubAPI {
 
     struct KillBody: Encodable { var origin = "nexus-mac" }
     /// Ends the pane; the channel and its history survive (contract).
+    /// Hand Claude a file from THIS machine.
+    ///
+    /// ★ `/share` on the hub can only pass along something already on talos, inside
+    /// the shared folders — useless for "here is a photo from my laptop". `/upload`
+    /// is the same dropzone-inbox door opened from the client side, so an attachment
+    /// no longer has to go via Google Photos or a screenshot.
+    /// ⚠️ "Shared" means "will be in front of Claude on his NEXT prompt" — the inbox
+    /// is swept by the UserPromptSubmit hook, not watched. The UI must promise that
+    /// and nothing more.
+    func upload(name: String, data: Data) async throws -> SharedResponse {
+        let boundary = "nexus.\(UUID().uuidString)"
+        var body = Data()
+        func append(_ s: String) { body.append(Data(s.utf8)) }
+        append("--\(boundary)\r\n")
+        append("Content-Disposition: form-data; name=\"file\"; filename=\"\(name)\"\r\n")
+        append("Content-Type: application/octet-stream\r\n\r\n")
+        body.append(data)
+        append("\r\n--\(boundary)--\r\n")
+
+        var req = try request("POST", "/upload")
+        req.setValue("multipart/form-data; boundary=\(boundary)",
+                     forHTTPHeaderField: "Content-Type")
+        req.httpBody = body
+        return try await run(req, as: SharedResponse.self)
+    }
+
     func kill(pane: String) async throws -> SendResponse {
         try await run(request("POST", "/channels/\(panePath(pane))/kill", body: KillBody()),
                       as: SendResponse.self)

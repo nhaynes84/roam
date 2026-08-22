@@ -596,3 +596,46 @@ def test_pages_really_parse_at_ecmaversion_2019(tmp_path, page):
         ("node", "-e", script, str(js)), capture_output=True, text=True
     )
     assert result.returncode == 0, result.stderr
+
+# --------------------------------------------------------------- /upload deposit
+
+
+def test_deposit_writes_bytes_into_the_inbox(tmp_path):
+    inbox = tmp_path / "inbox"
+    landed = files_mod.deposit("photo.png", b"\x89PNG\r\n\x1a\n" + b"x" * 32, inbox=inbox)
+    assert landed.parent == inbox
+    assert landed.name == "photo.png"
+    assert landed.read_bytes().startswith(b"\x89PNG")
+
+
+def test_deposit_never_lets_a_client_choose_a_path(tmp_path):
+    """A name is a suggestion. "../../.zshrc" lands IN the inbox or nowhere."""
+    inbox = tmp_path / "inbox"
+    landed = files_mod.deposit("../../.zshrc", b"data", inbox=inbox)
+    assert landed.parent == inbox
+    assert ".." not in landed.name
+    assert not landed.name.startswith(".")
+
+
+def test_deposit_leaves_no_part_file_behind(tmp_path):
+    """The prompt hook must never see a half-written attachment."""
+    inbox = tmp_path / "inbox"
+    files_mod.deposit("a.bin", b"1234", inbox=inbox)
+    assert list(inbox.glob("*.part")) == []
+
+
+def test_deposit_does_not_clobber_an_existing_name(tmp_path):
+    inbox = tmp_path / "inbox"
+    first = files_mod.deposit("shot.png", b"one", inbox=inbox)
+    second = files_mod.deposit("shot.png", b"two", inbox=inbox)
+    assert first != second
+    assert first.read_bytes() == b"one"
+    assert second.read_bytes() == b"two"
+
+
+def test_deposit_refuses_empty_and_oversized(tmp_path):
+    inbox = tmp_path / "inbox"
+    with pytest.raises(files_mod.BrowseError):
+        files_mod.deposit("empty.bin", b"", inbox=inbox)
+    with pytest.raises(files_mod.BrowseError):
+        files_mod.deposit("big.bin", b"x" * 11, inbox=inbox, max_bytes=10)

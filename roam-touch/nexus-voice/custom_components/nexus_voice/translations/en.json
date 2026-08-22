@@ -1,0 +1,16 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Nexus Voice",
+        "description": "Speak to the ROAM Touch channels. The hub token is in hub/hub-token.txt on talos.",
+        "data": {
+          "hub_url": "Hub URL",
+          "hub_token": "Hub token",
+          "ollama_url": "Ollama URL",
+          "default_speaker": "Default speaker"
+        }
+      }
+    }
+  }
+}

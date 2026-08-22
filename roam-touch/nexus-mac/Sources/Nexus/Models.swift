@@ -239,3 +239,10 @@ struct FilesResponse: Decodable, Sendable {
     var parent: String?
     var entries: [FileEntry]
 }
+
+
+/// What `/upload` and `/share` say came back.
+struct SharedResponse: Decodable, Sendable {
+    var shared: String
+    var bytes: Int?
+}

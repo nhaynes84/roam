@@ -10,3 +10,4 @@ pydantic-settings==2.15.0
 pytest==9.1.1
 httpx==0.28.1          # fastapi.testclient
 websockets==17.0.1     # ws client for smoke tests; also uvicorn's ws impl
+python-multipart==0.0.32  # /upload form parsing (UploadFile)

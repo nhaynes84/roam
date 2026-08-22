@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct ThreadView: View {
     @Bindable var store: HubStore
@@ -13,6 +14,8 @@ struct ThreadView: View {
     /// ⌘↑ / ⌘↓ land here; the proxy only exists inside ScrollViewReader, so the
     /// command sets a request and the reader performs it.
     @State private var scrollRequest: ScrollRequest?
+    @State private var dropped: URL?
+    @State private var dropTargeted = false
 
     enum ScrollRequest { case top, bottom }
 
@@ -88,7 +91,24 @@ struct ThreadView: View {
                 .sheet(isPresented: $showCapture) { CaptureSheet(store: store, pane: pane) }
             }
             Divider()
-            Composer(store: store, pane: pane, sendable: channel?.live == true && pane != "@host")
+            Composer(store: store, pane: pane,
+                     sendable: channel?.live == true && pane != "@host",
+                     dropped: $dropped)
+        }
+        // ★ Drag a file anywhere onto the conversation. Same door as the paperclip;
+        //   dropping where you are already looking beats a file picker.
+        .dropDestination(for: URL.self) { urls, _ in
+            guard let url = urls.first else { return false }
+            dropped = url
+            return true
+        } isTargeted: { dropTargeted = $0 }
+        .overlay {
+            if dropTargeted {
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(Color.accentColor, style: StrokeStyle(lineWidth: 2, dash: [7, 5]))
+                    .padding(6)
+                    .allowsHitTesting(false)
+            }
         }
         .navigationTitle(channel?.label ?? pane)
         .navigationSubtitle(subtitle)
@@ -173,8 +193,11 @@ struct Composer: View {
     var store: HubStore
     var pane: String
     var sendable: Bool
+    @Binding var dropped: URL?
     @State private var draft = ""
     @State private var failure: String?
+    @State private var attaching = false
+    @State private var attached: String?
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -183,6 +206,14 @@ struct Composer: View {
                 Text(failure)
                     .font(.system(size: 14))
                     .foregroundStyle(.red)
+            }
+            if let attached {
+                // ⚠️ The honest promise: the inbox is SWEPT by the prompt hook, not
+                //    watched. It is in front of Claude on the NEXT message, not now.
+                Label("\(attached) attached — send a message and it goes with it",
+                      systemImage: "checkmark.circle.fill")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.secondary)
             }
             // ★ The composer is the NAVIGATION layer, so this is where glass belongs —
             //   not on the bubbles. `.roundedBorder` was the ugly bit: a 2005 bezel with
@@ -208,6 +239,15 @@ struct Composer: View {
                                               lineWidth: focused ? 2 : 1)
                         )
                         .animation(.easeOut(duration: 0.12), value: focused)
+
+                    Button { pickAttachment() } label: {
+                        Image(systemName: attaching ? "arrow.up.circle" : "paperclip")
+                            .frame(width: 16, height: 16)
+                    }
+                    .buttonStyle(.glass)
+                    .controlSize(.large)
+                    .disabled(attaching)
+                    .help("Attach a file — lands in front of Claude on your next message")
 
                     Button {
                         Task {
@@ -237,6 +277,42 @@ struct Composer: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
+        .onChange(of: dropped) { _, url in
+            guard let url else { return }
+            dropped = nil
+            do { attach(name: url.lastPathComponent, data: try Data(contentsOf: url)) }
+            catch { failure = "could not read \(url.lastPathComponent): \(error)" }
+        }
+    }
+
+    /// Shared by the paperclip and by drag-and-drop.
+    func attach(name: String, data: Data) {
+        attaching = true
+        failure = nil
+        Task {
+            defer { attaching = false }
+            do {
+                let res = try await store.api.upload(name: name, data: data)
+                attached = res.shared
+                focused = true
+            } catch {
+                failure = "attach failed: \(error)"
+            }
+        }
+    }
+
+    private func pickAttachment() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.message = "Hand this file to Claude"
+        panel.prompt = "Attach"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            attach(name: url.lastPathComponent, data: try Data(contentsOf: url))
+        } catch {
+            failure = "could not read \(url.lastPathComponent): \(error)"
+        }
     }
 
     private func send() {

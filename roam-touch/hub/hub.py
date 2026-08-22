@@ -30,9 +30,11 @@ from typing import Any, Iterator
 from fastapi import (
     Depends,
     FastAPI,
+    File,
     HTTPException,
     Path as PathParam,
     Query,
+    UploadFile,
     WebSocket,
     WebSocketDisconnect,
     status,
@@ -1288,6 +1290,29 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
             content_disposition_type="inline",
             headers={"Referrer-Policy": "no-referrer"},
         )
+
+    @app.post("/upload", tags=["files"], dependencies=[Depends(require_auth_flex)])
+    async def upload_file(file: UploadFile = File(...)) -> dict[str, Any]:
+        """Hand Claude a file that is NOT on talos -- an attachment from a client.
+
+        ★ `/share` can only pass along something already sitting in the shared
+        folders. This is the same inbox door opened from the other side, so a photo
+        or a STEP on the laptop can reach Claude without going via Google Photos or
+        a screenshot. Same honest promise as /share: "shared" means "will be in
+        front of Claude on his next prompt", not "is on disk somewhere".
+        """
+        data = await file.read()
+        try:
+            landed = await run_in_threadpool(
+                files_mod.deposit, file.filename or "attachment", data, settings.inbox
+            )
+        except files_mod.BrowseError as exc:
+            raise _browse_error(exc) from exc
+        except OSError as exc:
+            raise HTTPException(
+                status.HTTP_507_INSUFFICIENT_STORAGE, detail=f"could not write: {exc}"
+            ) from exc
+        return {"shared": landed.name, "bytes": len(data)}
 
     @app.post("/share", tags=["files"], dependencies=[Depends(require_auth_flex)])
     async def share_file(payload: ShareRequest) -> dict[str, Any]:
