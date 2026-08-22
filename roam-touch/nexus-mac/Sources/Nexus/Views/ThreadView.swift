@@ -240,6 +240,14 @@ struct Composer: View {
                         )
                         .animation(.easeOut(duration: 0.12), value: focused)
 
+                    Button { startDictation() } label: {
+                        Image(systemName: "mic.fill").frame(width: 16, height: 16)
+                    }
+                    .buttonStyle(.glass)
+                    .controlSize(.large)
+                    .disabled(!sendable)
+                    .help("Dictate — macOS dictation, straight into the message")
+
                     Button { pickAttachment() } label: {
                         Image(systemName: attaching ? "arrow.up.circle" : "paperclip")
                             .frame(width: 16, height: 16)
@@ -282,6 +290,24 @@ struct Composer: View {
             dropped = nil
             do { attach(name: url.lastPathComponent, data: try Data(contentsOf: url)) }
             catch { failure = "could not read \(url.lastPathComponent): \(error)" }
+        }
+    }
+
+    /// ★ macOS already does speech-to-text; he did not want a second one built, he
+    /// wanted it on a BUTTON — "i realize it's a key on my mac but that's like a two
+    /// button combo". So this fires the system's own dictation rather than bringing in
+    /// a recogniser, which also means no microphone entitlement of ours and nothing
+    /// that can be invalidated by re-signing the bundle on each deploy.
+    ///
+    /// `startDictation:` is what the Edit menu's own item sends; NSApplication answers
+    /// it, so sending to nil walks the responder chain and lands there (verified:
+    /// NSApplication.instancesRespond(to:) == true, NSResponder/NSTextView == false).
+    /// ⚠️ Dictation types into the FOCUSED field, so focus must land first — hence the
+    /// hop to the next runloop pass before sending.
+    private func startDictation() {
+        focused = true
+        DispatchQueue.main.async {
+            NSApp.sendAction(Selector(("startDictation:")), to: nil, from: nil)
         }
     }
 
