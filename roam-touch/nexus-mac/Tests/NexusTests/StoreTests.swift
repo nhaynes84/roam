@@ -285,14 +285,4 @@ private func hello(latest: Int, channels: [Channel] = []) -> Frame {
         #expect(next.restoreSession() == nil, "must not yank him back later")
     }
 
-    @MainActor @Test func scrollAnchorsSurviveAndAreScopedPerChannel() {
-        let kv = MemoryKV()
-        let s = store(kv)
-        s.setScrollAnchor(41, for: "%1")
-        s.setScrollAnchor(77, for: "%2")
-        let next = store(kv)
-        #expect(next.scrollAnchor(for: "%1") == 41)
-        #expect(next.scrollAnchor(for: "%2") == 77)
-        #expect(next.scrollAnchor(for: "%3") == nil)
-    }
 }

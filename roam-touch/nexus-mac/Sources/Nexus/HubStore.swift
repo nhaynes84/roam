@@ -57,8 +57,6 @@ final class HubStore {
             if selectedPane != oldValue { persistSession() }
         }
     }
-    /// Where he was reading in each channel — the id of the topmost visible event.
-    var scrollAnchors: [String: Int] = [:]
     /// Set by the UI when the app is frontmost; gates read-tracking and presence.
     var appActive = false {
         didSet {
@@ -92,7 +90,6 @@ final class HubStore {
         self.readCursors = kv.intDict(forKey: "hub.readCursors")
         self.channelOrder = kv.strings(forKey: "hub.channelOrder")
         self.drafts = kv.stringDict(forKey: "hub.drafts")
-        self.scrollAnchors = kv.intDict(forKey: "hub.scrollAnchors")
         self.restoredPane = kv.stringDict(forKey: "hub.session")["pane"]
     }
 
@@ -327,16 +324,6 @@ final class HubStore {
         guard let pane = restoredPane,
               channels.contains(where: { $0.paneId == pane }) else { return nil }
         return pane
-    }
-
-    func scrollAnchor(for pane: String) -> Int? { scrollAnchors[pane] }
-
-    /// ⚠️ Only ever moves to an event that exists; a stale anchor would silently
-    /// dump him at the top of a thread with no explanation.
-    func setScrollAnchor(_ id: Int?, for pane: String) {
-        guard scrollAnchors[pane] != id else { return }
-        if let id { scrollAnchors[pane] = id } else { scrollAnchors.removeValue(forKey: pane) }
-        kv.set(scrollAnchors, forKey: "hub.scrollAnchors")
     }
 
     private func persistSession() {

@@ -52,6 +52,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.lazy.rememberLazyListState
 
 /**
  * The whole Nexus experience on a phone.
@@ -203,6 +204,13 @@ private fun ThreadScreen(
     onSend: (String) -> Unit,
 ) {
     var draft by remember { mutableStateOf("") }
+    // ⚠️⚠️ The phone had NO scroll logic at all — not a broken rule, an absent one.
+    //    "enter a thread it's somewhere in the middle, i send a message, it doesn't
+    //    scroll down". A conversation is read at the BOTTOM.
+    val listState = rememberLazyListState()
+    LaunchedEffect(events.size, events.lastOrNull()?.id) {
+        if (events.isNotEmpty()) listState.scrollToItem(events.lastIndex)
+    }
     Column(Modifier.fillMaxSize()) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
@@ -213,7 +221,10 @@ private fun ThreadScreen(
             }
             Text(label, fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
         }
-        LazyColumn(Modifier.weight(1f).padding(horizontal = 14.dp)) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.weight(1f).padding(horizontal = 14.dp),
+        ) {
             items(events, key = { it.id }) { e -> EventBubble(e) }
         }
         Row(

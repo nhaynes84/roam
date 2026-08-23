@@ -15,7 +15,6 @@ struct ThreadView: View {
     /// command sets a request and the reader performs it.
     @State private var scrollRequest: ScrollRequest?
     @State private var dropped: URL?
-    @State private var visible: Set<Int> = []
     @State private var dropTargeted = false
 
     enum ScrollRequest { case top, bottom }
@@ -37,8 +36,6 @@ struct ThreadView: View {
                                 .id(event.id)
                                 // Row visibility is the cheapest honest reading of
                                 // "where is he"; the topmost visible id is the anchor.
-                                .onAppear { visible.insert(event.id) }
-                                .onDisappear { visible.remove(event.id) }
                         }
                         // ★ Owner: "i'd like to see the in message 'Working…'".
                         //   The status bar and the subtitle already carry it, but the
@@ -52,17 +49,11 @@ struct ThreadView: View {
                     .padding(12)
                 }
                 .task(id: pane) { await openChannel(proxy) }
-                .onChange(of: channel.map { store.liveness($0).isActive } ?? false) { _, active in
-                    if positioned, active {
-                        withAnimation { proxy.scrollTo("working", anchor: .bottom) }
-                    }
-                }
-                .onChange(of: visible) { _, ids in
-                    // ⚠️ Guarded on `positioned`: during the opening scroll the set
-                    //    churns through rows he never looked at, and saving those
-                    //    would overwrite the very anchor we just restored.
-                    guard positioned, let top = ids.min() else { return }
-                    store.setScrollAnchor(top, for: pane)
+                .onChange(of: channel.map { store.liveness($0).isActive } ?? false) { _, _ in
+                    // Working appears and disappears BELOW the last event; both
+                    // transitions change what the bottom is.
+                    guard positioned else { return }
+                    scrollToEnd(proxy, events: thread.events, animated: true)
                 }
                 .onChange(of: scrollRequest) { _, req in
                     guard let req else { return }
@@ -76,12 +67,11 @@ struct ThreadView: View {
                         }
                     }
                 }
-                .onChange(of: thread.events.last?.id) { _, last in
-                    // Follow new arrivals only once the opening scroll landed,
-                    // so history inserts don't yank the view around.
-                    if positioned, let last {
-                        withAnimation { proxy.scrollTo(last, anchor: .bottom) }
-                    }
+                .onChange(of: thread.events.last?.id) { _, _ in
+                    // Follow new arrivals only once the opening scroll landed, so
+                    // history inserts don't yank the view around.
+                    guard positioned else { return }
+                    scrollToEnd(proxy, events: thread.events, animated: true)
                 }
                 .toolbar {
                     if newCount > 0 {
@@ -144,18 +134,32 @@ struct ThreadView: View {
         // Let the lazy list lay out before asking it to scroll — a scrollTo
         // issued during load is silently dropped, which left threads at the top.
         try? await Task.sleep(for: .milliseconds(80))
+        // ⚠️⚠️ NO scroll-position restore. I built one when he said "and if need be
+        //    the scroll position", and in use it is simply wrong: "enter a thread it's
+        //    somewhere in the middle". A conversation is read at the BOTTOM — that is
+        //    where the newest thing is — and the only reason to land anywhere else is
+        //    unread material, which the divider already marks.
         if newMarkerId != nil {
-            // Unread wins: the divider IS the spot worth landing on.
             proxy.scrollTo("new-marker", anchor: .top)
-        } else if let anchor = store.scrollAnchor(for: pane),
-                  events.contains(where: { $0.id == anchor }) {
-            // ★ Back where he was reading. Only if the event still exists — a stale
-            //   anchor would dump him at the top of a thread with no explanation.
-            proxy.scrollTo(anchor, anchor: .top)
-        } else if let last = events.last {
-            proxy.scrollTo(last.id, anchor: .bottom)
+        } else {
+            scrollToEnd(proxy, events: events, animated: false)
         }
         positioned = true
+    }
+
+    /// ★ The bottom is the WORKING row when it is up, and the last event otherwise.
+    /// Scrolling to the last event while "working…" renders beneath it leaves exactly
+    /// the thing he is waiting for just off screen — "i send a message, it doesn't
+    /// scroll down to Working...".
+    private func scrollToEnd(_ proxy: ScrollViewProxy, events: [Event], animated: Bool) {
+        let working = channel.map { store.liveness($0).isActive } ?? false
+        if working {
+            if animated { withAnimation { proxy.scrollTo("working", anchor: .bottom) } }
+            else { proxy.scrollTo("working", anchor: .bottom) }
+        } else if let last = events.last?.id {
+            if animated { withAnimation { proxy.scrollTo(last, anchor: .bottom) } }
+            else { proxy.scrollTo(last, anchor: .bottom) }
+        }
     }
 
     private var subtitle: String {
