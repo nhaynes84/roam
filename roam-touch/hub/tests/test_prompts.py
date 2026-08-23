@@ -204,3 +204,42 @@ class TestAskUserQuestion:
     def test_answering_picks_by_digit(self):
         p = prompts.parse(ASK_USER_QUESTION)
         assert prompts.answer_keys(p, 2) == ["2", "Enter"]
+
+
+# A MULTI-question (tabbed) picker, captured live 2026-08-23 — the shape he actually
+# gets when I ask several things at once, and the one that exposed the rule bug.
+TABBED_PICKER = """\
+ ☐ Theme
+
+Light or dark theme?
+
+❯ 1. Dark
+     Dark background, light text.
+  2. Light
+     Light background, dark text.
+  3. Type something.
+────────────────────────────────────────────────────────────────────────────────
+  4. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel
+"""
+
+
+class TestTabbedPicker:
+    def test_a_multi_question_picker_is_detected(self):
+        assert prompts.parse(TABBED_PICKER) is not None
+
+    def test_the_question_is_the_prompt_not_the_scrollback(self):
+        """⚠️⚠️ `_clean` strips box-drawing characters as symbols, so a "────" rule
+        came back EMPTY and read as a blank line. The question walk sailed past the
+        top of the picker and returned whatever was in the scrollback — on a live
+        pane it returned my own instruction to the agent. Rules are tested on the RAW
+        line now, and the tab strip (☐ ✔ ← →) is a boundary too."""
+        p = prompts.parse(TABBED_PICKER)
+        assert "theme" in p.question.lower()
+        assert "AskUserQuestion" not in p.question
+        assert "\u2500" not in p.question
+
+    def test_options_survive_their_descriptions_and_the_rule(self):
+        p = prompts.parse(TABBED_PICKER)
+        assert [o.n for o in p.options] == [1, 2, 3, 4]

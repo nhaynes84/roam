@@ -55,6 +55,11 @@ _FOOTER_RE = re.compile(
 #: A rule/divider, which ends the question block above a menu.
 _RULE_CHARS = set("─-=_━┄┈· ")
 
+#: The picker's own chrome, not part of the question: the tab strip across the top of a
+#: multi-question prompt ("← ☐ Indent ☐ Theme ✔ Submit →"). It is a boundary for the
+#: same reason a rule is.
+_CHROME = set("☐☑✔✓←→")
+
 #: How many prose lines above the options may be taken as the question.
 _MAX_QUESTION_LINES = 6
 
@@ -185,13 +190,24 @@ def _question_above(lines: list[str], first_option: int) -> str:
     picked: list[str] = []
     gap = 0
     for line in reversed(lines[:first_option]):
+        raw = line.strip()
+        # ⚠️⚠️ Test for a rule on the RAW line. `_clean` drops box-drawing characters
+        #    as symbols, so a "────" divider comes back EMPTY and reads as a blank
+        #    line — the walk then sails straight past the top of the prompt and takes
+        #    whatever was in the scrollback as the question. That is exactly what
+        #    happened on a live picker: the question came back as my own instruction
+        #    to the agent.
+        if _is_rule(raw) or (raw and set(raw) & _CHROME):
+            if picked:
+                break
+            continue
         text = _clean(line)
         if not text:
             gap += 1
             if gap >= 2 and picked:
                 break
             continue
-        if _is_rule(text) or _OPTION_RE.match(line):
+        if _OPTION_RE.match(line):
             if picked:
                 break
             continue
