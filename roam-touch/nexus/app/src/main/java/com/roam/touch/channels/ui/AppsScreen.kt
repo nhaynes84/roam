@@ -60,6 +60,7 @@ import com.roam.touch.apps.Torch
 fun AppsScreen(
     onBack: () -> Unit,
     onOpenHomeAssistant: () -> Unit,
+    onOpenStream: () -> Unit,
     onOpenHub: (url: String, label: String) -> Unit,
     onMessage: (String) -> Unit,
 ) {
@@ -92,6 +93,7 @@ fun AppsScreen(
                         // the home screen.
                         when (tile.kind) {
                             TileKind.INTERNAL -> when (tile.id) {
+                                AppShelf.STREAM -> onOpenStream()
                                 AppShelf.HOME_ASSISTANT -> onOpenHomeAssistant()
                                 AppShelf.TORCH ->
                                     // ⚠️ The switch is asked for, not asserted: the new

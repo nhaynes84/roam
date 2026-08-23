@@ -36,6 +36,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.roam.touch.apps.AppShelf
 import com.roam.touch.channels.Roam
+import com.roam.touch.stream.Role
+import com.roam.touch.stream.StreamScreen
+import com.roam.touch.stream.StreamViewModel
 import com.roam.touch.channels.controls.ControlAction
 import com.roam.touch.channels.controls.ControlSurface
 import com.roam.touch.channels.stt.PttState
@@ -70,6 +73,9 @@ fun installChannelsUi(activity: ComponentActivity) {
 enum class Screen {
     Channels,
     Apps,
+
+    /** ★ Stream lives on the apps shelf, not beside Channels — it is an app. */
+    Stream,
 
     /**
      * ★ The device's own settings, as widgets. Owner, 2026-08-15: *"we'll need our own
@@ -117,6 +123,17 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
     val creating by vm.creating.collectAsStateWithLifecycle()
     val nowMs = rememberTicker()
     val requestMic = rememberMicPermission(vm)
+    // ★ Stream on the wrist. Same hub config and token as everything else — Roam.hub
+    //   is the one place either is built. Held across recomposition so switching to
+    //   another screen does not drop an open channel.
+    //
+    // ⚠️⚠️ CREATED ON DEMAND, not eagerly. Building it in the composable's body reads
+    //    `Roam.hub`, which is `lateinit` — and every screen test that renders
+    //    ChannelsApp without booting Roam then dies on
+    //    UninitializedPropertyAccessException. That took out ~97 tests across nine UI
+    //    suites that have nothing to do with Stream, and the failures named
+    //    ThreadScreen and PttPanel rather than this line.
+    var streamVm by remember { mutableStateOf<StreamViewModel?>(null) }
     val shell = rememberShell()
 
     // ★★ The rail's fold, from disk. Not `rememberSaveable`: a launcher's process is killed
@@ -417,12 +434,34 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
                 Screen.Apps -> AppsScreen(
                     onBack = { screen = Screen.Channels },
                     onOpenHomeAssistant = { screen = Screen.HomeAssistant },
+                    onOpenStream = { screen = Screen.Stream },
                     onOpenHub = { url, label ->
                         hubPage = url to label
                         screen = Screen.HubBrowser
                     },
                     onMessage = { vm.notify(it) },
                 )
+
+                Screen.Stream -> {
+                    val vm0 = streamVm ?: StreamViewModel(
+                        Roam.hub, android.os.Build.MODEL ?: "roam"
+                    ).also { streamVm = it }
+                    val askStreamMic = rememberStreamMic(vm0)
+                    val ui by vm0.ui.collectAsStateWithLifecycle()
+                    StreamScreen(
+                        ui = ui,
+                        onRole = { role ->
+                            // ⚠️ NOT the PTT permission path: that one's wording
+                            //    ("hold the mic and talk") belongs to dictation, and
+                            //    a receiver that only listens should not be told to
+                            //    hold anything.
+                            if (role != Role.OFF && !ui.micGranted) askStreamMic()
+                            vm0.setRole(role)
+                        },
+                        onPress = vm0::press,
+                        onRelease = vm0::release,
+                    )
+                }
 
                 // ★ The hub's pages, in-app, with the token on the request rather than in
                 // the URL. `base` and `token` both come from the one hub configuration
@@ -628,6 +667,21 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
  * That is one wasted press the first time, and no hot mic ever — the same rule that got
  * automatic speech deleted, applied to the input side where it matters more.
  */
+/**
+ * Stream's own microphone gate.
+ *
+ * ⚠️ Separate from [rememberMicPermission] on purpose. That one is dictation's, and it
+ * answers with "hold the mic and talk" — wrong for a device being set as an open
+ * channel, and wronger for a receiver that may never talk at all.
+ */
+@Composable
+private fun rememberStreamMic(streamVm: StreamViewModel): () -> Unit {
+    val launcher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted -> streamVm.onMicPermission(granted) }
+    return { launcher.launch(android.Manifest.permission.RECORD_AUDIO) }
+}
+
 @Composable
 private fun rememberMicPermission(vm: ChannelsViewModel): (PttTarget, Boolean) -> Unit {
     val context = androidx.compose.ui.platform.LocalContext.current

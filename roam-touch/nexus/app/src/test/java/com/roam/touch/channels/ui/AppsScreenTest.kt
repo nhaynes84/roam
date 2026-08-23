@@ -71,6 +71,7 @@ class AppsScreenTest {
                         AppsScreen(
                             onBack = {},
                             onOpenHomeAssistant = { haOpens++ },
+                            onOpenStream = {},
                             onOpenHub = { _, _ -> },
                             onMessage = {},
                         )

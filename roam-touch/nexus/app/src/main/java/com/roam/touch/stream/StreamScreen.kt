@@ -1,4 +1,4 @@
-package com.roam.stream
+package com.roam.touch.stream
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures

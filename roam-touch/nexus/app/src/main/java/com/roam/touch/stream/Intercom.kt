@@ -1,4 +1,4 @@
-package com.roam.stream
+package com.roam.touch.stream
 
 import com.roam.touch.channels.net.HubConfig
 import kotlinx.coroutines.channels.awaitClose

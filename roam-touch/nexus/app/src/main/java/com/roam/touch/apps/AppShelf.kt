@@ -94,6 +94,11 @@ object AppShelf {
     /** The internal tile id for the native Home Assistant screen. */
     const val HOME_ASSISTANT = "roam:ha"
 
+    /** ★ Stream is an APP inside Nexus, never a separate install. Owner: "stream is
+     *  a stand alone nexus app, nothing we install independently." The wrist gets it
+     *  here, on the same shelf as everything else it can open. */
+    const val STREAM = "roam:stream"
+
     /**
      * The internal tile id for the torch.
      *
@@ -204,6 +209,13 @@ object AppShelf {
     )
 
     /** The native Home Assistant screen. Always present; it needs no package. */
+    private val STREAM_TILE = AppTile(
+        id = STREAM,
+        label = "Stream",
+        subtitle = "open channel / talk back",
+        kind = TileKind.INTERNAL,
+    )
+
     private val NATIVE_HA = AppTile(
         id = HOME_ASSISTANT,
         label = "Home Assistant",
@@ -256,7 +268,10 @@ object AppShelf {
             )
         }
         val (broken, working) = (resolved + LINKS).partition { it.broken }
-        val native = listOfNotNull(NATIVE_HA, TORCH_TILE.takeIf { hasTorch })
+        // ★ Stream sits AFTER the two reflexes. AppShelfTest states the rule outright
+        //   — "Both are reflexes and neither leaves the app; everything below is a tool
+        //   you go looking for" — and opening a monitor is the second kind.
+        val native = listOfNotNull(NATIVE_HA, TORCH_TILE.takeIf { hasTorch }, STREAM_TILE)
         return native + working + broken
     }
 }

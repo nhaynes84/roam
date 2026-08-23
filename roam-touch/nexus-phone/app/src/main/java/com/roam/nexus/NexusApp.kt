@@ -55,9 +55,22 @@ import com.roam.touch.channels.model.Event
  * ⚠️ This is NOT the wrist launcher. That is ../nexus, it claims the HOME category,
  * and it is pinned to targetSdk 29 for sailfish. Two products, two builds, on purpose.
  */
+/**
+ * ★ Two scopes everywhere, on every client: CHANNELS and APPS.
+ *
+ * Owner: *"everything should at least have 'Channels' and 'Apps', make 11
+ * consistent."* Stream is an APP, not a peer of Channels — the Mac has always had
+ * it that way (an APPS rail under the channel list) and the phone having a "Stream"
+ * tab beside "Channels" quietly said they were the same kind of thing.
+ */
 enum class Tab(val label: String) {
     CHANNELS("Channels"),
-    STREAM("Stream"),
+    APPS("Apps"),
+}
+
+/** One app inside Nexus. Files joins this list when the phone gets a browser. */
+enum class NexusAppId(val title: String, val subtitle: String) {
+    STREAM("Stream", "Open channel, or hold to talk back"),
 }
 
 @Composable
@@ -74,6 +87,7 @@ fun NexusApp(
     onRelease: () -> Unit,
 ) {
     var tab by remember { mutableStateOf(Tab.CHANNELS) }
+    var openApp by remember { mutableStateOf<NexusAppId?>(null) }
 
     Scaffold(
         bottomBar = {
@@ -83,14 +97,14 @@ fun NexusApp(
                         selected = tab == t,
                         onClick = { tab = t },
                         icon = {
-                            // A dot that carries state: Stream turns red while this
+                            // A dot that carries state: Apps turns red while this
                             // device is the live mic, so an open channel is visible
-                            // from the tab bar without opening the tab.
+                            // from the tab bar without opening anything.
                             Box(
                                 Modifier.size(10.dp).clip(CircleShape).background(
                                     when {
-                                        t == Tab.STREAM && streamUi.role == Role.SENDER -> Color(0xFFE5484D)
-                                        t == Tab.STREAM && streamUi.channelOpen -> Color(0xFF3E9B4F)
+                                        t == Tab.APPS && streamUi.role == Role.SENDER -> Color(0xFFE5484D)
+                                        t == Tab.APPS && streamUi.channelOpen -> Color(0xFF3E9B4F)
                                         tab == t -> MaterialTheme.colorScheme.primary
                                         else -> Color(0xFF6B7280)
                                     }
@@ -105,7 +119,12 @@ fun NexusApp(
     ) { pad ->
         Box(Modifier.padding(pad)) {
             when (tab) {
-                Tab.STREAM -> StreamScreen(streamUi, onRole, onPress, onRelease)
+                Tab.APPS ->
+                    when (openApp) {
+                        NexusAppId.STREAM ->
+                            StreamScreen(streamUi, onRole, onPress, onRelease)
+                        null -> AppsScreen(streamUi) { openApp = it }
+                    }
                 Tab.CHANNELS ->
                     if (openPane == null) {
                         ChannelList(channels, connected, onOpen)
@@ -236,4 +255,49 @@ private fun EventBubble(e: Event) {
             )
         }
     }
+}
+
+
+/**
+ * The apps shelf. One entry today; the point is the SHAPE — the phone and the Mac
+ * agree about what an app is and where it lives.
+ */
+@Composable
+private fun AppsScreen(streamUi: StreamUi, onOpen: (NexusAppId) -> Unit) {
+    Column(Modifier.fillMaxSize().padding(16.dp),
+           verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("Apps", fontSize = 26.sp, fontWeight = FontWeight.Bold)
+        NexusAppId.entries.forEach { app ->
+            val live = app == NexusAppId.STREAM && streamUi.role != Role.OFF
+            Row(
+                Modifier.fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(
+                        if (live) Color(0xFFE5484D).copy(alpha = 0.16f)
+                        else Color(0xFF6B7280).copy(alpha = 0.14f)
+                    )
+                    .clickable { onOpen(app) }
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.size(10.dp).clip(CircleShape).background(
+                    if (live) Color(0xFFE5484D) else Color(0xFF6B7280)))
+                Column {
+                    Text(app.title, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        if (live) streamStatusLine(streamUi) else app.subtitle,
+                        fontSize = 13.sp, color = Color(0xFF9AA3AF),
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun streamStatusLine(ui: StreamUi): String = when {
+    ui.role == Role.SENDER -> "LIVE — this device is the open mic"
+    ui.talkingNow != null -> "${ui.talkingNow} is talking"
+    ui.channelOpen -> "Listening"
+    else -> "Waiting for a channel"
 }

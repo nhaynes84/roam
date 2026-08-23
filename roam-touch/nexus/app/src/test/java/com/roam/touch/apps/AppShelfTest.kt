@@ -61,7 +61,10 @@ class AppShelfTest {
         // Growth here is a product decision, never an accident: this ceiling exists to
         // make an accidental tile fail the build rather than appear on his wrist.
         // 11 -> 12 on 2026-08-14 for the Radio tile. Deliberate, per the rule above.
-        assertTrue("shelf grew to ${shelf.size}", shelf.size <= 12)
+        // 12 -> 13 on 2026-08-23 for Stream. Owner: "stream is a stand alone nexus app,
+        // nothing we install independently" — so the wrist reaches it here, on the shelf,
+        // rather than through a second APK.
+        assertTrue("shelf grew to ${shelf.size}", shelf.size <= 13)
         val ids = shelf.map { it.id }
 
         // ★ Twenty packages are installed and six earn a tile. These are the ones that
@@ -154,6 +157,9 @@ class AppShelfTest {
             listOf(
                 AppShelf.HOME_ASSISTANT,
                 AppShelf.TORCH,
+                // ★ After the two reflexes: opening a monitor is a thing you go
+                //   looking for, which is the rule this list already encodes.
+                AppShelf.STREAM,
                 "com.google.android.GoogleCamera",
                 "com.termux",
                 "com.tailscale.ipn",
