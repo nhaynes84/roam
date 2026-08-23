@@ -89,8 +89,15 @@ class StreamAudio {
     }
 
     /** Fill [buf]; returns bytes read, or -1 when capture is not running. */
-    fun read(buf: ByteArray): Int =
+    /**
+     * ⚠️ runCatching: stopCapture() now runs on a DIFFERENT thread to this read, so a
+     * release() can land mid-read. That is by design — stopping the record is what
+     * unblocks a read that would otherwise hold its thread forever — but it means the
+     * loser of that race must end quietly rather than throw.
+     */
+    fun read(buf: ByteArray): Int = runCatching {
         record?.read(buf, 0, minOf(buf.size, Wire.BYTES_PER_FRAME)) ?: -1
+    }.getOrDefault(-1)
 
     fun stopCapture() {
         record?.let {

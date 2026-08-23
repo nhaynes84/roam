@@ -71,9 +71,38 @@ class StreamViewModel(
      * in order, and a pool would let a stop overtake a start.
      */
     private val audioThread = java.util.concurrent.Executors
-        .newSingleThreadExecutor { r -> Thread(r, "stream-audio") }
+        .newSingleThreadExecutor { r -> Thread(r, "stream-control") }
     private val audioDispatcher = audioThread.asCoroutineDispatcher()
+
+    /** Device setup and teardown ONLY. Serial, so a stop can never overtake a start. */
     private val audioScope = CoroutineScope(SupervisorJob() + audioDispatcher)
+
+    /**
+     * ⚠️⚠️ THE BLOCKING READ LOOP GETS ITS OWN THREAD, and this is the whole bug.
+     *
+     * I made the audio dispatcher single-threaded on purpose, to stop AudioRecord and
+     * AudioTrack blocking the MAIN thread (that was the ANR). Then I ran the capture
+     * loop on it too — and `AudioRecord.read()` blocks until samples arrive, so while
+     * a phone was the open channel it held that one thread permanently. Nothing else
+     * queued there could ever run: the playback pump never wrote a frame, and onFloor
+     * never stopped capture when the floor moved.
+     *
+     * That is exactly what he saw, on both phones: "pixel sends audio just fine but
+     * doesn't receive the PTT". The hub confirmed it — it had delivered the frames
+     * (tx=460 and tx=110) and the phones had kept transmitting without the floor
+     * (dropped_no_floor 2377 and 585), which is the same starvation seen from the
+     * other end.
+     *
+     * The Mac was immune because AVAudioEngine delivers capture through a callback
+     * rather than a blocking read on a shared serial queue.
+     */
+    private val captureScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /** Playback writes block too, so they cannot share the control thread either. */
+    private val playbackThread = java.util.concurrent.Executors
+        .newSingleThreadExecutor { r -> Thread(r, "stream-playback") }
+    private val playbackScope =
+        CoroutineScope(SupervisorJob() + playbackThread.asCoroutineDispatcher())
 
     /**
      * ★ DROP_OLDEST, not suspend. If playback cannot keep up, the honest thing for a
@@ -151,7 +180,7 @@ class StreamViewModel(
     }
 
     private fun startPlaybackPump() {
-        audioScope.coLaunch {
+        playbackScope.coLaunch {
             for (frame in incoming) {
                 val n = audio.write(frame)
                 if (n > 0) _ui.value = _ui.value.copy(framesPlayed = _ui.value.framesPlayed + 1)
@@ -178,7 +207,7 @@ class StreamViewModel(
             return
         }
         _ui.value = _ui.value.copy(capturing = true, notice = null)
-        captureJob = audioScope.coLaunch {
+        captureJob = captureScope.coLaunch {
             val buf = ByteArray(Wire.BYTES_PER_FRAME)
             while (isActive) {
                 val n = audio.read(buf)
@@ -208,9 +237,12 @@ class StreamViewModel(
 
     override fun onCleared() {
         socketJob?.cancel()
+        captureScope.cancel()
         audioScope.coLaunch { audio.release() }
         audioScope.cancel()
+        playbackScope.cancel()
         audioThread.shutdown()
+        playbackThread.shutdown()
         super.onCleared()
     }
 }
