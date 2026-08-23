@@ -1046,3 +1046,36 @@ def test_answering_closes_the_prompt_everywhere(client, auth):
     assert res.status_code == 200, res.text
     assert res.json()["answered"] == "Yes, I trust this folder"
     assert "%1" not in app.state.prompts, "an answered question stops being answerable"
+
+
+# ------------------------------------------------- the duplicated paste
+
+
+def _echo_key(text: str) -> str:
+    """Mirror of hub._echo_key — the rule, not the implementation."""
+    return " ".join((text or "").split())[:200]
+
+
+def test_a_long_paste_echoes_even_though_the_bodies_differ():
+    """⚠️ THE bug behind "duped copy / paste in a chanel".
+
+    Real pair, captured from his history: what the client SENT (1683 chars) and what
+    the agent's hook REPORTED (1764) diverge in the middle — bracketed paste, terminal
+    reflow and the agent's own normalisation all get a say. Exact equality failed, so
+    the receipt was not recognised as an echo and the thread drew his paste twice.
+    """
+    import pathlib
+    here = pathlib.Path(__file__).resolve().parent
+    sent = (here / "fixtures_paste_sent.txt").read_text()
+    receipt = (here / "fixtures_paste_receipt.txt").read_text()
+
+    assert sent.strip() != receipt.strip(), "the whole point: they are NOT identical"
+    assert _echo_key(sent) == _echo_key(receipt), "but they are the same message"
+
+
+def test_two_different_messages_are_not_treated_as_an_echo():
+    """★ The dangerous direction. A receipt wrongly marked as an echo stops being the
+    record that he typed something — a false match HIDES a message, a miss merely
+    duplicates one."""
+    assert _echo_key("check the roaster temp") != _echo_key("check the grinder temp")
+    assert _echo_key("") == _echo_key("   \n  ")

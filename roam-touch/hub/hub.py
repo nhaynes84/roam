@@ -627,6 +627,23 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
     def _publish(message: dict[str, Any]) -> None:
         app.state.broadcaster.publish(message)
 
+    def _echo_key(text: str) -> str:
+        """What two copies of the same message must agree on.
+
+        ⚠️⚠️ NOT the whole body. It used to compare `body.strip() == typed`, and on a
+        long PASTE the two never match: what the client sent and what the agent's hook
+        reports differ in the middle — bracketed paste, terminal reflow and the agent's
+        own normalisation all get a say. Measured on a real one: 1683 chars sent, 1764
+        received. Exact equality failed, the receipt was not recognised as an echo, and
+        the thread drew his paste twice. "duped copy / paste in a chanel".
+
+        ★ Whitespace-normalised opening only. Tight enough to be safe — it is compared
+        against the SINGLE most recent `sent` inside the echo window, not any message —
+        and a false match is the dangerous direction, because a receipt marked as an
+        echo stops being the record that he typed something.
+        """
+        return " ".join((text or "").split())[:200]
+
     def _note_prompt_origin(st: Store, pane_id: str, prompt: str) -> int | None:
         """A prompt was submitted in this pane. Was it him, or was it us?
 
@@ -658,7 +675,7 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
         for event in reversed(recent):
             if event.kind != EventKind.SENT.value or event.ts < cutoff:
                 continue
-            if not typed or event.body.strip() == typed:
+            if not typed or _echo_key(event.body) == _echo_key(typed):
                 # Our own send coming back: the conversation stays put, and the
                 # event names the message it duplicates.
                 return event.id

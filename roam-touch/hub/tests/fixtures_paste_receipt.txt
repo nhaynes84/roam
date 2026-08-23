@@ -1,0 +1,124 @@
+this one is interesting; rough start last year, but great recent run with batch numbers posted: Bfflist AMO Retatrutide test history
+48 tests · 25 pass · 23 fail
+COA-backed lab tests
+Date    Result    Test    Lab    Purity    Dosage    Label    COA
+15 Jul 2026    
+Pass    
+tf24k5e
+Tested
+BTLabs
+99.8%
+identity Pass
++3%
+12.3 mg tested / 12 mg label
+Batch 129007
+sent by Public
+View COA
+21 Apr 2026    
+Pass    
+ju3acbn
+Tested
+BTLabs
+99.8%
+identity Pass
+-12%
+10.6 mg tested / 12 mg label
+Batch 129008 03/04/2026
+sent by Public
+View COA
+29 Mar 2026    
+Pass    
+5pz5rrb
+Tested
+BTLabs
+99.9%
+identity Pass
+-7%
+56 mg tested / 60 mg label
+Batch 609001-10/12/2025
+sent by Public
+View COA
+18 Feb 2026    
+Pass    
+38kxy2m
+Tested
+Krause Analytical
+99.9%
+identity Pass
+-1%
+29.6 mg tested / 30 mg label
+Batch 309018-11/22/2025
+sent by Public
+View COA
+16 Feb 2026    
+Pass    
+hm9asnu
+Tested
+Krause Analytical
+99.9%
+identity Pass
+-1%
+4.96 mg tested / 5 mg label
+Batch 059016
+sent by Public
+View COA
+16 Feb 2026    
+Pass    
+byxerjt
+Tested
+Krause Analytical
+99.9%
+identity Pass
++1%
+10.1 mg tested / 10 mg label
+Batch 109027
+sent by Public
+View COA
+15 Feb 2026    
+Pass    
+6hg4wyp
+Tested
+BTLabs
+99.8%
+identity Pass
+-15%
+25.6 mg tested / 30 mg label
+Batch R30 309019-12/3/2025
+sent by Public
+View COA
+13 Feb 2026    
+Pass    
+z7nmj8a
+Tested
+Krause Analytical
+99.9%
+identity Pass
+-2%
+29.5 mg tested / 30 mg label
+Batch 309018-11/22/2025
+sent by Public
+View COA
+11 Feb 2026    
+Pass    
+ezq3apg
+Tested
+Krause Analytical
+99.9%
+identity Pass
+-2%
+23.6 mg tested / 24 mg label
+Batch 249002-11/22/2025
+sent by Public
+View COA
+11 Feb 2026    
+Fail    
+3z5nmy2
+Tested
+Krause Analytical
+99.69%
+identity Pass
+-1%
+19.9 mg tested / 20 mg label
+Batch 209022-11/10/2024
+sent by Public
+View COA
