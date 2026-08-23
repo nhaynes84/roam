@@ -149,6 +149,15 @@ extension HubAPI {
                       as: RespondResponse.self)
     }
 
+    /// Raw bytes of an image posted into a channel.
+    ///
+    /// ★ Content-addressed and immutable, so these are safe to cache forever — an id
+    /// can only ever refer to one sequence of bytes. URLSession's own cache does the
+    /// work; the hub sends `immutable` with a year's max-age.
+    func imageData(id: String) async throws -> Data {
+        try await rawData("/images/\(id)", query: [])
+    }
+
     /// Hand Claude a file from THIS machine.
     ///
     /// ★ `/share` on the hub can only pass along something already on talos, inside

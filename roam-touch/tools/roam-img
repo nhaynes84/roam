@@ -1,0 +1,57 @@
+#!/bin/bash
+# Put an image IN a channel feed, where he will actually see it.
+#
+# ★ "you should be able to dump images into these channel feeds, that is the direction
+#   you should go, don't point me elsewhere." Filing a picture in a shared folder and
+#   describing where to look is not showing someone a picture.
+#
+#   roam-img <file> [pane] [caption...]
+#
+# With no pane it posts to the channel that spoke most recently, which is almost always
+# the one he is looking at.
+set -uo pipefail
+HUB="${ROAM_HUB_URL:-http://100.67.237.109:8787}"
+TOKEN_FILE="${ROAM_HUB_TOKEN_FILE:-$HOME/Projects/roam/roam-touch/hub/hub-token.txt}"
+TOKEN="${ROAM_HUB_TOKEN:-$(cat "$TOKEN_FILE" 2>/dev/null)}"
+
+file="${1:-}"
+[ -f "$file" ] || { echo "usage: roam-img <file> [pane] [caption...]" >&2; exit 2; }
+shift
+
+pane="${1:-}"
+case "$pane" in
+  %*|[0-9]*) shift ;;                    # a pane id
+  *) pane="" ;;                          # anything else is caption
+esac
+caption="$*"
+
+if [ -z "$pane" ]; then
+  pane=$(curl -s -m 10 -H "Authorization: Bearer $TOKEN" "$HUB/channels" \
+    | python3 -c '
+import sys,json
+d=json.load(sys.stdin)
+live=[c for c in d.get("channels",[]) if c.get("live") and c.get("pane_id")!="@host"]
+live.sort(key=lambda c: c.get("last_seen") or 0, reverse=True)
+print(live[0]["pane_id"] if live else "")' 2>/dev/null)
+fi
+[ -n "$pane" ] || { echo "roam-img: no live channel to post to" >&2; exit 1; }
+
+# the hub takes a bare pane number; %12 and 12 both mean the same channel
+num="${pane#%}"
+# ⚠️ NOT `--get --data-urlencode`: that flips the request to GET and the upload
+#    silently does nothing. The caption is a query param on a POST, so encode it here.
+enc=$(python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1]))' "$caption")
+out=$(curl -s -m 60 -X POST \
+  -H "Authorization: Bearer $TOKEN" \
+  -F "file=@${file}" \
+  "$HUB/channels/${num}/image?caption=${enc}" 2>&1) || { echo "roam-img: $out" >&2; exit 1; }
+echo "$out" | python3 -c '
+import sys, json
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    sys.stderr.write("roam-img: " + sys.stdin.read()[:200] + "\n"); raise SystemExit(1)
+if "posted" not in d:
+    sys.stderr.write("roam-img: " + str(d)[:200] + "\n"); raise SystemExit(1)
+print("posted %s  %sx%s  %d bytes" % (d["posted"][:12], d.get("width"), d.get("height"), d["bytes"]))
+'

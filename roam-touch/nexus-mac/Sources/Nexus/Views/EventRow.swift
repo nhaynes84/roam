@@ -27,6 +27,7 @@ struct EventRow: View {
         case "closed": chipRow(icon: "xmark.circle", text: "pane closed", tint: .secondary)
         case "notice": noticeRow
         case "prompt": promptRow
+        case "image": imageRow
         default: expandableRow(role: event.kind == "outcome" ? nil : event.kind)
         }
     }
@@ -118,6 +119,22 @@ struct EventRow: View {
         .background(BubbleShape(mine: false).fill(Theme.promptFill))
         .overlay(BubbleShape(mine: false).strokeBorder(
             answerable ? Color.accentColor.opacity(0.55) : Theme.agentEdge, lineWidth: 1))
+    }
+
+    /// The image, drawn where it was posted.
+    @ViewBuilder
+    private var imageRow: some View {
+        if let payload = event.meta?.image {
+            HStack(alignment: .top, spacing: 8) {
+                InlineImage(store: store, payload: payload,
+                            caption: event.body == event.meta?.name ? nil : event.body)
+                Spacer(minLength: 0)
+            }
+            .padding(.vertical, 2)
+        } else {
+            // Contract: render an unknown shape as a plain note rather than nothing.
+            chipRow(icon: "photo", text: event.summary, tint: .secondary)
+        }
     }
 
     private var noticeRow: some View {

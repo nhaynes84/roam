@@ -70,6 +70,10 @@ class EventKind(str, Enum):
     #: `meta.prompt` carries {question, options:[{n,text,selected}]}; answering
     #: goes back through POST /channels/{pane}/respond. See prompts.py.
     PROMPT = "prompt"
+    #: An image posted INTO the conversation. `meta.image` carries
+    #: {id, media_type, bytes, width, height}; the bytes are served from
+    #: GET /images/{id}. See images.py — his direction was "don't point me elsewhere".
+    IMAGE = "image"
     #: A tool saying something to the wearer -- `roam-msg "build finished"`.
     #: Not part of the conversation: it never makes a channel owe an answer and
     #: never moves `last_input_source`. It is pushed like an outcome, and

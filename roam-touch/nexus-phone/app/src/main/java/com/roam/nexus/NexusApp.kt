@@ -42,6 +42,16 @@ import com.roam.touch.stream.StreamScreen
 import com.roam.touch.stream.StreamUi
 import com.roam.touch.channels.model.Channel
 import com.roam.touch.channels.model.Event
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.contentOrNull
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.Image
 
 /**
  * The whole Nexus experience on a phone.
@@ -234,6 +244,7 @@ private fun ThreadScreen(
  */
 @Composable
 private fun EventBubble(e: Event) {
+    if (e.kind == "image") { InlineImage(e); return }
     val mine = e.kind == "sent" || e.kind == "receipt"
     Row(
         Modifier.fillMaxWidth().padding(vertical = 4.dp),
@@ -300,4 +311,60 @@ private fun streamStatusLine(ui: StreamUi): String = when {
     ui.talkingNow != null -> "${ui.talkingNow} is talking"
     ui.channelOpen -> "Listening"
     else -> "Waiting for a channel"
+}
+
+
+/**
+ * An image drawn IN the thread.
+ *
+ * ★ "you should be able to dump images into these channel feeds ... don't point me
+ * elsewhere." Same event, same place, on the phone as on the Mac.
+ *
+ * ⚠️ Hand-rolled loader rather than Coil: the hub needs a Bearer token, and adding an
+ * image library to carry one header is not worth the dependency. Content-addressed and
+ * immutable, so a one-shot in-memory cache keyed by id can never be stale.
+ */
+@Composable
+private fun InlineImage(e: Event) {
+    val id = e.meta["image"]?.jsonObject?.get("id")?.jsonPrimitive?.contentOrNull
+    val w = e.meta["image"]?.jsonObject?.get("width")?.jsonPrimitive?.intOrNull
+    val h = e.meta["image"]?.jsonObject?.get("height")?.jsonPrimitive?.intOrNull
+    var bmp by remember(id) { mutableStateOf<ImageBitmap?>(null) }
+    var failed by remember(id) { mutableStateOf(false) }
+
+    LaunchedEffect(id) {
+        if (id == null) { failed = true; return@LaunchedEffect }
+        bmp = ImageCache.load(id)
+        if (bmp == null) failed = true
+    }
+
+    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                // ★ Reserve the real aspect ratio before the bytes land, so the thread
+                //   does not jump under him while images load.
+                .then(if (w != null && h != null && w > 0 && h > 0)
+                          Modifier.aspectRatio(w.toFloat() / h.toFloat())
+                      else Modifier)
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color(0xFF8066D2).copy(alpha = 0.14f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            when {
+                bmp != null -> Image(
+                    bitmap = bmp!!,
+                    contentDescription = e.body,
+                    modifier = Modifier.fillMaxWidth(),
+                    contentScale = ContentScale.Fit,
+                )
+                failed -> Text("image did not load", fontSize = 14.sp, color = Color(0xFF9AA3AF))
+                else -> CircularProgressIndicator(Modifier.size(28.dp))
+            }
+        }
+        if (e.body.isNotBlank()) {
+            Text(e.body, fontSize = 14.sp, color = Color(0xFF9AA3AF),
+                 modifier = Modifier.padding(top = 6.dp))
+        }
+    }
 }

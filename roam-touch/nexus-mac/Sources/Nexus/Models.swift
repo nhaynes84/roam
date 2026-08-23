@@ -24,7 +24,19 @@ struct PromptPayload: Decodable, Sendable, Equatable {
     var options: [PromptOption]
 }
 
+/// An image posted into the conversation. Bytes come from GET /images/{id}.
+struct ImagePayload: Decodable, Sendable, Equatable {
+    var id: String
+    var mediaType: String?
+    var bytes: Int?
+    var width: Int?
+    var height: Int?
+}
+
 struct EventMeta: Decodable, Sendable, Equatable {
+    /// Present on `image` events.
+    var image: ImagePayload?
+    var name: String?
     /// Present on `prompt` events: what was being asked at the time.
     var prompt: PromptPayload?
     /// Present on the `sent` event that records an answer.

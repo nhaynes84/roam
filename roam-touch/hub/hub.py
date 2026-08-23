@@ -48,6 +48,7 @@ from starlette.concurrency import run_in_threadpool
 
 import channels as channels_mod
 import files as files_mod
+import images as images_mod
 import intercom as intercom_mod
 import prompts as prompts_mod
 import radio as radio_mod
@@ -192,6 +193,8 @@ class Settings(BaseSettings):
     #: Where `POST /share` puts a file so Claude gets it. Same queue the photo
     #: bridge feeds -- see README.md, "the inbox contract".
     inbox: Path = files_mod.DEFAULT_INBOX
+    #: Bytes for images posted into channels. Beside the DB, not in the repo.
+    image_root: Path = DEFAULT_DB_PATH.parent / "images"
     thumb_cache: Path = files_mod.DEFAULT_THUMB_CACHE
 
     #: Where the station directory is cached. The browser never calls
@@ -1554,6 +1557,78 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
         return _page("radio.html", {'"__ROAM_TOKEN__"': _js_literal(token)})
 
     # ----------------------------------------------------------- websocket
+
+    @app.post(
+        "/channels/{pane}/image",
+        tags=["channels"],
+        dependencies=[Depends(require_auth_flex)],
+    )
+    async def post_image(
+        pane: str = PathParam(...),
+        file: UploadFile = File(...),
+        caption: str = Query(default=""),
+    ) -> dict[str, Any]:
+        """Put an image IN the conversation.
+
+        ★ "you should be able to dump images into these channel feeds, that is the
+        direction you should go, don't point me elsewhere." Before this the only way to
+        show him a picture was to file it in a shared folder and describe where to look.
+        This makes it an ordinary event: it lands in the thread, in order, on every
+        client, in the channel it belongs to.
+        """
+        pane_id = normalise_pane_id(pane)
+        st = _store()
+        data = await file.read()
+        try:
+            stored = await run_in_threadpool(
+                images_mod.store, data, settings.image_root
+            )
+        except images_mod.ImageError as exc:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
+        except OSError as exc:
+            raise HTTPException(
+                status.HTTP_507_INSUFFICIENT_STORAGE, detail=f"could not store: {exc}"
+            ) from exc
+
+        shape = f"{stored.width}x{stored.height}" if stored.width else stored.media_type
+        summary = caption.strip() or f"[image {shape}]"
+        # ⚠️ Event is a FROZEN dataclass — assigning event.summary raises
+        #    FrozenInstanceError AFTER the row is already written, which lands the
+        #    image in the thread while the caller sees a 500 and no client is ever
+        #    told. append() takes the summary; pass it, never patch it.
+        event = st.append(
+            pane_id,
+            EventKind.IMAGE,
+            caption.strip() or file.filename or "image",
+            meta={"image": stored.to_dict(), "name": file.filename or ""},
+            summary=summary,
+        )
+        app.state.broadcaster.publish({"type": "event", "event": event.to_dict()})
+        return {"posted": stored.id, **stored.to_dict()}
+
+    @app.get("/images/{image_id}", tags=["channels"],
+             dependencies=[Depends(require_auth_flex)])
+    async def get_image(image_id: str = PathParam(...)) -> FileResponse:
+        """Serve stored bytes.
+
+        ⚠️ Content-addressed, so these are immutable — an id can only ever mean one
+        sequence of bytes. That is what makes the long cache header safe, and it is
+        why clients may keep them forever.
+        """
+        try:
+            path = await run_in_threadpool(
+                images_mod.path_for, image_id, settings.image_root
+            )
+        except images_mod.ImageError as exc:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        media_type, _ = images_mod.sniff(path.read_bytes()[:16])
+        return FileResponse(
+            path,
+            media_type=media_type,
+            headers={"Cache-Control": "public, max-age=31536000, immutable"},
+        )
 
     @app.get("/intercom/state", tags=["channels"],
              dependencies=[Depends(require_auth_flex)])
