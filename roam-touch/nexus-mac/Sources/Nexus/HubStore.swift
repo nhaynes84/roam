@@ -70,6 +70,10 @@ final class HubStore {
     }
 
     let api: HubAPI
+    /// Stream lives beside the channels, on the same hub and the same token.
+    /// ⚠️ Stored, not lazy — @Observable rewrites stored properties into computed
+    /// ones and `lazy` is illegal on those.
+    let stream: IntercomClient
     private let kv: KVStore
     private var clockSkew: Double = 0  // serverTime - local now, from hello
     private(set) var cursor: Int?
@@ -82,6 +86,7 @@ final class HubStore {
 
     init(api: HubAPI, kv: KVStore = DefaultsKV()) {
         self.api = api
+        self.stream = IntercomClient(config: api.config)
         self.kv = kv
         self.cursor = kv.int(forKey: "hub.cursor")
         self.readCursors = kv.intDict(forKey: "hub.readCursors")

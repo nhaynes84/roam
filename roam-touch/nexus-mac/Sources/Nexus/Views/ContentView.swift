@@ -4,6 +4,7 @@ import SwiftUI
 enum MainDestination: Hashable {
     case channel(String)
     case files
+    case stream
 }
 
 struct ContentView: View {
@@ -30,6 +31,8 @@ struct ContentView: View {
                         .id(pane)
                 case .files:
                     FilesBrowser(api: store.api)
+                case .stream:
+                    StreamView(stream: store.stream)
                 case nil:
                     ContentUnavailableView("Pick a channel", systemImage: "rectangle.split.2x1",
                                            description: Text("Each channel is one agent pane on talos.")
@@ -89,6 +92,7 @@ struct AppsSection: View {
 
     private let apps: [App] = [
         App(dest: .files, name: "Files", icon: "folder"),
+        App(dest: .stream, name: "Stream", icon: "dot.radiowaves.left.and.right"),
     ]
 
     var body: some View {

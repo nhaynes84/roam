@@ -26,6 +26,10 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundleShortVersionString</key><string>0.3.3</string>
     <key>CFBundleExecutable</key><string>Nexus</string>
     <key>CFBundleIconFile</key><string>Nexus</string>
+    <!-- Stream captures audio. macOS refuses the mic outright without this string,
+         and the refusal is silent from the app's side — the engine just returns
+         empty buffers, which looks exactly like a broken microphone. -->
+    <key>NSMicrophoneUsageDescription</key><string>Stream uses the microphone to open an audio channel to your other devices, and to talk back on push-to-talk.</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>NSHighResolutionCapable</key><true/>
