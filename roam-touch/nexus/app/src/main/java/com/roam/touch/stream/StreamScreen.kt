@@ -88,6 +88,12 @@ private fun StatusCard(ui: StreamUi) {
         !ui.connected -> Idle to "Connecting…"
         ui.role == Role.SENDER && ui.talkingNow != null ->
             Listening to "${ui.talkingNow} is talking — your mic is muted"
+        // ⚠️ The floor being granted is NOT the same as the microphone working. He hit
+        //    exactly this gap: "it did say the mic was hot, but that it couldn't find
+        //    it". A monitor that claims to be live while capturing nothing is worse
+        //    than one that plainly says it is broken.
+        ui.role == Role.SENDER && !ui.capturing ->
+            Live to "MIC DID NOT OPEN — nothing is being sent"
         ui.role == Role.SENDER -> Live to "Live — this device is the open mic"
         ui.talkingNow != null && ui.floor?.micLive("") == false && ui.talkingNow != null ->
             Listening to "${ui.talkingNow} is talking"

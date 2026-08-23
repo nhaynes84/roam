@@ -15,8 +15,8 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
-import com.roam.nexus.stream.Role
-import com.roam.nexus.stream.StreamViewModel
+import com.roam.touch.stream.Role
+import com.roam.touch.stream.StreamViewModel
 import com.roam.touch.channels.net.HubApi
 
 class MainActivity : ComponentActivity() {

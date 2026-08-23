@@ -61,6 +61,10 @@ android {
             def shared = [
                     "$rootDir/../nexus/app/src/main/java/com/roam/touch/channels/model",
                     "$rootDir/../nexus/app/src/main/java/com/roam/touch/channels/net",
+                    // ★ Stream too. It had been COPIED here, and the copy would have
+                    //   missed the main-thread ANR fix — two Streams drifting is
+                    //   exactly the silent breakage sharing model/ and net/ avoids.
+                    "$rootDir/../nexus/app/src/main/java/com/roam/touch/stream",
             ]
             kotlin.srcDirs += shared
             java.srcDirs += shared

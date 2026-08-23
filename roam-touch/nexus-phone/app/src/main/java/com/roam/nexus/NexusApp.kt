@@ -37,9 +37,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.roam.nexus.stream.Role
-import com.roam.nexus.stream.StreamScreen
-import com.roam.nexus.stream.StreamUi
+import com.roam.touch.stream.Role
+import com.roam.touch.stream.StreamScreen
+import com.roam.touch.stream.StreamUi
 import com.roam.touch.channels.model.Channel
 import com.roam.touch.channels.model.Event
 

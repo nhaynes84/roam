@@ -1,4 +1,4 @@
-package com.roam.nexus.stream
+package com.roam.touch.stream
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse

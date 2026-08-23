@@ -39,7 +39,17 @@ class StreamAudio {
     ).coerceAtLeast(Wire.BYTES_PER_FRAME * 4)
 
     @SuppressLint("MissingPermission")   // the caller holds RECORD_AUDIO or does not call
-    fun startCapture(): Boolean {
+    fun startCapture(): Boolean = runCatching { openRecord() }.getOrDefault(false)
+
+    /**
+     * ⚠️ Wrapped by [startCapture] because the AudioRecord CONSTRUCTOR throws —
+     * IllegalArgumentException for a rate/source the device will not give, and
+     * IllegalStateException from startRecording() when the HAL is unwell. Both were
+     * uncaught, and on a device whose audio HAL had died that is an app that
+     * disappears rather than a channel that says it could not open.
+     */
+    @SuppressLint("MissingPermission")
+    private fun openRecord(): Boolean {
         if (record != null) return true
         val r = AudioRecord(
             MediaRecorder.AudioSource.VOICE_COMMUNICATION,
