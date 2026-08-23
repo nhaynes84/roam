@@ -48,6 +48,7 @@ from starlette.concurrency import run_in_threadpool
 
 import channels as channels_mod
 import files as files_mod
+import intercom as intercom_mod
 import prompts as prompts_mod
 import radio as radio_mod
 from channels import Channel, TmuxError
@@ -589,6 +590,9 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
         app.state.prompts = {}
         #: pane_id -> messages held while that pane was asking a question.
         app.state.queued = {}
+        #: The open audio channel and who currently holds the floor.
+        app.state.intercom = intercom_mod.Intercom()
+        app.state.intercom_peers = {}
         app.state.poller = asyncio.create_task(_poll_forever(app))
         try:
             yield
@@ -1544,6 +1548,110 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
         return _page("radio.html", {'"__ROAM_TOKEN__"': _js_literal(token)})
 
     # ----------------------------------------------------------- websocket
+
+    @app.websocket("/intercom")
+    async def intercom_endpoint(
+        websocket: WebSocket,
+        device: str = Query(..., min_length=1, max_length=64),
+        role: str = Query(default="receiver"),
+        token_q: str | None = Query(default=None, alias="token"),
+    ) -> None:
+        """Two-way audio, half-duplex by design.
+
+        ★ One device opens a channel and streams; any number receive; a receiver
+        holding PTT INTERRUPTS the feed and pushes the other way. Because the two
+        directions never overlap there is no echo path, so no AEC -- that is the
+        whole reason for this shape. See intercom.py.
+
+        ⚠️⚠️ THE ENFORCEMENT THAT MATTERS: audio from a device that does not hold the
+        floor is DROPPED HERE, silently. A client is not trusted to stop sending when
+        it loses the floor -- a laggy release, a wedged press or an old build would
+        otherwise put two live speakers in one house, which howls. The server is the
+        only thing that decides whose bytes get relayed.
+        """
+        header = websocket.headers.get("authorization", "")
+        supplied = header[7:].strip() if header.lower().startswith("bearer ") else ""
+        supplied = supplied or (token_q or "")
+        if not supplied or not secrets.compare_digest(supplied, token):
+            await websocket.accept()
+            await websocket.send_json({"type": "error", "detail": "unauthorised"})
+            await websocket.close(code=4401)
+            return
+
+        await websocket.accept()
+        ic: intercom_mod.Intercom = app.state.intercom
+        peers: dict[str, WebSocket] = app.state.intercom_peers
+        peers[device] = websocket
+
+        async def announce() -> None:
+            snap = {"type": "floor", **ic.snapshot()}
+            for other, sock in list(peers.items()):
+                try:
+                    await sock.send_json(snap)
+                except (WebSocketDisconnect, RuntimeError):
+                    peers.pop(other, None)
+
+        if role == "sender":
+            ic.open_channel(device)
+        else:
+            ic.join(device)
+        await announce()
+
+        try:
+            while True:
+                message = await websocket.receive()
+                if message.get("type") == "websocket.disconnect":
+                    break
+
+                if (raw := message.get("bytes")) is not None:
+                    # ⚠️ The gate. Not a client's decision.
+                    if ic.expire():
+                        await announce()
+                    if ic.holder() != device:
+                        continue
+                    if device == ic.sender:
+                        ic.touch_sender()
+                    for other, sock in list(peers.items()):
+                        if other == device:
+                            continue
+                        try:
+                            await sock.send_bytes(raw)
+                        except (WebSocketDisconnect, RuntimeError):
+                            peers.pop(other, None)
+                    continue
+
+                text = message.get("text")
+                if text is None:
+                    continue
+                try:
+                    control = json.loads(text)
+                except ValueError:
+                    continue
+                kind = control.get("type")
+                try:
+                    if kind == "press":
+                        ic.press(device)
+                    elif kind == "release":
+                        ic.release(device)
+                    elif kind == "open":
+                        ic.open_channel(device)
+                    elif kind == "close":
+                        ic.close_channel(device)
+                    else:
+                        continue
+                except intercom_mod.IntercomError as exc:
+                    await websocket.send_json({"type": "denied", "detail": str(exc)})
+                    continue
+                await announce()
+        except WebSocketDisconnect:
+            pass
+        finally:
+            peers.pop(device, None)
+            if ic.sender == device:
+                ic.close_channel(device)
+            else:
+                ic.leave(device)
+            await announce()
 
     @app.websocket("/ws")
     async def websocket_endpoint(
