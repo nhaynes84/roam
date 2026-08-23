@@ -136,13 +136,39 @@ def parse(screen: str) -> Prompt | None:
     # must be 1..N in order: a real menu numbers itself, prose rarely does
     if [o.n for o in options] != list(range(1, len(options) + 1)):
         return None
-    # and they must be contiguous -- a numbered list split across paragraphs is prose
-    if positions[-1] - positions[0] != len(positions) - 1:
+    # ⚠️⚠️ NO CONTIGUITY RULE. It used to require the options on consecutive lines, to
+    #    reject prose. It also rejected every REAL AskUserQuestion picker, because each
+    #    option carries a wrapped description and a rule can sit between them:
+    #
+    #        ❯ 1. Spaces
+    #             Indent with space characters (most common default...
+    #          2. Tabs
+    #          ...
+    #        ────────────────────────────────
+    #          4. Chat about this
+    #
+    #    That single rule is why he never saw a prompt: in two days the only thing it
+    #    ever matched was the trust gate. Options may be spread, but must still be
+    #    1..N in order and inside one screenful.
+    if positions[-1] - positions[0] > 40:
         return None
 
     has_cursor = any(o.selected for o in options)
     has_footer = any(_FOOTER_RE.search(l) for l in lines)
     if not (has_cursor or has_footer):
+        return None
+
+    # ⚠️ A LIVE prompt is waiting for input, so it sits at the BOTTOM of the screen.
+    #    Quoted menus scroll up and have output beneath them — that is how an agent
+    #    *writing about* the trust dialog got announced as a real question, which would
+    #    have queued his messages behind something nobody could answer.
+    last_content = max(
+        (i for i, l in enumerate(lines) if l.strip()), default=positions[-1]
+    )
+    #    Measured on the real captures: the trust gate and the AskUserQuestion picker
+    #    both put their footer 1 line below the last option, codex 2. Three is margin,
+    #    not a guess.
+    if last_content - positions[-1] > 3:
         return None
 
     return Prompt(question=_question_above(lines, positions[0]),

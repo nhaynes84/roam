@@ -100,9 +100,21 @@ class TestFalsePositives:
             "All green.\n"
         ) is None
 
-    def test_a_numbered_list_split_across_paragraphs_is_prose(self):
+    def test_a_quoted_menu_scrolled_up_the_screen_is_not_live(self):
+        """⚠️ THE false positive that actually happened: an agent WRITING ABOUT the
+        trust dialog got announced as a real question, which would have queued his
+        messages behind something nobody could answer. A live prompt waits for input
+        at the BOTTOM; a quotation has output beneath it."""
         assert prompts.parse(
-            "steps\n1. first\n\nsome commentary\n2. second\nEnter to confirm\n"
+            "The channel it spawned is sitting at Claude's trust-folder dialog:\n"
+            "  1. Yes, I trust this folder\n"
+            "  2. No, exit\n"
+            "Enter to confirm\n"
+            "\n"
+            "So the next thing to do is answer it, then carry on with the build.\n"
+            "I will wait for you before touching anything else.\n"
+            "Meanwhile the hub is up and the counters are reset.\n"
+            "Let me know how you want to proceed.\n"
         ) is None
 
     def test_a_single_option_is_not_a_choice(self):
@@ -145,3 +157,50 @@ class TestAnswering:
     def test_summary_says_what_is_being_asked(self):
         p = prompts.parse(CLAUDE_TRUST)
         assert "2 options" in p.summary()
+
+
+# The real thing, captured off a live pane 2026-08-23. THIS is what he actually meets,
+# and the parser matched none of it for two days.
+ASK_USER_QUESTION = """\
+ \u2610 Indentation
+Do you prefer tabs or spaces for indentation?
+\u276f 1. Spaces
+     Indent with space characters (most common default; width set per-language,
+     e.g. 2 or 4).
+  2. Tabs
+     Indent with tab characters; each reader's editor renders the width they
+     prefer.
+  3. Type something.
+\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  4. Chat about this
+Enter to select \u00b7 \u2191/\u2193 to navigate \u00b7 Esc to cancel
+"""
+
+
+class TestAskUserQuestion:
+    """★ The picker he asked for: "when you format a series of tabbed questions for
+    me to answer on a plan". Options are NOT contiguous — each carries a wrapped
+    description, and a rule sits before the last one. Requiring consecutive lines is
+    exactly why he never saw a prompt."""
+
+    def test_it_is_detected_at_all(self):
+        assert prompts.parse(ASK_USER_QUESTION) is not None
+
+    def test_all_four_options_survive_their_descriptions(self):
+        p = prompts.parse(ASK_USER_QUESTION)
+        assert [o.n for o in p.options] == [1, 2, 3, 4]
+        assert p.options[0].text == "Spaces"
+        assert p.options[1].text == "Tabs"
+        assert p.options[3].text == "Chat about this"
+
+    def test_the_cursor_marks_the_default(self):
+        p = prompts.parse(ASK_USER_QUESTION)
+        assert p.options[0].selected and not p.options[1].selected
+
+    def test_the_question_is_the_question(self):
+        p = prompts.parse(ASK_USER_QUESTION)
+        assert "tabs or spaces" in p.question
+
+    def test_answering_picks_by_digit(self):
+        p = prompts.parse(ASK_USER_QUESTION)
+        assert prompts.answer_keys(p, 2) == ["2", "Enter"]
