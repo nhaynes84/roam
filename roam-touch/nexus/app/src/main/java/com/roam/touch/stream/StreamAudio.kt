@@ -110,7 +110,20 @@ class StreamAudio {
         effects.clear()
     }
 
-    fun startPlayback() {
+    /**
+     * @return null on success, or why it failed.
+     *
+     * ⚠️⚠️ AudioTrack.Builder().build() THROWS — UnsupportedOperationException for a
+     * format the device will not give, IllegalStateException when the track cannot be
+     * created. I wrapped AudioRecord after it bit once and left this one bare, so a
+     * throw here killed the whole onFloor block: playback never started AND the
+     * capture teardown after it never ran. Silent, on both phones, in exactly the way
+     * he reported — "pixel sends audio just fine but doesn't receive the PTT".
+     */
+    fun startPlayback(): String? = runCatching { openTrack(); null }
+        .getOrElse { "${it::class.simpleName}: ${it.message}" }
+
+    private fun openTrack() {
         if (track != null) return
         val t = AudioTrack.Builder()
             .setAudioAttributes(
@@ -140,12 +153,16 @@ class StreamAudio {
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
         t.play()
+        // ⚠️ play() is not a promise. A track that failed to start is silent and
+        //    reports it only here.
+        check(t.playState == AudioTrack.PLAYSTATE_PLAYING) {
+            "AudioTrack did not enter PLAYING (state ${t.playState}, buf $minTrackBytes)"
+        }
         track = t
     }
 
-    fun write(pcm: ByteArray) {
-        track?.write(pcm, 0, pcm.size)
-    }
+    /** @return bytes actually written; negative is an AudioTrack error code. */
+    fun write(pcm: ByteArray): Int = track?.write(pcm, 0, pcm.size) ?: 0
 
     fun stopPlayback() {
         track?.let {

@@ -72,6 +72,12 @@ fun StreamScreen(
         ui.notice?.let {
             Text(it, fontSize = 14.sp, color = Live)
         }
+        // ★ in / played. "arrived but never played" and "never arrived" look identical
+        //   from the outside, and guessing between them cost two round trips.
+        if (ui.role != Role.OFF) {
+            Text("audio in ${ui.framesIn} · played ${ui.framesPlayed}",
+                 fontSize = 13.sp, color = Idle)
+        }
 
         Spacer(Modifier.height(8.dp))
 

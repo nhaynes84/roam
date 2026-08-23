@@ -26,6 +26,10 @@ data class StreamUi(
     val notice: String? = null,
     /** ★ Whether the microphone is ACTUALLY delivering, not merely permitted. */
     val capturing: Boolean = false,
+    /** ★ Frames off the socket vs frames the speaker actually accepted. One glance
+     *  separates "never arrived" from "arrived and went nowhere". */
+    val framesIn: Long = 0,
+    val framesPlayed: Long = 0,
 ) {
     val channelOpen: Boolean get() = floor?.open == true
     val talkingNow: String? get() = floor?.talker
@@ -101,7 +105,10 @@ class StreamViewModel(
             c.connect(role).collect { event ->
                 when (event) {
                     is StreamEvent.FloorChanged -> onFloor(event.floor)
-                    is StreamEvent.Audio -> incoming.trySend(event.pcm)
+                    is StreamEvent.Audio -> {
+                        _ui.value = _ui.value.copy(framesIn = _ui.value.framesIn + 1)
+                        incoming.trySend(event.pcm)
+                    }
                     is StreamEvent.Denied ->
                         _ui.value = _ui.value.copy(notice = event.detail)
                     is StreamEvent.Failed ->
@@ -132,14 +139,23 @@ class StreamViewModel(
         val wantCapture = floor.micLive(device) && _ui.value.micGranted
         val wantPlayback = floor.shouldPlay(device)
         audioScope.coLaunch {
-            if (wantPlayback) audio.startPlayback() else audio.stopPlayback()
+            if (wantPlayback) {
+                audio.startPlayback()?.let { why ->
+                    _ui.value = _ui.value.copy(notice = "Speaker would not open — $why")
+                }
+            } else {
+                audio.stopPlayback()
+            }
             if (wantCapture) startCaptureOnAudioThread() else stopCaptureOnAudioThread()
         }
     }
 
     private fun startPlaybackPump() {
         audioScope.coLaunch {
-            for (frame in incoming) audio.write(frame)
+            for (frame in incoming) {
+                val n = audio.write(frame)
+                if (n > 0) _ui.value = _ui.value.copy(framesPlayed = _ui.value.framesPlayed + 1)
+            }
         }
     }
 
