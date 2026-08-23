@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <application
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:label="Nexus"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Nexus"
+        android:usesCleartextTraffic="true">
+        <!-- cleartext: the hub is plain HTTP on the tailnet and WireGuard is the
+             encryption layer. Same rationale as the Mac client. -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="Nexus"
+            android:launchMode="singleTask">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <!-- ⚠️ LAUNCHER only, never HOME: ../nexus is the wrist LAUNCHER,
+                     this is an ordinary app on an ordinary phone. -->
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

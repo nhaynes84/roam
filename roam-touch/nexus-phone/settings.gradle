@@ -1,0 +1,19 @@
+// ★ A SEPARATE Gradle project from ../nexus on purpose.
+//
+// The Pixel 11 runs Android 17, whose platform declares API level "37.0" — the new
+// minor-SDK scheme, which AGP 8.5 cannot parse at all. Targeting it properly needs
+// AGP 9 / Gradle 9 / Kotlin 2, and forcing that upgrade on ../nexus would put the
+// WORKING wrist launcher at risk for a device it will never run on.
+//
+// His call, and the right one: "do 2 different builds if that makes more sense, one
+// for pixel and one for pixel 11; they are different anyway; pixel runs a launcher,
+// 11 runs an app."
+pluginManagement {
+    repositories { google(); mavenCentral(); gradlePluginPortal() }
+}
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories { google(); mavenCentral() }
+}
+rootProject.name = "nexus-phone"
+include ':app'
