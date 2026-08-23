@@ -593,6 +593,12 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
         #: The open audio channel and who currently holds the floor.
         app.state.intercom = intercom_mod.Intercom()
         app.state.intercom_peers = {}
+        #: ⚠️ Diagnostic counters, per device: frames IN from it, frames OUT to it.
+        #: Talk-back "does not come back across to the sender" is one of three very
+        #: different faults — the receiver never captured, the hub never relayed, or
+        #: the sender never played it. Guessing between them wasted a round trip; these
+        #: split it in one test.
+        app.state.intercom_stats = {}
         app.state.poller = asyncio.create_task(_poll_forever(app))
         try:
             yield
@@ -1549,6 +1555,24 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
 
     # ----------------------------------------------------------- websocket
 
+    @app.get("/intercom/state", tags=["channels"],
+             dependencies=[Depends(require_auth_flex)])
+    async def intercom_state() -> dict[str, Any]:
+        """Who holds the floor, and how many audio frames each device sent/received.
+
+        ★ Exists to answer one question without a second round of guessing: when
+        talk-back does not arrive, is the talker not capturing, is the hub not
+        relaying, or is the listener not playing? rx_frames on the talker and
+        tx_frames on the sender separate all three.
+        """
+        ic: intercom_mod.Intercom = app.state.intercom
+        return {
+            **ic.snapshot(),
+            "peers": sorted(app.state.intercom_peers),
+            "stats": app.state.intercom_stats,
+            "queued": {k: len(v) for k, v in app.state.queued.items()},
+        }
+
     @app.websocket("/intercom")
     async def intercom_endpoint(
         websocket: WebSocket,
@@ -1604,10 +1628,17 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
                     break
 
                 if (raw := message.get("bytes")) is not None:
+                    st = app.state.intercom_stats.setdefault(
+                        device, {"rx_frames": 0, "rx_bytes": 0, "tx_frames": 0,
+                                 "tx_bytes": 0, "dropped_no_floor": 0}
+                    )
+                    st["rx_frames"] += 1
+                    st["rx_bytes"] += len(raw)
                     # ⚠️ The gate. Not a client's decision.
                     if ic.expire():
                         await announce()
                     if ic.holder() != device:
+                        st["dropped_no_floor"] += 1
                         continue
                     if device == ic.sender:
                         ic.touch_sender()
@@ -1616,6 +1647,12 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
                             continue
                         try:
                             await sock.send_bytes(raw)
+                            ost = app.state.intercom_stats.setdefault(
+                                other, {"rx_frames": 0, "rx_bytes": 0, "tx_frames": 0,
+                                        "tx_bytes": 0, "dropped_no_floor": 0}
+                            )
+                            ost["tx_frames"] += 1
+                            ost["tx_bytes"] += len(raw)
                         except (WebSocketDisconnect, RuntimeError):
                             peers.pop(other, None)
                     continue
