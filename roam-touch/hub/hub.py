@@ -631,11 +631,20 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
         """What two copies of the same message must agree on.
 
         ⚠️⚠️ NOT the whole body. It used to compare `body.strip() == typed`, and on a
-        long PASTE the two never match: what the client sent and what the agent's hook
-        reports differ in the middle — bracketed paste, terminal reflow and the agent's
-        own normalisation all get a say. Measured on a real one: 1683 chars sent, 1764
-        received. Exact equality failed, the receipt was not recognised as an echo, and
-        the thread drew his paste twice. "duped copy / paste in a chanel".
+        pasted TABLE the two never match. Diffed on the real pair (1683 chars sent,
+        1764 reported, similarity 0.93): **every single difference is a TAB that came
+        back as four spaces.**
+
+            sent  '\tPurity\t'
+            recpt '    Purity    '
+
+        So the divergence is tab expansion by the agent's own input handling, not
+        anything the hub does. Exact equality failed, the receipt was not recognised as
+        an echo, and the thread drew his paste twice — "duped copy / paste in a chanel".
+
+        ⚠️ Worth knowing separately: this means TAB-SENSITIVE content is altered in
+        transit. Pasted tabular data is cosmetic, but a Makefile or a TSV sent through
+        a channel arrives with its tabs expanded, and nothing warns about it.
 
         ★ Whitespace-normalised opening only. Tight enough to be safe — it is compared
         against the SINGLE most recent `sent` inside the echo window, not any message —

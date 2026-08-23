@@ -1059,10 +1059,10 @@ def _echo_key(text: str) -> str:
 def test_a_long_paste_echoes_even_though_the_bodies_differ():
     """⚠️ THE bug behind "duped copy / paste in a chanel".
 
-    Real pair, captured from his history: what the client SENT (1683 chars) and what
-    the agent's hook REPORTED (1764) diverge in the middle — bracketed paste, terminal
-    reflow and the agent's own normalisation all get a say. Exact equality failed, so
-    the receipt was not recognised as an echo and the thread drew his paste twice.
+    Real pair from his history. Diffing them showed the cause exactly: EVERY difference
+    is a tab that came back as four spaces (1683 chars sent, 1764 reported, similarity
+    0.93). Exact equality failed, so the receipt was not recognised as an echo and the
+    thread drew his paste twice.
     """
     import pathlib
     here = pathlib.Path(__file__).resolve().parent
@@ -1071,6 +1071,11 @@ def test_a_long_paste_echoes_even_though_the_bodies_differ():
 
     assert sent.strip() != receipt.strip(), "the whole point: they are NOT identical"
     assert _echo_key(sent) == _echo_key(receipt), "but they are the same message"
+
+
+def test_tabs_and_spaces_are_the_same_message():
+    """The measured cause, in miniature: the agent expands tabs on input."""
+    assert _echo_key("a\tb\tc") == _echo_key("a    b    c")
 
 
 def test_two_different_messages_are_not_treated_as_an_echo():
