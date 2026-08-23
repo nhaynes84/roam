@@ -16,3 +16,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "roam-nexus"
 include ':app'
+include ':stream'
