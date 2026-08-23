@@ -152,7 +152,9 @@ class StreamViewModel(
      */
     private fun startCaptureOnAudioThread() {
         if (captureJob?.isActive == true) return
-        if (!audio.startCapture()) {
+        // The sender is the monitor; a listener holding PTT is close-talking.
+        val monitor = _ui.value.role == Role.SENDER
+        if (!audio.startCapture(monitor = monitor)) {
             _ui.value = _ui.value.copy(
                 capturing = false,
                 notice = "Microphone would not open — this device is NOT sending",

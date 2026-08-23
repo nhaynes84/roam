@@ -38,8 +38,22 @@ class StreamAudio {
         Wire.SAMPLE_RATE, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT
     ).coerceAtLeast(Wire.BYTES_PER_FRAME * 4)
 
+    /**
+     * @param monitor true when this device is the OPEN CHANNEL (the baby monitor),
+     *   false when it is a listener holding PTT.
+     *
+     * ★★ THE TWO DIRECTIONS WANT OPPOSITE AUDIO. He found this immediately: *"it
+     * actually does a surprisingly good job of ignoring background noise, which also
+     * means, my son would have to intentionally yell to get through."*
+     *
+     * That is VOICE_COMMUNICATION doing its job — it is tuned for a handset held to
+     * your face, and everything distant or quiet is treated as noise and gated away.
+     * Correct for talk-back, exactly wrong for a monitor, whose entire purpose is to
+     * carry a small voice from across a room.
+     */
     @SuppressLint("MissingPermission")   // the caller holds RECORD_AUDIO or does not call
-    fun startCapture(): Boolean = runCatching { openRecord() }.getOrDefault(false)
+    fun startCapture(monitor: Boolean = false): Boolean =
+        runCatching { openRecord(monitor) }.getOrDefault(false)
 
     /**
      * ⚠️ Wrapped by [startCapture] because the AudioRecord CONSTRUCTOR throws —
@@ -49,10 +63,13 @@ class StreamAudio {
      * disappears rather than a channel that says it could not open.
      */
     @SuppressLint("MissingPermission")
-    private fun openRecord(): Boolean {
+    private fun openRecord(monitor: Boolean): Boolean {
         if (record != null) return true
+        val source =
+            if (monitor) MediaRecorder.AudioSource.MIC
+            else MediaRecorder.AudioSource.VOICE_COMMUNICATION
         val r = AudioRecord(
-            MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+            source,
             Wire.SAMPLE_RATE,
             AudioFormat.CHANNEL_IN_MONO,
             AudioFormat.ENCODING_PCM_16BIT,
@@ -62,7 +79,10 @@ class StreamAudio {
             r.release()
             return false
         }
-        attachEffects(r.audioSessionId)
+        // ⚠️ On a monitor, only AGC — and deliberately NO NoiseSuppressor. NS is what
+        //    decides a child two metres away is noise. AGC is the opposite: it lifts a
+        //    quiet room instead of gating it.
+        attachEffects(r.audioSessionId, monitor = monitor)
         r.startRecording()
         record = r
         return true
@@ -95,12 +115,17 @@ class StreamAudio {
         val t = AudioTrack.Builder()
             .setAudioAttributes(
                 AudioAttributes.Builder()
-                    // ⚠️ VOICE_COMMUNICATION so it rides the call stream: it ducks
-                    //    music, follows the earpiece/speaker routing the user expects
-                    //    of a call, and is not silenced by Do Not Disturb the way a
-                    //    media stream can be. A monitor that DND can mute is not a
-                    //    monitor.
-                    .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                    // ⚠️⚠️ USAGE_MEDIA, *not* USAGE_VOICE_COMMUNICATION.
+                    //
+                    // VOICE_COMMUNICATION routes to the EARPIECE — the little speaker
+                    // you hold to your head on a call. Everything worked and he heard
+                    // nothing: "the other way doesn't seem to push audio back ... it
+                    // all works, i just didn't hear anything." It was playing, into a
+                    // speaker nobody's ear was against.
+                    //
+                    // An intercom is a loudspeaker device by definition; a talk-back
+                    // you must hold to your face is not talk-back.
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                     .build()
             )
@@ -140,12 +165,14 @@ class StreamAudio {
      * hardware, so a missing effect is a shrug, never a failure — the channel still
      * works, it just sounds like a room.
      */
-    private fun attachEffects(sessionId: Int) {
-        runCatching {
+    private fun attachEffects(sessionId: Int, monitor: Boolean) {
+        // Half-duplex means there is no echo path to cancel, so AEC is a bonus for a
+        // room with a television in it — and on a monitor it is another gate, so off.
+        if (!monitor) runCatching {
             if (AcousticEchoCanceler.isAvailable())
                 AcousticEchoCanceler.create(sessionId)?.also { it.enabled = true; effects += it }
         }
-        runCatching {
+        if (!monitor) runCatching {
             if (NoiseSuppressor.isAvailable())
                 NoiseSuppressor.create(sessionId)?.also { it.enabled = true; effects += it }
         }
