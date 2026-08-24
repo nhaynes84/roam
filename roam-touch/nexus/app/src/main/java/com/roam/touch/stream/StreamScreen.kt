@@ -1,5 +1,10 @@
 package com.roam.touch.stream
 
+import android.graphics.BitmapFactory
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -49,6 +54,7 @@ fun StreamScreen(
     onRole: (Role) -> Unit,
     onPress: () -> Unit,
     onRelease: () -> Unit,
+    onVideo: (Boolean) -> Unit = {},
 ) {
     Column(
         Modifier
@@ -62,6 +68,11 @@ fun StreamScreen(
 
         StatusCard(ui)
 
+        // ★ The picture, when there is one. Video always rides WITH audio — "video in
+        //   isolation does nothing for me, i can't lip read" — so this sits under the
+        //   status rather than replacing it.
+        ui.incomingFrame?.let { jpeg -> VideoFrame(jpeg) }
+
         Text("This device", fontSize = 14.sp, color = Idle)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             RoleChip("Off", ui.role == Role.OFF) { onRole(Role.OFF) }
@@ -71,6 +82,21 @@ fun StreamScreen(
 
         ui.notice?.let {
             Text(it, fontSize = 14.sp, color = Live)
+        }
+        ui.videoNotice?.let {
+            Text(it, fontSize = 14.sp, color = Live)
+        }
+
+        if (ui.role != Role.OFF && ui.channelOpen) {
+            // ★ Either end may turn the SENDER's camera on: "sender can turn on the
+            //   sender video or receiver can turn on sender video". A listener's own
+            //   camera is a separate, self-only switch the hub enforces.
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                RoleChip(
+                    if (ui.videoOut) "Camera on (this device)" else "Show the room",
+                    ui.videoOut,
+                ) { onVideo(!ui.videoOut) }
+            }
         }
         // ★ in / played. "arrived but never played" and "never arrived" look identical
         //   from the outside, and guessing between them cost two round trips.
@@ -175,6 +201,33 @@ private fun TalkButton(ui: StreamUi, onPress: () -> Unit, onRelease: () -> Unit)
             fontSize = 20.sp,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onBackground,
+        )
+    }
+}
+
+
+/**
+ * One JPEG, drawn as it arrives.
+ *
+ * ⚠️ Decoded on every frame and deliberately not cached: unlike a posted image these
+ * bytes are never seen twice, so a cache would only grow. At two to six frames a second
+ * a small JPEG decode is far cheaper than the camera that produced it.
+ */
+@Composable
+private fun VideoFrame(jpeg: ByteArray) {
+    val bmp = remember(jpeg) {
+        runCatching { BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size)?.asImageBitmap() }
+            .getOrNull()
+    }
+    if (bmp != null) {
+        Image(
+            bitmap = bmp,
+            contentDescription = "the open channel",
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(bmp.width.toFloat() / bmp.height.toFloat())
+                .clip(RoundedCornerShape(14.dp)),
+            contentScale = ContentScale.Fit,
         )
     }
 }

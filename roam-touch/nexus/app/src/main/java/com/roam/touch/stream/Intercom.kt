@@ -48,7 +48,10 @@ data class Floor(
     val talker: String?,
     val holder: String?,
     val receivers: List<String>,
+    /** Devices whose camera is live. NOT floor-governed — video has no echo. */
+    val video: List<String> = emptyList(),
 ) {
+    fun videoLive(device: String) = device in video
     /** Should THIS device's microphone be live? */
     fun micLive(device: String) = holder == device
 
@@ -78,6 +81,7 @@ class IntercomClient(
 ) {
     private val json = Json { ignoreUnknownKeys = true }
     @Volatile private var socket: WebSocket? = null
+    @Volatile private var videoSocket: WebSocket? = null
 
     /**
      * ⚠️ `http://`, not `ws://` — OkHttp's HttpUrl rejects a ws scheme outright and
@@ -127,6 +131,54 @@ class IntercomClient(
         }
     }
 
+    /**
+     * Video rides its OWN socket.
+     *
+     * ⚠️ Not multiplexed onto the audio socket: a video frame is orders of magnitude
+     * bigger than a 640-byte audio frame and would head-of-line block the speech
+     * behind it. Audio is the stream that must never stutter; video may drop a frame
+     * and nobody notices.
+     */
+    fun connectVideo(): Flow<ByteArray> = callbackFlow {
+        val url = "http://${config.host}:${config.port}/intercom/video" +
+                "?device=$device&token=${config.token}"
+        val ws = client.newWebSocket(Request.Builder().url(url).build(),
+            object : WebSocketListener() {
+                override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+                    trySend(bytes.toByteArray())
+                }
+
+                override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                    close()
+                }
+
+                override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                    close()
+                }
+            })
+        videoSocket = ws
+        awaitClose {
+            videoSocket = null
+            ws.close(1000, null)
+        }
+    }
+
+    fun sendVideo(jpeg: ByteArray) {
+        videoSocket?.send(jpeg.toByteString())
+    }
+
+    /**
+     * Ask the hub to turn a camera on or off.
+     *
+     * ★ `target` defaults to the SENDER, because "receiver can turn on sender video"
+     * is the common case. The hub enforces who may do this — a listener's camera is
+     * their own, and only they can open it.
+     */
+    fun setVideo(on: Boolean, target: String? = null) {
+        val t = target?.let { """,\"target\":\"$it\"""" } ?: ""
+        socket?.send("""{"type":"video","on":$on$t}""")
+    }
+
     /** Hold PTT. The hub answers with a [Floor]; do not assume it was granted. */
     fun press() { socket?.send("""{"type":"press"}""") }
 
@@ -162,6 +214,8 @@ fun parseFloor(obj: JsonObject): Floor? {
         talker = obj.str("talker"),
         holder = obj.str("holder"),
         receivers = obj["receivers"]?.jsonArray
+            ?.mapNotNull { it.jsonPrimitive.nullSafe() } ?: emptyList(),
+        video = obj["video"]?.jsonArray
             ?.mapNotNull { it.jsonPrimitive.nullSafe() } ?: emptyList(),
     )
 }

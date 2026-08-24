@@ -96,6 +96,7 @@ fun NexusApp(
     onRole: (Role) -> Unit,
     onPress: () -> Unit,
     onRelease: () -> Unit,
+    onVideo: (Boolean) -> Unit,
 ) {
     var tab by remember { mutableStateOf(Tab.CHANNELS) }
     var openApp by remember { mutableStateOf<NexusAppId?>(null) }
@@ -133,7 +134,7 @@ fun NexusApp(
                 Tab.APPS ->
                     when (openApp) {
                         NexusAppId.STREAM ->
-                            StreamScreen(streamUi, onRole, onPress, onRelease)
+                            StreamScreen(streamUi, onRole, onPress, onRelease, onVideo)
                         null -> AppsScreen(streamUi) { openApp = it }
                     }
                 Tab.CHANNELS ->

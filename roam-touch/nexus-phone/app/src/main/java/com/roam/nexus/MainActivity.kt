@@ -28,6 +28,11 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestPermission()
     ) { granted -> stream.onMicPermission(granted) }
 
+    // ⚠️ Its own request: a camera is a bigger ask than a microphone.
+    private val askCamera = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val config = NexusViewModel.config()
@@ -37,7 +42,7 @@ class MainActivity : ComponentActivity() {
 
         val factory = viewModelFactory {
             initializer { NexusViewModel(HubApi(config)) }
-            initializer { StreamViewModel(config, device) }
+            initializer { StreamViewModel(config, device, video = com.roam.touch.stream.StreamVideo(applicationContext)) }
         }
         val provider = ViewModelProvider(this, factory)
         nexus = provider[NexusViewModel::class.java]
@@ -70,6 +75,10 @@ class MainActivity : ComponentActivity() {
                     },
                     onPress = stream::press,
                     onRelease = stream::release,
+                    onVideo = { on ->
+                        if (on && !su.videoOut) askCamera.launch(Manifest.permission.CAMERA)
+                        stream.setVideo(on)
+                    },
                 )
             }
         }

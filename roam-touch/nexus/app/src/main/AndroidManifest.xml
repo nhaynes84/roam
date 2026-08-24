@@ -20,6 +20,7 @@
       com.roam.touch.channels.stt.Ptt and MicPolicyTest, which fail if that changes.
     -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.CAMERA" />
     <!--
       ⚠️⚠️ Push to talk records from a BLUETOOTH HEADSET, not from this handset. Its own
       analog capture is dead at the HAL (measured: every source, rate and buffer size

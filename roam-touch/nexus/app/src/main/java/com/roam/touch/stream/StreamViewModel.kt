@@ -30,6 +30,11 @@ data class StreamUi(
      *  separates "never arrived" from "arrived and went nowhere". */
     val framesIn: Long = 0,
     val framesPlayed: Long = 0,
+    /** Whether THIS device's camera is live, per the hub. */
+    val videoOut: Boolean = false,
+    /** The most recent frame from whoever is showing a picture. */
+    val incomingFrame: ByteArray? = null,
+    val videoNotice: String? = null,
 ) {
     val channelOpen: Boolean get() = floor?.open == true
     val talkingNow: String? get() = floor?.talker
@@ -49,6 +54,7 @@ class StreamViewModel(
     private val config: HubConfig,
     private val device: String,
     private val audio: StreamAudio = StreamAudio(),
+    private val video: StreamVideo? = null,
 ) : ViewModel() {
 
     private val _ui = MutableStateFlow(StreamUi())
@@ -57,6 +63,7 @@ class StreamViewModel(
     private var client: IntercomClient? = null
     private var socketJob: Job? = null
     private var captureJob: Job? = null
+    private var videoJob: Job? = null
 
     /**
      * ⚠️⚠️ EVERY audio call runs here, never on the main thread.
@@ -130,6 +137,11 @@ class StreamViewModel(
         val c = IntercomClient(config, device)
         client = c
         startPlaybackPump()
+        videoJob = viewModelScope.launch {
+            c.connectVideo().collect { jpeg ->
+                _ui.value = _ui.value.copy(incomingFrame = jpeg)
+            }
+        }
         socketJob = viewModelScope.launch {
             c.connect(role).collect { event ->
                 when (event) {
@@ -164,7 +176,12 @@ class StreamViewModel(
      * let the answer decide.
      */
     private fun onFloor(floor: Floor) {
-        _ui.value = _ui.value.copy(floor = floor, connected = true)
+        val wantVideo = floor.videoLive(device)
+        _ui.value = _ui.value.copy(floor = floor, connected = true, videoOut = wantVideo)
+        // ⚠️ The camera follows the HUB, exactly as the microphone does. A receiver may
+        //    switch this device's camera on remotely, so a local toggle is not the
+        //    authority — the answer that comes back is.
+        if (wantVideo) startVideo() else stopVideo()
         val wantCapture = floor.micLive(device) && _ui.value.micGranted
         val wantPlayback = floor.shouldPlay(device)
         audioScope.coLaunch {
@@ -177,6 +194,21 @@ class StreamViewModel(
             }
             if (wantCapture) startCaptureOnAudioThread() else stopCaptureOnAudioThread()
         }
+    }
+
+    /** Ask the hub to turn a camera on. Default target is the sender. */
+    fun setVideo(on: Boolean, target: String? = null) = client?.setVideo(on, target)
+
+    private fun startVideo() {
+        val v = video ?: return
+        if (_ui.value.videoNotice != null) return
+        val why = v.start { jpeg -> client?.sendVideo(jpeg) }
+        if (why != null) _ui.value = _ui.value.copy(videoNotice = "Camera: $why")
+    }
+
+    private fun stopVideo() {
+        video?.stop()
+        _ui.value = _ui.value.copy(videoNotice = null)
     }
 
     private fun startPlaybackPump() {
@@ -228,6 +260,9 @@ class StreamViewModel(
     private fun stopEverything() {
         socketJob?.cancel()
         socketJob = null
+        videoJob?.cancel()
+        videoJob = null
+        stopVideo()
         client = null
         audioScope.coLaunch {
             stopCaptureOnAudioThread()

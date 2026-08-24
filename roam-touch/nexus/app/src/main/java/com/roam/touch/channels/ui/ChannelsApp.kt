@@ -123,6 +123,7 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
     val creating by vm.creating.collectAsStateWithLifecycle()
     val nowMs = rememberTicker()
     val requestMic = rememberMicPermission(vm)
+    val askStreamCamera = rememberStreamCamera()
     // ★ Stream on the wrist. Same hub config and token as everything else — Roam.hub
     //   is the one place either is built. Held across recomposition so switching to
     //   another screen does not drop an open channel.
@@ -443,8 +444,11 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
                 )
 
                 Screen.Stream -> {
+                    val ctx = androidx.compose.ui.platform.LocalContext.current
                     val vm0 = streamVm ?: StreamViewModel(
-                        Roam.hub, android.os.Build.MODEL ?: "roam"
+                        Roam.hub,
+                        android.os.Build.MODEL ?: "roam",
+                        video = com.roam.touch.stream.StreamVideo(ctx.applicationContext),
                     ).also { streamVm = it }
                     val askStreamMic = rememberStreamMic(vm0)
                     val ui by vm0.ui.collectAsStateWithLifecycle()
@@ -460,6 +464,10 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
                         },
                         onPress = vm0::press,
                         onRelease = vm0::release,
+                        onVideo = { on ->
+                            if (on && !ui.videoOut) askStreamCamera()
+                            vm0.setVideo(on)
+                        },
                     )
                 }
 
@@ -674,6 +682,15 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
  * answers with "hold the mic and talk" — wrong for a device being set as an open
  * channel, and wronger for a receiver that may never talk at all.
  */
+/** ⚠️ Separate from the mic gate: a camera is a bigger ask and deserves its own. */
+@Composable
+private fun rememberStreamCamera(): () -> Unit {
+    val launcher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { }
+    return { launcher.launch(android.Manifest.permission.CAMERA) }
+}
+
 @Composable
 private fun rememberStreamMic(streamVm: StreamViewModel): () -> Unit {
     val launcher = rememberLauncherForActivityResult(
