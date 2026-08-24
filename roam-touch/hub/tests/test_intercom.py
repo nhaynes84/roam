@@ -277,3 +277,115 @@ def test_the_floor_returns_to_the_sender_when_a_talker_disconnects(client):
             rx.send_text('{"type":"press"}')
             _floor_until(tx, "desk")
         _floor_until(tx, "kitchen")   # a dropped talker frees the floor
+
+
+class TestVideo:
+    """★ "Streams should default to audio, but have the ability to turn on the video
+    feed, from either end." Video rides alongside audio and is NOT floor-governed —
+    audio is half-duplex only because of echo, and video has none."""
+
+    def test_video_is_off_until_asked_for(self):
+        ic = opened()
+        assert not ic.video_live("kitchen")
+        assert ic.snapshot()["video"] == []
+
+    def test_a_receiver_may_turn_on_the_senders_camera(self):
+        """The product: looking in on the room is why the channel exists."""
+        ic = opened()
+        ic.join("desk", now=1.0)
+        ic.set_video("kitchen", True, by="desk")
+        assert ic.video_live("kitchen")
+
+    def test_the_sender_may_turn_on_its_own_camera(self):
+        ic = opened()
+        ic.set_video("kitchen", True, by="kitchen")
+        assert ic.video_live("kitchen")
+
+    def test_nobody_may_open_a_camera_on_a_listener(self):
+        """⚠️ The asymmetry is the privacy decision. A receiver's camera is theirs."""
+        ic = opened()
+        ic.join("desk", now=1.0)
+        ic.join("phone", now=1.0)
+        with pytest.raises(IntercomError):
+            ic.set_video("desk", True, by="phone")
+        with pytest.raises(IntercomError):
+            ic.set_video("desk", True, by="kitchen")
+        assert not ic.video_live("desk")
+
+    def test_a_listener_may_turn_on_their_own_camera_to_talk_back(self):
+        ic = opened()
+        ic.join("desk", now=1.0)
+        ic.set_video("desk", True, by="desk")
+        assert ic.video_live("desk")
+
+    def test_video_does_not_follow_the_floor(self):
+        """The room stays visible while someone talks back — that is the point."""
+        ic = opened()
+        ic.join("desk", now=1.0)
+        ic.set_video("kitchen", True, by="desk")
+        ic.press("desk", now=1.0)
+        assert ic.holder() == "desk"
+        assert ic.video_live("kitchen"), "the monitor must not go dark to talk to it"
+
+    def test_a_camera_never_outlives_its_socket(self):
+        ic = opened()
+        ic.join("desk", now=1.0)
+        ic.set_video("desk", True, by="desk")
+        ic.leave("desk")
+        assert not ic.video_live("desk")
+
+    def test_closing_the_channel_kills_the_senders_camera(self):
+        ic = opened()
+        ic.set_video("kitchen", True, by="kitchen")
+        ic.close_channel("kitchen")
+        assert not ic.video_live("kitchen")
+        assert ic.snapshot()["video"] == []
+
+
+def _vws(client, device):
+    return client.websocket_connect(f"/intercom/video?device={device}&token={TOKEN}")
+
+
+def test_video_frames_reach_listeners_when_the_camera_is_on(client):
+    with _ws(client, "kitchen", "sender") as tx, _ws(client, "desk") as rx:
+        _floor(rx)
+        rx.send_text('{"type":"video","target":"kitchen","on":true}')
+        _floor_until(rx, "kitchen")
+        with _vws(client, "kitchen") as vtx, _vws(client, "desk") as vrx:
+            vtx.send_bytes(b"JPEGFRAME")
+            assert vrx.receive()["bytes"] == b"JPEGFRAME"
+
+
+def test_video_from_a_camera_that_was_switched_off_is_dropped(client):
+    """⚠️ Same rule as audio: the SERVER decides whether the bytes travel. A client
+    told to stop is not trusted to stop, and a picture arriving after the camera was
+    turned off is the failure that matters."""
+    with _ws(client, "kitchen", "sender") as tx, _ws(client, "desk") as rx:
+        _floor(rx)
+        with _vws(client, "kitchen") as vtx, _vws(client, "desk") as vrx:
+            vtx.send_bytes(b"SHOULD-NOT-TRAVEL")     # camera never enabled
+            rx.send_text('{"type":"video","target":"kitchen","on":true}')
+            _floor_until(rx, "kitchen")
+            vtx.send_bytes(b"NOW-ALLOWED")
+            assert vrx.receive()["bytes"] == b"NOW-ALLOWED"
+
+
+def test_the_picture_survives_a_ptt_burst(client):
+    """★ Video is not floor-governed: the room stays visible while you talk to it."""
+    with _ws(client, "kitchen", "sender") as tx, _ws(client, "desk") as rx:
+        _floor(rx)
+        rx.send_text('{"type":"video","target":"kitchen","on":true}')
+        _floor_until(rx, "kitchen")
+        rx.send_text('{"type":"press"}')
+        _floor_until(rx, "desk")
+        with _vws(client, "kitchen") as vtx, _vws(client, "desk") as vrx:
+            vtx.send_bytes(b"STILL-WATCHING")
+            assert vrx.receive()["bytes"] == b"STILL-WATCHING"
+
+
+def test_a_listener_cannot_open_a_camera_on_another_listener(client):
+    with _ws(client, "kitchen", "sender") as tx, \
+         _ws(client, "desk") as rx, _ws(client, "phone") as phone:
+        _floor(phone)
+        phone.send_text('{"type":"video","target":"desk","on":true}')
+        assert "own camera" in _until(phone, "denied")["detail"]

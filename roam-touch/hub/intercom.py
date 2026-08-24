@@ -48,6 +48,8 @@ class Intercom:
     sender: str | None = None
     talker: str | None = None
     receivers: dict[str, float] = field(default_factory=dict)
+    #: Devices whose CAMERA is live. Not floor-governed — see `set_video`.
+    video: set[str] = field(default_factory=set)
     talk_started: float | None = None
     talk_timeout_s: float = DEFAULT_TALK_TIMEOUT_S
     sender_seen: float | None = None
@@ -77,6 +79,7 @@ class Intercom:
         """The sender stops. Any burst in flight dies with it."""
         if self.sender != device:
             return
+        self.video.discard(device)
         self.sender = None
         self.sender_seen = None
         self.talker = None
@@ -90,8 +93,40 @@ class Intercom:
 
     def leave(self, device: str) -> None:
         self.receivers.pop(device, None)
+        # ⚠️ A camera must never outlive the socket that was showing it.
+        self.video.discard(device)
         if self.talker == device:
             self.release(device)
+
+    # ---------------------------------------------------------------- video
+
+    def set_video(self, target: str, on: bool, by: str) -> None:
+        """Turn a device's camera on or off.
+
+        ★★ VIDEO IS NOT FLOOR-GOVERNED, and that is the whole point. Audio is
+        half-duplex only because of echo; video has no echo, so the monitor keeps
+        showing the room while someone talks back. His words: *"video in isolation
+        does nothing for me, i can't lip read"* — so video always rides alongside
+        audio, and the audio rules are untouched.
+
+        ⚠️ THE ASYMMETRY IS DELIBERATE, and it is a privacy decision, not an
+        oversight:
+          * the SENDER's camera may be switched on by ANYONE — *"receiver can turn on
+            sender video"*. That is the product: looking in on the room is the reason
+            the channel exists.
+          * a RECEIVER's own camera is theirs alone — *"Sender PTT is at sender
+            discretion, they can toggle video on / off before a PTT event"*. Nobody
+            gets to open a camera on the person who is merely listening.
+        """
+        if target != self.sender and target != by:
+            raise IntercomError("only that device can turn on its own camera")
+        if on:
+            self.video.add(target)
+        else:
+            self.video.discard(target)
+
+    def video_live(self, device: str) -> bool:
+        return device in self.video
 
     # ---------------------------------------------------------------- floor
 
@@ -170,4 +205,5 @@ class Intercom:
             "talker": self.talker,
             "holder": self.holder(),
             "receivers": sorted(self.receivers),
+            "video": sorted(self.video),
         }

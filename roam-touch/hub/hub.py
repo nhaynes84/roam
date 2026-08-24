@@ -596,6 +596,8 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
         #: The open audio channel and who currently holds the floor.
         app.state.intercom = intercom_mod.Intercom()
         app.state.intercom_peers = {}
+        #: Video sockets, kept apart from audio so a frame cannot delay speech.
+        app.state.video_peers = {}
         #: ⚠️ Diagnostic counters, per device: frames IN from it, frames OUT to it.
         #: Talk-back "does not come back across to the sender" is one of three very
         #: different faults — the receiver never captured, the hub never relayed, or
@@ -1674,6 +1676,67 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
             "queued": {k: len(v) for k, v in app.state.queued.items()},
         }
 
+    @app.websocket("/intercom/video")
+    async def intercom_video(
+        websocket: WebSocket,
+        device: str = Query(..., min_length=1, max_length=64),
+        token_q: str | None = Query(default=None, alias="token"),
+    ) -> None:
+        """Video frames, on their OWN socket.
+
+        ⚠️⚠️ Separate from /intercom on purpose. A video frame is orders of magnitude
+        bigger than a 640-byte audio frame, and on one socket it would head-of-line
+        block the audio behind it — a monitor whose speech goes choppy whenever the
+        picture updates is worse than one with no picture at all. Audio is the payload
+        that must never stutter; video is the one that can drop a frame unnoticed.
+
+        ★ NOT floor-governed. The floor is an echo rule and echo is an audio problem,
+        so the room stays visible while someone talks back. The gate here is only
+        "is this device's camera supposed to be on", which intercom.set_video owns.
+        """
+        header = websocket.headers.get("authorization", "")
+        supplied = header[7:].strip() if header.lower().startswith("bearer ") else ""
+        supplied = supplied or (token_q or "")
+        if not supplied or not secrets.compare_digest(supplied, token):
+            await websocket.accept()
+            await websocket.send_json({"type": "error", "detail": "unauthorised"})
+            await websocket.close(code=4401)
+            return
+
+        await websocket.accept()
+        ic: intercom_mod.Intercom = app.state.intercom
+        peers: dict[str, WebSocket] = app.state.video_peers
+        peers[device] = websocket
+        try:
+            while True:
+                message = await websocket.receive()
+                if message.get("type") == "websocket.disconnect":
+                    break
+                raw = message.get("bytes")
+                if raw is None:
+                    continue
+                # ⚠️ Same rule as audio: the SERVER decides whether these bytes travel.
+                #    A client whose camera was switched off remotely is not trusted to
+                #    stop sending, and a picture that keeps arriving after it was
+                #    turned off is the failure that matters here.
+                if not ic.video_live(device):
+                    st = app.state.intercom_stats.setdefault(
+                        device, {"rx_frames": 0, "rx_bytes": 0, "tx_frames": 0,
+                                 "tx_bytes": 0, "dropped_no_floor": 0})
+                    st["dropped_no_floor"] += 1
+                    continue
+                for other, sock in list(peers.items()):
+                    if other == device:
+                        continue
+                    try:
+                        await sock.send_bytes(raw)
+                    except (WebSocketDisconnect, RuntimeError):
+                        peers.pop(other, None)
+        except WebSocketDisconnect:
+            pass
+        finally:
+            peers.pop(device, None)
+
     @app.websocket("/intercom")
     async def intercom_endpoint(
         websocket: WebSocket,
@@ -1775,6 +1838,14 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
                         ic.open_channel(device)
                     elif kind == "close":
                         ic.close_channel(device)
+                    elif kind == "video":
+                        # target defaults to the sender: "receiver can turn on sender
+                        # video" is the common case and should not need naming.
+                        ic.set_video(
+                            control.get("target") or (ic.sender or device),
+                            bool(control.get("on", True)),
+                            by=device,
+                        )
                     else:
                         continue
                 except intercom_mod.IntercomError as exc:
