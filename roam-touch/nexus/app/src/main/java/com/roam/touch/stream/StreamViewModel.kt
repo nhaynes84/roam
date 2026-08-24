@@ -218,7 +218,15 @@ class StreamViewModel(
 
     private fun startVideo(facing: String, reopen: Boolean) {
         val v = video ?: return
-        val send: (ByteArray) -> Unit = { jpeg -> client?.sendVideo(jpeg) }
+        // ⚠️ A listener's camera is ARMED, not broadcasting: frames only leave while
+        //    they hold the floor. The hub enforces this too, but sending bytes that
+        //    will be dropped costs the phone battery and the link bandwidth for
+        //    nothing.
+        val send: (ByteArray) -> Unit = { jpeg ->
+            val f = _ui.value.floor
+            val mine = f?.sender == device || f?.talker == device
+            if (mine) client?.sendVideo(jpeg)
+        }
         val why = if (reopen) v.switchTo(facing, send) else v.start(facing, send)
         _ui.value = _ui.value.copy(videoNotice = why?.let { "Camera: $it" })
     }

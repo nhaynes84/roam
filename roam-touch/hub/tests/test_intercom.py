@@ -425,3 +425,39 @@ class TestCameraSelection:
         ic.set_video("kitchen", True, by="kitchen", facing="front")
         ic.set_video("kitchen", False, by="kitchen")
         assert ic.video_facing("kitchen") is None
+
+
+class TestListenerVideoIsABurst:
+    """★ "once i enable video as the PTT option as a receiver, it shows it non stop;
+    not just when sending." The sender IS the monitor and is continuous; a listener's
+    camera is the other half of a talk-back and belongs to the burst."""
+
+    def test_the_senders_camera_is_continuous(self):
+        ic = opened()
+        ic.set_video("kitchen", True, by="kitchen")
+        assert ic.video_should_relay("kitchen")
+
+    def test_a_listeners_camera_is_dark_until_they_hold_the_floor(self):
+        ic = opened()
+        ic.join("desk", now=1.0)
+        ic.set_video("desk", True, by="desk")
+        assert not ic.video_should_relay("desk"), "enabling is arming, not broadcasting"
+        ic.press("desk", now=1.0)
+        assert ic.video_should_relay("desk")
+        ic.release("desk")
+        assert not ic.video_should_relay("desk"), "dark the moment they let go"
+
+    def test_the_monitor_keeps_showing_while_someone_talks_back(self):
+        ic = opened()
+        ic.join("desk", now=1.0)
+        ic.set_video("kitchen", True, by="desk")
+        ic.set_video("desk", True, by="desk")
+        ic.press("desk", now=1.0)
+        assert ic.video_should_relay("kitchen"), "the room must not go dark"
+        assert ic.video_should_relay("desk")
+
+    def test_a_camera_that_was_never_enabled_never_relays(self):
+        ic = opened()
+        ic.join("desk", now=1.0)
+        ic.press("desk", now=1.0)
+        assert not ic.video_should_relay("desk")

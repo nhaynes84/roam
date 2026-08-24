@@ -37,6 +37,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 
 private val Live = Color(0xFFE5484D)
 private val Listening = Color(0xFF3E9B4F)
@@ -56,10 +58,15 @@ fun StreamScreen(
     onRelease: () -> Unit,
     onVideo: (Boolean, String, String?) -> Unit = { _, _, _ -> },
 ) {
+    // ⚠️ SCROLLABLE. With a video frame on screen the PTT button was pushed off the
+    //    bottom and simply could not be reached — "video streams to the pixel but it
+    //    can't scroll down and use the PTT button". A fixed Column is fine until
+    //    something tall appears in it, and then it is a trap.
     Column(
         Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
+            .verticalScroll(rememberScrollState())
             .padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {

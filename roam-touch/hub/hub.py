@@ -1719,7 +1719,7 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
                 #    A client whose camera was switched off remotely is not trusted to
                 #    stop sending, and a picture that keeps arriving after it was
                 #    turned off is the failure that matters here.
-                if not ic.video_live(device):
+                if not ic.video_should_relay(device):
                     st = app.state.intercom_stats.setdefault(
                         device, {"rx_frames": 0, "rx_bytes": 0, "tx_frames": 0,
                                  "tx_bytes": 0, "dropped_no_floor": 0})

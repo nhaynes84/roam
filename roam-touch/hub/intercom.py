@@ -135,6 +135,28 @@ class Intercom:
     def video_facing(self, device: str) -> str | None:
         return self.video.get(device)
 
+    def video_should_relay(self, device: str) -> bool:
+        """Whether this device's camera should actually be going out right now.
+
+        ★★ THE SENDER'S CAMERA IS CONTINUOUS; A LISTENER'S IS A BURST. He caught this
+        immediately: *"once i enable video as the PTT option as a receiver, it shows it
+        non stop; not just when sending"*.
+
+        The sender IS the monitor — its picture is the product, and it must survive
+        someone talking back. A listener's camera is the other half of a talk-back, so
+        it belongs to the burst: live while they hold the floor, dark the moment they
+        let go. Enabling it is arming it, not broadcasting.
+
+        ⚠️ Note this makes a listener's video floor-governed while the sender's is not.
+        That is not an inconsistency — the floor is about who is TALKING, and a
+        listener's camera only means anything while they are.
+        """
+        if device not in self.video:
+            return False
+        if device == self.sender:
+            return True
+        return self.talker == device
+
     # ---------------------------------------------------------------- floor
 
     @property

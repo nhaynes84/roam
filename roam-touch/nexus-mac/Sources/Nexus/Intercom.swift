@@ -193,7 +193,15 @@ final class IntercomClient {
             if wantVideo {
                 if reopen { video.stop() }
                 videoNotice = video.start(facing: wantFacing) { [weak self] jpeg in
-                    self?.videoTask?.send(.data(jpeg)) { _ in }
+                    // ⚠️ A listener's camera is ARMED, not broadcasting — frames only
+                    //    leave while they hold the floor. The hub enforces it as well,
+                    //    but sending bytes that will be dropped is waste on both ends.
+                    Task { @MainActor in
+                        guard let self else { return }
+                        let mine = self.floor?.sender == self.device
+                            || self.floor?.talker == self.device
+                        if mine { self.videoTask?.send(.data(jpeg)) { _ in } }
+                    }
                 }
             } else {
                 video.stop()
