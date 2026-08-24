@@ -34,7 +34,10 @@ struct Floor: Decodable, Equatable, Sendable {
     var talker: String?
     var holder: String?
     var receivers: [String]
+    /// Devices whose camera is live. NOT floor-governed — video has no echo.
+    var video: [String] = []
 
+    func videoLive(_ device: String) -> Bool { video.contains(device) }
     func micLive(_ device: String) -> Bool { holder == device }
     func shouldPlay(_ device: String) -> Bool { holder != nil && holder != device }
 }
@@ -52,14 +55,22 @@ final class IntercomClient {
     private(set) var floor: Floor?
     private(set) var connected = false
     private(set) var notice: String?
+    /// Whether THIS Mac's camera is live, per the hub.
+    private(set) var videoOut = false
+    /// The newest frame from whoever is showing a picture.
+    private(set) var frame: Data?
+    private(set) var videoNotice: String?
 
     /// Named after the machine, so the floor snapshot is readable by a human.
     let device: String
 
     private let config: HubConfig
     private let audio = StreamAudio()
+    private let video = StreamVideo()
     private var task: URLSessionWebSocketTask?
+    private var videoTask: URLSessionWebSocketTask?
     private var pump: Task<Void, Never>?
+    private var videoPump: Task<Void, Never>?
 
     init(config: HubConfig, device: String = Host.current().localizedName ?? "mac") {
         self.config = config
@@ -96,6 +107,19 @@ final class IntercomClient {
         task = socket
         connected = true
         pump = Task { await receiveLoop(socket) }
+
+        // ⚠️ Video gets its OWN socket. A frame is orders of magnitude bigger than a
+        //    640-byte audio frame and would head-of-line block the speech behind it.
+        var v = comps
+        v.path = "/intercom/video"
+        v.queryItems = [
+            .init(name: "device", value: device),
+            .init(name: "token", value: config.token),
+        ]
+        let vsocket = URLSession.shared.webSocketTask(with: v.url!)
+        vsocket.resume()
+        videoTask = vsocket
+        videoPump = Task { await videoLoop(vsocket) }
     }
 
     private func receiveLoop(_ socket: URLSessionWebSocketTask) async {
@@ -112,6 +136,16 @@ final class IntercomClient {
             } catch {
                 connected = false
                 if role != .off { notice = "stream link dropped" }
+                return
+            }
+        }
+    }
+
+    private func videoLoop(_ socket: URLSessionWebSocketTask) async {
+        while !Task.isCancelled {
+            do {
+                if case .data(let jpeg) = try await socket.receive() { frame = jpeg }
+            } catch {
                 return
             }
         }
@@ -142,6 +176,22 @@ final class IntercomClient {
         floor = next
         connected = true
 
+        // ⚠️ The camera follows the HUB, never a local toggle — a receiver may switch
+        //    this Mac's camera on remotely, so the answer that comes back is the
+        //    authority. Same rule the microphone follows.
+        let wantVideo = next.videoLive(device)
+        if wantVideo != videoOut {
+            videoOut = wantVideo
+            if wantVideo {
+                videoNotice = video.start { [weak self] jpeg in
+                    self?.videoTask?.send(.data(jpeg)) { _ in }
+                }
+            } else {
+                video.stop()
+                videoNotice = nil
+            }
+        }
+
         if next.shouldPlay(device) { audio.startPlayback() } else { audio.stopPlayback() }
 
         if next.micLive(device) {
@@ -163,6 +213,13 @@ final class IntercomClient {
         send(text: #"{"type":"release"}"#)
     }
 
+    /// Ask the hub to turn a camera on. Default target is the sender — "receiver can
+    /// turn on sender video" is the common case and should not need naming.
+    func setVideo(_ on: Bool, target: String? = nil) {
+        let t = target.map { #","target":"\#($0)""# } ?? ""
+        send(text: #"{"type":"video","on":\#(on)\#(t)}"#)
+    }
+
     private func send(text: String) {
         task?.send(.string(text)) { [weak self] error in
             guard let error else { return }
@@ -179,6 +236,12 @@ final class IntercomClient {
 
     private func teardown() {
         pump?.cancel(); pump = nil
+        videoPump?.cancel(); videoPump = nil
+        video.stop()
+        videoTask?.cancel(with: .goingAway, reason: nil)
+        videoTask = nil
+        frame = nil
+        videoOut = false
         audio.stopCapture()
         audio.stopPlayback()
         task?.cancel(with: .goingAway, reason: nil)

@@ -29,6 +29,10 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <!-- Stream captures audio. macOS refuses the mic outright without this string,
          and the refusal is silent from the app's side — the engine just returns
          empty buffers, which looks exactly like a broken microphone. -->
+    <!-- ⚠️ Without this macOS refuses the camera SILENTLY — no frames, no error,
+         which is indistinguishable from a broken camera. Exactly the trap the
+         microphone had. -->
+    <key>NSCameraUsageDescription</key><string>Stream uses the camera to show your room on the open channel, when you or another device turns it on.</string>
     <key>NSMicrophoneUsageDescription</key><string>Stream uses the microphone to open an audio channel to your other devices, and to talk back on push-to-talk.</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>

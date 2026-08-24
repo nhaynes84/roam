@@ -16,6 +16,19 @@ struct StreamView: View {
 
             statusCard
 
+            // ★ The picture sits UNDER the status, not instead of it: video always
+            //   rides with audio — "video in isolation does nothing for me, i can't
+            //   lip read" — so the audio state stays the headline.
+            if let jpeg = stream.frame, let image = NSImage(data: jpeg) {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(maxWidth: 520)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .overlay(RoundedRectangle(cornerRadius: 12)
+                        .strokeBorder(Theme.agentEdge, lineWidth: 1))
+            }
+
             Text("This device — \(stream.device)")
                 .font(.system(size: 14)).foregroundStyle(.secondary)
             Picker("", selection: Binding(
@@ -32,6 +45,25 @@ struct StreamView: View {
             if let notice = stream.notice {
                 Label(notice, systemImage: "exclamationmark.triangle.fill")
                     .font(.system(size: 14)).foregroundStyle(.orange)
+            }
+            if let notice = stream.videoNotice {
+                Label(notice, systemImage: "video.slash")
+                    .font(.system(size: 14)).foregroundStyle(.orange)
+            }
+
+            if stream.role != .off && stream.channelOpen {
+                // ★ Either end may switch the SENDER's camera on. A listener's own
+                //   camera is a separate switch the hub enforces as self-only.
+                Toggle(isOn: Binding(
+                    get: { stream.videoOut },
+                    set: { stream.setVideo($0) })
+                ) {
+                    Label(stream.videoOut ? "Camera on — this Mac is showing the room"
+                                          : "Show the room",
+                          systemImage: stream.videoOut ? "video.fill" : "video")
+                        .font(.system(size: 14))
+                }
+                .toggleStyle(.switch)
             }
 
             if stream.role == .receiver {
