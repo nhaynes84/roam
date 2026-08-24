@@ -16,6 +16,7 @@ import okhttp3.WebSocketListener
 import okio.ByteString
 import okio.ByteString.Companion.toByteString
 import java.util.concurrent.TimeUnit
+import kotlinx.serialization.json.jsonObject
 
 /**
  * The Stream wire format and the client that speaks it.
@@ -48,10 +49,11 @@ data class Floor(
     val talker: String?,
     val holder: String?,
     val receivers: List<String>,
-    /** Devices whose camera is live. NOT floor-governed — video has no echo. */
-    val video: List<String> = emptyList(),
+    /** device -> lens it is showing. NOT floor-governed — video has no echo. */
+    val video: Map<String, String> = emptyMap(),
 ) {
     fun videoLive(device: String) = device in video
+    fun videoFacing(device: String) = video[device]
     /** Should THIS device's microphone be live? */
     fun micLive(device: String) = holder == device
 
@@ -168,15 +170,23 @@ class IntercomClient(
     }
 
     /**
-     * Ask the hub to turn a camera on or off.
+     * Ask the hub to turn a camera on, and which lens.
      *
-     * ★ `target` defaults to the SENDER, because "receiver can turn on sender video"
-     * is the common case. The hub enforces who may do this — a listener's camera is
-     * their own, and only they can open it.
+     * ⚠️ Built by concatenation, not a raw string. The previous version wrote
+     * `""",\"target\":\"$it\""""` — inside a Kotlin RAW string `\"` is a literal
+     * backslash followed by a quote, so it emitted malformed JSON and the hub could
+     * never have parsed a target. It was never exercised because target is normally
+     * null.
+     *
+     * ★ `target` defaults to the SENDER: "receiver can select sender cam option".
+     * A listener's own camera is self-only and the hub enforces that.
      */
-    fun setVideo(on: Boolean, target: String? = null) {
-        val t = target?.let { """,\"target\":\"$it\"""" } ?: ""
-        socket?.send("""{"type":"video","on":$on$t}""")
+    fun setVideo(on: Boolean, facing: String = "back", target: String? = null) {
+        val sb = StringBuilder("{\"type\":\"video\",\"on\":")
+        sb.append(on).append(",\"facing\":\"").append(facing).append('"')
+        if (target != null) sb.append(",\"target\":\"").append(target).append('"')
+        sb.append('}')
+        socket?.send(sb.toString())
     }
 
     /** Hold PTT. The hub answers with a [Floor]; do not assume it was granted. */
@@ -215,8 +225,12 @@ fun parseFloor(obj: JsonObject): Floor? {
         holder = obj.str("holder"),
         receivers = obj["receivers"]?.jsonArray
             ?.mapNotNull { it.jsonPrimitive.nullSafe() } ?: emptyList(),
-        video = obj["video"]?.jsonArray
-            ?.mapNotNull { it.jsonPrimitive.nullSafe() } ?: emptyList(),
+        // ⚠️ A MAP now: which lens a device shows is state, not a flag.
+        video = obj["video"]?.jsonObject
+            ?.mapNotNull { entry ->
+                entry.value.jsonPrimitive.nullSafe()?.let { entry.key to it }
+            }
+            ?.toMap() ?: emptyMap(),
     )
 }
 

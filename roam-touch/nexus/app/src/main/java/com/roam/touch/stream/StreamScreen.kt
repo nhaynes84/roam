@@ -54,7 +54,7 @@ fun StreamScreen(
     onRole: (Role) -> Unit,
     onPress: () -> Unit,
     onRelease: () -> Unit,
-    onVideo: (Boolean) -> Unit = {},
+    onVideo: (Boolean, String) -> Unit = { _, _ -> },
 ) {
     Column(
         Modifier
@@ -88,14 +88,17 @@ fun StreamScreen(
         }
 
         if (ui.role != Role.OFF && ui.channelOpen) {
-            // ★ Either end may turn the SENDER's camera on: "sender can turn on the
-            //   sender video or receiver can turn on sender video". A listener's own
-            //   camera is a separate, self-only switch the hub enforces.
+            // ★ Plain "Video". It was "Show the room" and he called that obtuse — a
+            //   control should name the thing, not describe a scenario.
+            Text("Video", fontSize = 14.sp, color = Idle)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                RoleChip(
-                    if (ui.videoOut) "Camera on (this device)" else "Show the room",
-                    ui.videoOut,
-                ) { onVideo(!ui.videoOut) }
+                RoleChip("Off", !ui.videoOut) { onVideo(false, ui.videoFacing) }
+                RoleChip("Back", ui.videoOut && ui.videoFacing == "back") {
+                    onVideo(true, "back")
+                }
+                RoleChip("Front", ui.videoOut && ui.videoFacing == "front") {
+                    onVideo(true, "front")
+                }
             }
         }
         // ★ in / played. "arrived but never played" and "never arrived" look identical

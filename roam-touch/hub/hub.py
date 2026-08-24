@@ -1845,6 +1845,7 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
                             control.get("target") or (ic.sender or device),
                             bool(control.get("on", True)),
                             by=device,
+                            facing=str(control.get("facing") or "back"),
                         )
                     else:
                         continue

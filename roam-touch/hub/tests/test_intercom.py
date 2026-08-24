@@ -287,7 +287,7 @@ class TestVideo:
     def test_video_is_off_until_asked_for(self):
         ic = opened()
         assert not ic.video_live("kitchen")
-        assert ic.snapshot()["video"] == []
+        assert ic.snapshot()["video"] == {}
 
     def test_a_receiver_may_turn_on_the_senders_camera(self):
         """The product: looking in on the room is why the channel exists."""
@@ -339,7 +339,7 @@ class TestVideo:
         ic.set_video("kitchen", True, by="kitchen")
         ic.close_channel("kitchen")
         assert not ic.video_live("kitchen")
-        assert ic.snapshot()["video"] == []
+        assert ic.snapshot()["video"] == {}
 
 
 def _vws(client, device):
@@ -389,3 +389,39 @@ def test_a_listener_cannot_open_a_camera_on_another_listener(client):
         _floor(phone)
         phone.send_text('{"type":"video","target":"desk","on":true}')
         assert "own camera" in _until(phone, "denied")["detail"]
+
+
+class TestCameraSelection:
+    """★ "phones have 2 cams, should be selectable, same rules, receiver can select
+    sender cam option; receiver can set / change their own cam"."""
+
+    def test_the_lens_is_part_of_the_state_not_just_on_or_off(self):
+        ic = opened()
+        ic.set_video("kitchen", True, by="kitchen", facing="front")
+        assert ic.video_facing("kitchen") == "front"
+        assert ic.snapshot()["video"] == {"kitchen": "front"}
+
+    def test_a_receiver_may_switch_which_lens_the_sender_shows(self):
+        ic = opened()
+        ic.join("desk", now=1.0)
+        ic.set_video("kitchen", True, by="desk", facing="back")
+        ic.set_video("kitchen", True, by="desk", facing="front")
+        assert ic.video_facing("kitchen") == "front", "switching lens is a state change"
+
+    def test_a_listener_still_cannot_point_someone_elses_camera(self):
+        ic = opened()
+        ic.join("desk", now=1.0)
+        ic.join("phone", now=1.0)
+        with pytest.raises(IntercomError):
+            ic.set_video("desk", True, by="phone", facing="front")
+
+    def test_an_unknown_lens_is_refused(self):
+        ic = opened()
+        with pytest.raises(IntercomError):
+            ic.set_video("kitchen", True, by="kitchen", facing="periscope")
+
+    def test_turning_it_off_forgets_the_lens(self):
+        ic = opened()
+        ic.set_video("kitchen", True, by="kitchen", facing="front")
+        ic.set_video("kitchen", False, by="kitchen")
+        assert ic.video_facing("kitchen") is None

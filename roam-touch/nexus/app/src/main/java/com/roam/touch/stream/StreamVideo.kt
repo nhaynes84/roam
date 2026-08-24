@@ -31,8 +31,11 @@ data class VideoProfile(val width: Int, val height: Int, val fps: Int, val quali
     val frameIntervalMs: Long get() = 1000L / fps.coerceAtLeast(1)
 
     companion object {
-        /** Old hardware: small and slow, because it runs hot under sustained load. */
-        val MODEST = VideoProfile(480, 360, 2, 60)
+        /** Old hardware: a smaller FRAME, not a slower one.
+         *  ⚠️ Was 2 fps and he said flatly it is too low. Resolution is what costs the
+         *  ISP and the link; frame rate is what makes it look like a video call. Drop
+         *  the pixels, keep the motion. */
+        val MODEST = VideoProfile(480, 360, 6, 60)
 
         /** Anything current. */
         val NORMAL = VideoProfile(640, 480, 6, 70)
@@ -69,18 +72,24 @@ class StreamVideo(private val context: Context) {
      *   same rule as audio, for the same reason.
      * @return null on success, or why it failed.
      */
-    fun start(onFrame: (ByteArray) -> Unit): String? {
+    fun start(facing: String, onFrame: (ByteArray) -> Unit): String? {
         if (running) return null
         if (!hasPermission()) return "camera permission not granted"
-        return runCatching { open(onFrame); null }
+        return runCatching { open(facing, onFrame); null }
             .getOrElse { "${it::class.simpleName}: ${it.message}" }
     }
 
+    /** Switching lens means a full reopen — a camera device serves one lens. */
+    fun switchTo(facing: String, onFrame: (ByteArray) -> Unit): String? {
+        stop()
+        return start(facing, onFrame)
+    }
+
     @SuppressLint("MissingPermission")
-    private fun open(onFrame: (ByteArray) -> Unit) {
+    private fun open(facing: String, onFrame: (ByteArray) -> Unit) {
         val manager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
-        val id = pickCamera(manager)
-            ?: throw IllegalStateException("no usable camera on this device")
+        val id = pickCamera(manager, facing)
+            ?: throw IllegalStateException("no $facing camera on this device")
 
         val t = HandlerThread("stream-video").also { it.start() }
         thread = t
@@ -142,16 +151,22 @@ class StreamVideo(private val context: Context) {
         running = true
     }
 
-    /** Back camera by preference — a worn build points its lens away from him. */
-    private fun pickCamera(manager: CameraManager): String? {
+    /**
+     * The requested lens, falling back to whatever exists.
+     * ⚠️ Falls back rather than failing: a device with one camera should still show a
+     * picture when someone asks for the other one.
+     */
+    private fun pickCamera(manager: CameraManager, facing: String): String? {
+        val want = if (facing == "front") CameraCharacteristics.LENS_FACING_FRONT
+                   else CameraCharacteristics.LENS_FACING_BACK
         val ids = runCatching { manager.cameraIdList }.getOrDefault(emptyArray())
-        val back = ids.firstOrNull {
+        val match = ids.firstOrNull {
             runCatching {
                 manager.getCameraCharacteristics(it)
                     .get(CameraCharacteristics.LENS_FACING)
-            }.getOrNull() == CameraCharacteristics.LENS_FACING_BACK
+            }.getOrNull() == want
         }
-        return back ?: ids.firstOrNull()
+        return match ?: ids.firstOrNull()
     }
 
     fun stop() {

@@ -35,9 +35,11 @@ struct Floor: Decodable, Equatable, Sendable {
     var holder: String?
     var receivers: [String]
     /// Devices whose camera is live. NOT floor-governed — video has no echo.
-    var video: [String] = []
+    /// ⚠️ A MAP: which lens a device is showing is state, not a flag.
+    var video: [String: String] = [:]
 
-    func videoLive(_ device: String) -> Bool { video.contains(device) }
+    func videoLive(_ device: String) -> Bool { video[device] != nil }
+    func videoFacing(_ device: String) -> String { video[device] ?? "back" }
     func micLive(_ device: String) -> Bool { holder == device }
     func shouldPlay(_ device: String) -> Bool { holder != nil && holder != device }
 }
@@ -57,6 +59,7 @@ final class IntercomClient {
     private(set) var notice: String?
     /// Whether THIS Mac's camera is live, per the hub.
     private(set) var videoOut = false
+    private(set) var videoFacing = "back"
     /// The newest frame from whoever is showing a picture.
     private(set) var frame: Data?
     private(set) var videoNotice: String?
@@ -180,10 +183,16 @@ final class IntercomClient {
         //    this Mac's camera on remotely, so the answer that comes back is the
         //    authority. Same rule the microphone follows.
         let wantVideo = next.videoLive(device)
-        if wantVideo != videoOut {
+        let wantFacing = next.videoFacing(device)
+        // ⚠️ A lens CHANGE is not the same as switching on — the capture session has
+        //    to be torn down and reopened, so compare both.
+        if wantVideo != videoOut || (wantVideo && wantFacing != videoFacing) {
+            let reopen = videoOut
             videoOut = wantVideo
+            videoFacing = wantFacing
             if wantVideo {
-                videoNotice = video.start { [weak self] jpeg in
+                if reopen { video.stop() }
+                videoNotice = video.start(facing: wantFacing) { [weak self] jpeg in
                     self?.videoTask?.send(.data(jpeg)) { _ in }
                 }
             } else {
@@ -215,9 +224,12 @@ final class IntercomClient {
 
     /// Ask the hub to turn a camera on. Default target is the sender — "receiver can
     /// turn on sender video" is the common case and should not need naming.
-    func setVideo(_ on: Bool, target: String? = nil) {
-        let t = target.map { #","target":"\#($0)""# } ?? ""
-        send(text: #"{"type":"video","on":\#(on)\#(t)}"#)
+    func setVideo(_ on: Bool, facing: String = "back", target: String? = nil) {
+        var obj: [String: Any] = ["type": "video", "on": on, "facing": facing]
+        if let target { obj["target"] = target }
+        guard let data = try? JSONSerialization.data(withJSONObject: obj),
+              let text = String(data: data, encoding: .utf8) else { return }
+        send(text: text)
     }
 
     private func send(text: String) {

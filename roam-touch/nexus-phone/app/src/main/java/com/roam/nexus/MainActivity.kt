@@ -75,9 +75,9 @@ class MainActivity : ComponentActivity() {
                     },
                     onPress = stream::press,
                     onRelease = stream::release,
-                    onVideo = { on ->
+                    onVideo = { on, facing ->
                         if (on && !su.videoOut) askCamera.launch(Manifest.permission.CAMERA)
-                        stream.setVideo(on)
+                        stream.setVideo(on, facing)
                     },
                 )
             }

@@ -32,6 +32,8 @@ data class StreamUi(
     val framesPlayed: Long = 0,
     /** Whether THIS device's camera is live, per the hub. */
     val videoOut: Boolean = false,
+    /** Which lens the hub says this device should be showing. */
+    val videoFacing: String = "back",
     /** The most recent frame from whoever is showing a picture. */
     val incomingFrame: ByteArray? = null,
     val videoNotice: String? = null,
@@ -177,11 +179,20 @@ class StreamViewModel(
      */
     private fun onFloor(floor: Floor) {
         val wantVideo = floor.videoLive(device)
-        _ui.value = _ui.value.copy(floor = floor, connected = true, videoOut = wantVideo)
+        val wantFacing = floor.videoFacing(device) ?: "back"
+        val was = _ui.value
+        _ui.value = was.copy(floor = floor, connected = true,
+                             videoOut = wantVideo, videoFacing = wantFacing)
         // ⚠️ The camera follows the HUB, exactly as the microphone does. A receiver may
         //    switch this device's camera on remotely, so a local toggle is not the
         //    authority — the answer that comes back is.
-        if (wantVideo) startVideo() else stopVideo()
+        // ⚠️ A lens CHANGE is not the same as turning it on: the camera has to be
+        //    reopened, so compare both.
+        when {
+            wantVideo && (!was.videoOut || was.videoFacing != wantFacing) ->
+                startVideo(wantFacing, reopen = was.videoOut)
+            !wantVideo && was.videoOut -> stopVideo()
+        }
         val wantCapture = floor.micLive(device) && _ui.value.micGranted
         val wantPlayback = floor.shouldPlay(device)
         audioScope.coLaunch {
@@ -197,13 +208,14 @@ class StreamViewModel(
     }
 
     /** Ask the hub to turn a camera on. Default target is the sender. */
-    fun setVideo(on: Boolean, target: String? = null) = client?.setVideo(on, target)
+    fun setVideo(on: Boolean, facing: String = "back", target: String? = null) =
+        client?.setVideo(on, facing, target)
 
-    private fun startVideo() {
+    private fun startVideo(facing: String, reopen: Boolean) {
         val v = video ?: return
-        if (_ui.value.videoNotice != null) return
-        val why = v.start { jpeg -> client?.sendVideo(jpeg) }
-        if (why != null) _ui.value = _ui.value.copy(videoNotice = "Camera: $why")
+        val send: (ByteArray) -> Unit = { jpeg -> client?.sendVideo(jpeg) }
+        val why = if (reopen) v.switchTo(facing, send) else v.start(facing, send)
+        _ui.value = _ui.value.copy(videoNotice = why?.let { "Camera: $it" })
     }
 
     private fun stopVideo() {

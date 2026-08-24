@@ -52,18 +52,22 @@ struct StreamView: View {
             }
 
             if stream.role != .off && stream.channelOpen {
-                // ★ Either end may switch the SENDER's camera on. A listener's own
-                //   camera is a separate switch the hub enforces as self-only.
-                Toggle(isOn: Binding(
-                    get: { stream.videoOut },
-                    set: { stream.setVideo($0) })
+                // ★ Plain "Video" with the lens beside it. It said "Show the room",
+                //   which he called obtuse — name the thing, do not describe a scene.
+                Text("Video").font(.system(size: 14)).foregroundStyle(.secondary)
+                Picker("", selection: Binding(
+                    get: { stream.videoOut ? stream.videoFacing : "off" },
+                    set: { choice in
+                        if choice == "off" { stream.setVideo(false) }
+                        else { stream.setVideo(true, facing: choice) }
+                    })
                 ) {
-                    Label(stream.videoOut ? "Camera on — this Mac is showing the room"
-                                          : "Show the room",
-                          systemImage: stream.videoOut ? "video.fill" : "video")
-                        .font(.system(size: 14))
+                    Text("Off").tag("off")
+                    Text("Back").tag("back")
+                    Text("Front").tag("front")
                 }
-                .toggleStyle(.switch)
+                .pickerStyle(.segmented)
+                .labelsHidden()
             }
 
             if stream.role == .receiver {

@@ -48,8 +48,10 @@ class Intercom:
     sender: str | None = None
     talker: str | None = None
     receivers: dict[str, float] = field(default_factory=dict)
-    #: Devices whose CAMERA is live. Not floor-governed — see `set_video`.
-    video: set[str] = field(default_factory=set)
+    #: device -> which lens it is showing ("back" | "front"). Not floor-governed.
+    #: ⚠️ A MAP, not a set: a phone has two cameras and switching between them is a
+    #: change of state, not an on/off.
+    video: dict[str, str] = field(default_factory=dict)
     talk_started: float | None = None
     talk_timeout_s: float = DEFAULT_TALK_TIMEOUT_S
     sender_seen: float | None = None
@@ -79,7 +81,7 @@ class Intercom:
         """The sender stops. Any burst in flight dies with it."""
         if self.sender != device:
             return
-        self.video.discard(device)
+        self.video.pop(device, None)
         self.sender = None
         self.sender_seen = None
         self.talker = None
@@ -94,13 +96,13 @@ class Intercom:
     def leave(self, device: str) -> None:
         self.receivers.pop(device, None)
         # ⚠️ A camera must never outlive the socket that was showing it.
-        self.video.discard(device)
+        self.video.pop(device, None)
         if self.talker == device:
             self.release(device)
 
     # ---------------------------------------------------------------- video
 
-    def set_video(self, target: str, on: bool, by: str) -> None:
+    def set_video(self, target: str, on: bool, by: str, facing: str = "back") -> None:
         """Turn a device's camera on or off.
 
         ★★ VIDEO IS NOT FLOOR-GOVERNED, and that is the whole point. Audio is
@@ -120,13 +122,18 @@ class Intercom:
         """
         if target != self.sender and target != by:
             raise IntercomError("only that device can turn on its own camera")
+        if facing not in ("back", "front"):
+            raise IntercomError(f"no such camera: {facing}")
         if on:
-            self.video.add(target)
+            self.video[target] = facing
         else:
-            self.video.discard(target)
+            self.video.pop(target, None)
 
     def video_live(self, device: str) -> bool:
         return device in self.video
+
+    def video_facing(self, device: str) -> str | None:
+        return self.video.get(device)
 
     # ---------------------------------------------------------------- floor
 
@@ -205,5 +212,5 @@ class Intercom:
             "talker": self.talker,
             "holder": self.holder(),
             "receivers": sorted(self.receivers),
-            "video": sorted(self.video),
+            "video": dict(self.video),
         }

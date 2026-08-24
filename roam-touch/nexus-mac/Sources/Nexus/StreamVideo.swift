@@ -33,7 +33,7 @@ final class StreamVideo: NSObject, @unchecked Sendable {
     private var running = false
 
     /// @return nil on success, or why it failed.
-    func start(onFrame: @escaping (Data) -> Void) -> String? {
+    func start(facing: String = "back", onFrame: @escaping (Data) -> Void) -> String? {
         guard !running else { return nil }
         self.onFrame = onFrame
 
@@ -50,9 +50,16 @@ final class StreamVideo: NSObject, @unchecked Sendable {
             break
         }
 
-        guard let device = AVCaptureDevice.default(for: .video) else {
-            return "no camera on this Mac"
-        }
+        // ⚠️ Falls back rather than failing: most Macs have exactly one camera, and
+        //    asking for the other should still show a picture.
+        let position: AVCaptureDevice.Position = facing == "front" ? .front : .back
+        let discovery = AVCaptureDevice.DiscoverySession(
+            deviceTypes: [.builtInWideAngleCamera, .external],
+            mediaType: .video,
+            position: .unspecified)
+        let device = discovery.devices.first(where: { $0.position == position })
+            ?? AVCaptureDevice.default(for: .video)
+        guard let device else { return "no camera on this Mac" }
         do {
             let input = try AVCaptureDeviceInput(device: device)
             session.beginConfiguration()
