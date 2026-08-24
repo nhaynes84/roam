@@ -168,8 +168,19 @@ class StreamAudio {
         track = t
     }
 
-    /** @return bytes actually written; negative is an AudioTrack error code. */
-    fun write(pcm: ByteArray): Int = track?.write(pcm, 0, pcm.size) ?: 0
+    /**
+     * @return bytes actually written; negative is an AudioTrack error code.
+     *
+     * ⚠️⚠️ runCatching, for the SAME race that `read` already guards — and I fixed one
+     * side and left the other, twice now. Playback runs on its own thread while
+     * stopPlayback() runs on the control thread: `track?.write(...)` can pass the null
+     * check and then have the native object released underneath it, which throws
+     * "Unable to retrieve AudioTrack pointer for write()" and takes the app down.
+     * Losing a frame during teardown is nothing; crashing is not.
+     */
+    fun write(pcm: ByteArray): Int = runCatching {
+        track?.write(pcm, 0, pcm.size) ?: 0
+    }.getOrDefault(0)
 
     fun stopPlayback() {
         track?.let {

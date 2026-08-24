@@ -90,6 +90,10 @@ class StreamVideo(private val context: Context) {
         val manager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
         val id = pickCamera(manager, facing)
             ?: throw IllegalStateException("no $facing camera on this device")
+        val sensorOrientation = runCatching {
+            manager.getCameraCharacteristics(id)
+                .get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
+        }.getOrDefault(0)
 
         val t = HandlerThread("stream-video").also { it.start() }
         thread = t
@@ -120,17 +124,39 @@ class StreamVideo(private val context: Context) {
 
         manager.openCamera(id, object : CameraDevice.StateCallback() {
             override fun onOpened(device: CameraDevice) {
+                // ⚠️⚠️ THE CALLBACK CAN ARRIVE AFTER TEARDOWN. stop() closes the camera,
+                //    and if that happened between openCamera() and this callback the
+                //    device is already dead — createCaptureSession then throws
+                //    "CameraDevice was already closed" ON THE CAMERA THREAD, uncaught,
+                //    and the app dies. Toggling video off quickly, or switchTo()'s
+                //    stop-then-start, is enough to hit it.
+                //    Same rule the audio read/write paths already follow: anything that
+                //    can land after teardown must tolerate landing after teardown.
+                if (!running) {
+                    runCatching { device.close() }
+                    return
+                }
                 camera = device
                 val request = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
                     .apply {
                         addTarget(r.surface)
                         set(CaptureRequest.JPEG_QUALITY, profile.quality.toByte())
-                        set(
-                            CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,
-                            android.util.Range(profile.fps, profile.fps)
-                        )
+                        // ⚠️ Without this the JPEG comes out in SENSOR orientation,
+                        //    which on a phone is 90° off — "you are rotating the
+                        //    phones video 90 cw". The sensor is mounted rotated; the
+                        //    ISP will correct it, but only if asked.
+                        set(CaptureRequest.JPEG_ORIENTATION, sensorOrientation)
+                        // ⚠️ Only if the device actually offers it. A fixed [6,6]
+                        //    range is not universal on older camera HALs, and an
+                        //    unsupported range throws rather than being ignored. We
+                        //    rate-limit on receipt anyway, so this is an optimisation,
+                        //    never a requirement.
+                        supportedFpsRange(manager, id, profile.fps)?.let {
+                            set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, it)
+                        }
                     }
                 @Suppress("DEPRECATION")
+                runCatching {
                 device.createCaptureSession(
                     listOf(r.surface),
                     object : CameraCaptureSession.StateCallback() {
@@ -143,6 +169,7 @@ class StreamVideo(private val context: Context) {
                     },
                     h,
                 )
+                }.onFailure { stop() }
             }
 
             override fun onDisconnected(device: CameraDevice) = stop()
@@ -150,6 +177,15 @@ class StreamVideo(private val context: Context) {
         }, h)
         running = true
     }
+
+    /** The device's own range covering our target, or null to leave it alone. */
+    private fun supportedFpsRange(
+        manager: CameraManager, id: String, fps: Int
+    ): android.util.Range<Int>? = runCatching {
+        val ranges = manager.getCameraCharacteristics(id)
+            .get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
+        ranges?.firstOrNull { it.lower <= fps && fps <= it.upper }
+    }.getOrNull()
 
     /**
      * The requested lens, falling back to whatever exists.

@@ -39,6 +39,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.exifinterface.media.ExifInterface
+import android.graphics.Matrix
 
 private val Live = Color(0xFFE5484D)
 private val Listening = Color(0xFF3E9B4F)
@@ -237,10 +239,7 @@ private fun TalkButton(ui: StreamUi, onPress: () -> Unit, onRelease: () -> Unit)
  */
 @Composable
 private fun VideoFrame(jpeg: ByteArray) {
-    val bmp = remember(jpeg) {
-        runCatching { BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size)?.asImageBitmap() }
-            .getOrNull()
-    }
+    val bmp = remember(jpeg) { runCatching { decodeUpright(jpeg) }.getOrNull() }
     if (bmp != null) {
         Image(
             bitmap = bmp,
@@ -252,4 +251,31 @@ private fun VideoFrame(jpeg: ByteArray) {
             contentScale = ContentScale.Fit,
         )
     }
+}
+
+
+/**
+ * Decode a JPEG the right way up.
+ *
+ * ⚠️ BitmapFactory IGNORES the EXIF orientation tag. Some devices rotate the pixels
+ * when asked for JPEG_ORIENTATION and some only write the tag, so asking the camera
+ * politely is not enough on its own — a receiver that trusts the pixels gets a picture
+ * on its side on half the hardware.
+ */
+private fun decodeUpright(jpeg: ByteArray): androidx.compose.ui.graphics.ImageBitmap? {
+    val bitmap = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size) ?: return null
+    val degrees = runCatching {
+        when (ExifInterface(java.io.ByteArrayInputStream(jpeg))
+            .getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)) {
+            ExifInterface.ORIENTATION_ROTATE_90 -> 90f
+            ExifInterface.ORIENTATION_ROTATE_180 -> 180f
+            ExifInterface.ORIENTATION_ROTATE_270 -> 270f
+            else -> 0f
+        }
+    }.getOrDefault(0f)
+    if (degrees == 0f) return bitmap.asImageBitmap()
+    val m = Matrix().apply { postRotate(degrees) }
+    return android.graphics.Bitmap
+        .createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, m, true)
+        .asImageBitmap()
 }
