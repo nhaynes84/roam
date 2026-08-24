@@ -141,13 +141,22 @@ class IntercomClient(
      * behind it. Audio is the stream that must never stutter; video may drop a frame
      * and nobody notices.
      */
-    fun connectVideo(): Flow<ByteArray> = callbackFlow {
+    /** A frame and the camera it came from. */
+    data class VideoFrame(val from: String, val jpeg: ByteArray)
+
+    fun connectVideo(): Flow<VideoFrame> = callbackFlow {
         val url = "http://${config.host}:${config.port}/intercom/video" +
                 "?device=$device&token=${config.token}"
         val ws = client.newWebSocket(Request.Builder().url(url).build(),
             object : WebSocketListener() {
                 override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
-                    trySend(bytes.toByteArray())
+                    // [1 byte id length][id utf8][jpeg] — see the hub's video relay.
+                    val raw = bytes.toByteArray()
+                    if (raw.isEmpty()) return
+                    val n = raw[0].toInt() and 0xFF
+                    if (raw.size < 1 + n) return
+                    val from = String(raw, 1, n, Charsets.UTF_8)
+                    trySend(VideoFrame(from, raw.copyOfRange(1 + n, raw.size)))
                 }
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {

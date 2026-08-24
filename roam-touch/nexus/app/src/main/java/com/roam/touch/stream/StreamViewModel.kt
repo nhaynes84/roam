@@ -34,11 +34,15 @@ data class StreamUi(
     val videoOut: Boolean = false,
     /** Which lens the hub says this device should be showing. */
     val videoFacing: String = "back",
-    /** The most recent frame from whoever is showing a picture. */
-    val incomingFrame: ByteArray? = null,
+    /** Newest frame per camera. ⚠️ Keyed by SOURCE: two live cameras in one slot
+     *  flicker, and a burst that ends leaves its last frame frozen forever. */
+    val frames: Map<String, ByteArray> = emptyMap(),
     val videoNotice: String? = null,
     /** This device's own name, so the UI can tell the two cameras apart. */
     val device: String = "",
+    /** ★ Self-view. The hub never echoes your own frames back, so the only way to see
+     *  what you are sending is to keep a copy on the way out. */
+    val selfFrame: ByteArray? = null,
 ) {
     val channelOpen: Boolean get() = floor?.open == true
     val talkingNow: String? get() = floor?.talker
@@ -142,8 +146,8 @@ class StreamViewModel(
         client = c
         startPlaybackPump()
         videoJob = viewModelScope.launch {
-            c.connectVideo().collect { jpeg ->
-                _ui.value = _ui.value.copy(incomingFrame = jpeg)
+            c.connectVideo().collect { f ->
+                _ui.value = _ui.value.copy(frames = _ui.value.frames + (f.from to f.jpeg))
             }
         }
         socketJob = viewModelScope.launch {
@@ -183,8 +187,13 @@ class StreamViewModel(
         val wantVideo = floor.videoLive(device)
         val wantFacing = floor.videoFacing(device) ?: "back"
         val was = _ui.value
+        // ★ Drop the picture from any camera the hub no longer says is LIVE. That is
+        //   what turns a talk-back ending into a placeholder instead of a freeze:
+        //   "it's confusing to have video pop in then freeze".
+        val stillLive = was.frames.filterKeys { floor.videoLive(it) }
         _ui.value = was.copy(floor = floor, connected = true,
-                             videoOut = wantVideo, videoFacing = wantFacing)
+                             videoOut = wantVideo, videoFacing = wantFacing,
+                             frames = stillLive)
         // ⚠️ The camera follows the HUB, exactly as the microphone does. A receiver may
         //    switch this device's camera on remotely, so a local toggle is not the
         //    authority — the answer that comes back is.
@@ -225,7 +234,15 @@ class StreamViewModel(
         val send: (ByteArray) -> Unit = { jpeg ->
             val f = _ui.value.floor
             val mine = f?.sender == device || f?.talker == device
-            if (mine) client?.sendVideo(jpeg)
+            if (mine) {
+                client?.sendVideo(jpeg)
+                _ui.value = _ui.value.copy(selfFrame = jpeg)
+            } else if (_ui.value.selfFrame != null) {
+                // ⚠️ Clear it the moment we stop transmitting, for the same reason the
+                //    incoming tiles clear: a frozen self-view claims you are still
+                //    being seen when you are not.
+                _ui.value = _ui.value.copy(selfFrame = null)
+            }
         }
         val why = if (reopen) v.switchTo(facing, send) else v.start(facing, send)
         _ui.value = _ui.value.copy(videoNotice = why?.let { "Camera: $it" })
@@ -233,7 +250,7 @@ class StreamViewModel(
 
     private fun stopVideo() {
         video?.stop()
-        _ui.value = _ui.value.copy(videoNotice = null)
+        _ui.value = _ui.value.copy(videoNotice = null, selfFrame = null)
     }
 
     private fun startPlaybackPump() {

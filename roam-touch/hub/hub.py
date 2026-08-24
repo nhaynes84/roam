@@ -1725,11 +1725,20 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
                                  "tx_bytes": 0, "dropped_no_floor": 0})
                     st["dropped_no_floor"] += 1
                     continue
+                # ⚠️ TAG THE SOURCE. Frames were anonymous, so a client could only
+                #    show "the newest blob" — and with the sender's continuous feed and
+                #    a talker's burst both live they land in one slot and flicker
+                #    between two cameras. It is also why a burst LOOKED FROZEN when it
+                #    ended: nothing said which picture had stopped, so the last frame
+                #    just sat there.
+                #    [1 byte id length][id utf8][jpeg]
+                ident = device.encode("utf-8")[:255]
+                tagged = bytes([len(ident)]) + ident + raw
                 for other, sock in list(peers.items()):
                     if other == device:
                         continue
                     try:
-                        await sock.send_bytes(raw)
+                        await sock.send_bytes(tagged)
                     except (WebSocketDisconnect, RuntimeError):
                         peers.pop(other, None)
         except WebSocketDisconnect:

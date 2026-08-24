@@ -60,9 +60,13 @@ final class IntercomClient {
     /// Whether THIS Mac's camera is live, per the hub.
     private(set) var videoOut = false
     private(set) var videoFacing = "back"
-    /// The newest frame from whoever is showing a picture.
-    private(set) var frame: Data?
+    /// Newest frame per camera. ⚠️ Keyed by SOURCE: two live cameras sharing one slot
+    /// flicker, and a burst that ends leaves its last frame frozen forever.
+    private(set) var frames: [String: Data] = [:]
     private(set) var videoNotice: String?
+    /// ★ Self-view. The hub never echoes your own frames back, so the only way to see
+    /// what you are sending is to keep a copy on the way out.
+    private(set) var selfFrame: Data?
 
     /// Named after the machine, so the floor snapshot is readable by a human.
     let device: String
@@ -147,7 +151,12 @@ final class IntercomClient {
     private func videoLoop(_ socket: URLSessionWebSocketTask) async {
         while !Task.isCancelled {
             do {
-                if case .data(let jpeg) = try await socket.receive() { frame = jpeg }
+                if case .data(let raw) = try await socket.receive() {
+                    // [1 byte id length][id utf8][jpeg] — see the hub's video relay.
+                    guard let n = raw.first.map(Int.init), raw.count > n else { continue }
+                    let from = String(decoding: raw[1...n], as: UTF8.self)
+                    frames[from] = Data(raw[(n + 1)...])
+                }
             } catch {
                 return
             }
@@ -182,6 +191,10 @@ final class IntercomClient {
         // ⚠️ The camera follows the HUB, never a local toggle — a receiver may switch
         //    this Mac's camera on remotely, so the answer that comes back is the
         //    authority. Same rule the microphone follows.
+        // ★ Drop the picture from any camera the hub no longer says is live — that is
+        //   what turns a talk-back ending into a placeholder rather than a freeze.
+        frames = frames.filter { next.videoLive($0.key) }
+
         let wantVideo = next.videoLive(device)
         let wantFacing = next.videoFacing(device)
         // ⚠️ A lens CHANGE is not the same as switching on — the capture session has
@@ -200,12 +213,20 @@ final class IntercomClient {
                         guard let self else { return }
                         let mine = self.floor?.sender == self.device
                             || self.floor?.talker == self.device
-                        if mine { self.videoTask?.send(.data(jpeg)) { _ in } }
+                        if mine {
+                            self.videoTask?.send(.data(jpeg)) { _ in }
+                            self.selfFrame = jpeg
+                        } else if self.selfFrame != nil {
+                            // ⚠️ Clear it the instant we stop transmitting: a frozen
+                            //    self-view claims you are still being seen.
+                            self.selfFrame = nil
+                        }
                     }
                 }
             } else {
                 video.stop()
                 videoNotice = nil
+                selfFrame = nil
             }
         }
 
@@ -260,7 +281,8 @@ final class IntercomClient {
         video.stop()
         videoTask?.cancel(with: .goingAway, reason: nil)
         videoTask = nil
-        frame = nil
+        frames = [:]
+        selfFrame = nil
         videoOut = false
         audio.stopCapture()
         audio.stopPlayback()

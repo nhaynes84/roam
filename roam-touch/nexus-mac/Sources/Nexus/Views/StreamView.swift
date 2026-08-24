@@ -19,14 +19,51 @@ struct StreamView: View {
             // ★ The picture sits UNDER the status, not instead of it: video always
             //   rides with audio — "video in isolation does nothing for me, i can't
             //   lip read" — so the audio state stays the headline.
-            if let jpeg = stream.frame, let image = NSImage(data: jpeg) {
-                Image(nsImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(maxWidth: 520)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12)
-                        .strokeBorder(Theme.agentEdge, lineWidth: 1))
+            // The self-view rides on top of the feed as a PIP: the hub never sends
+            // your own frames back, so this is the only way to see what you are
+            // sending while you hold the button.
+            ZStack(alignment: .topTrailing) {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach((stream.floor?.video.keys).map(Array.init)?.sorted() ?? [],
+                            id: \.self) { who in
+                        if who != stream.device {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(who).font(.system(size: 13)).foregroundStyle(.secondary)
+                                if let jpeg = stream.frames[who],
+                                   let image = NSImage(data: jpeg) {
+                                    Image(nsImage: image)
+                                        .resizable().aspectRatio(contentMode: .fit)
+                                        .frame(maxWidth: 520)
+                                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                                        .overlay(RoundedRectangle(cornerRadius: 12)
+                                            .strokeBorder(Theme.agentEdge, lineWidth: 1))
+                                } else {
+                                    // ⚠️ A placeholder, NOT the last frame. A frozen
+                                    //    picture claims a camera is still showing you
+                                    //    something when it has stopped.
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .fill(Theme.agentFill)
+                                        .frame(maxWidth: 520, minHeight: 160)
+                                        .overlay(Text("waiting for video")
+                                            .font(.system(size: 14))
+                                            .foregroundStyle(.secondary))
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ★ Self-view PIP: the hub never echoes your own frames back, so this
+                //   is the only way to see what you are sending while you hold PTT.
+                if let jpeg = stream.selfFrame, let image = NSImage(data: jpeg) {
+                    Image(nsImage: image)
+                        .resizable().aspectRatio(contentMode: .fill)
+                        .frame(width: 132, height: 99)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .overlay(RoundedRectangle(cornerRadius: 8)
+                            .strokeBorder(Color.accentColor.opacity(0.7), lineWidth: 1))
+                        .padding(8)
+                }
             }
 
             Text("This device — \(stream.device)")

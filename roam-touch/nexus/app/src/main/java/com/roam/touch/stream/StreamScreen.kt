@@ -41,6 +41,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.exifinterface.media.ExifInterface
 import android.graphics.Matrix
+import androidx.compose.foundation.layout.width
 
 private val Live = Color(0xFFE5484D)
 private val Listening = Color(0xFF3E9B4F)
@@ -80,7 +81,32 @@ fun StreamScreen(
         // ★ The picture, when there is one. Video always rides WITH audio — "video in
         //   isolation does nothing for me, i can't lip read" — so this sits under the
         //   status rather than replacing it.
-        ui.incomingFrame?.let { jpeg -> VideoFrame(jpeg) }
+        // One tile per live camera, each labelled, each replaced by a placeholder the
+        // moment its camera stops — never a frozen last frame. The self-view rides on
+        // top as a PIP, because the hub never sends your own frames back to you.
+        Box(Modifier.fillMaxWidth()) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                ui.floor?.video?.keys?.filter { it != ui.device }?.forEach { who ->
+                    VideoTile(who, ui.frames[who])
+                }
+            }
+            ui.selfFrame?.let { jpeg ->
+                val bmp = remember(jpeg) { runCatching { decodeUpright(jpeg) }.getOrNull() }
+                if (bmp != null) {
+                    Image(
+                        bitmap = bmp,
+                        contentDescription = "what you are sending",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(8.dp)
+                            .width(112.dp)
+                            .aspectRatio(4f / 3f)
+                            .clip(RoundedCornerShape(10.dp)),
+                    )
+                }
+            }
+        }
 
         Text("This device", fontSize = 14.sp, color = Idle)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -238,7 +264,19 @@ private fun TalkButton(ui: StreamUi, onPress: () -> Unit, onRelease: () -> Unit)
  * a small JPEG decode is far cheaper than the camera that produced it.
  */
 @Composable
-private fun VideoFrame(jpeg: ByteArray) {
+private fun VideoTile(who: String, jpeg: ByteArray?) {
+    Text(who, fontSize = 13.sp, color = Idle)
+    if (jpeg == null) {
+        // ⚠️ A placeholder, NOT the last frame. A frozen picture claims the camera is
+        //    still showing you something; this says plainly that it is not.
+        Box(
+            Modifier.fillMaxWidth().aspectRatio(4f / 3f)
+                .clip(RoundedCornerShape(14.dp))
+                .background(Idle.copy(alpha = 0.14f)),
+            contentAlignment = Alignment.Center,
+        ) { Text("camera off", fontSize = 14.sp, color = Idle) }
+        return
+    }
     val bmp = remember(jpeg) { runCatching { decodeUpright(jpeg) }.getOrNull() }
     if (bmp != null) {
         Image(

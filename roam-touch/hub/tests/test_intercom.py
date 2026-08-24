@@ -346,6 +346,12 @@ def _vws(client, device):
     return client.websocket_connect(f"/intercom/video?device={device}&token={TOKEN}")
 
 
+def _untag(frame: bytes) -> tuple[str, bytes]:
+    """[1 byte id length][id utf8][jpeg] — see the video relay."""
+    n = frame[0]
+    return frame[1:1 + n].decode(), frame[1 + n:]
+
+
 def test_video_frames_reach_listeners_when_the_camera_is_on(client):
     with _ws(client, "kitchen", "sender") as tx, _ws(client, "desk") as rx:
         _floor(rx)
@@ -353,7 +359,29 @@ def test_video_frames_reach_listeners_when_the_camera_is_on(client):
         _floor_until(rx, "kitchen")
         with _vws(client, "kitchen") as vtx, _vws(client, "desk") as vrx:
             vtx.send_bytes(b"JPEGFRAME")
-            assert vrx.receive()["bytes"] == b"JPEGFRAME"
+            who, jpeg = _untag(vrx.receive()["bytes"])
+            assert (who, jpeg) == ("kitchen", b"JPEGFRAME")
+
+
+def test_a_frame_says_which_camera_it_came_from(client):
+    """★ Without this a client can only show "the newest blob": two live cameras land
+    in one slot and flicker, and a burst that ENDS just leaves its last frame frozen
+    because nothing says which picture stopped."""
+    with _ws(client, "kitchen", "sender") as tx, _ws(client, "desk") as rx:
+        _floor(rx)
+        rx.send_text('{"type":"video","target":"kitchen","on":true}')
+        _floor_until(rx, "kitchen")
+        rx.send_text('{"type":"press"}')
+        _floor_until(rx, "desk")
+        rx.send_text('{"type":"video","target":"desk","on":true,"facing":"front"}')
+        _floor_until(rx, "desk")
+        with _vws(client, "kitchen") as vk, _vws(client, "desk") as vd, \
+             _vws(client, "phone") as watcher:
+            vk.send_bytes(b"ROOM")
+            vd.send_bytes(b"FACE")
+            seen = dict(_untag(watcher.receive()["bytes"]) for _ in range(1))
+            seen.update([_untag(watcher.receive()["bytes"])])
+            assert seen == {"kitchen": b"ROOM", "desk": b"FACE"}
 
 
 def test_video_from_a_camera_that_was_switched_off_is_dropped(client):
@@ -367,7 +395,7 @@ def test_video_from_a_camera_that_was_switched_off_is_dropped(client):
             rx.send_text('{"type":"video","target":"kitchen","on":true}')
             _floor_until(rx, "kitchen")
             vtx.send_bytes(b"NOW-ALLOWED")
-            assert vrx.receive()["bytes"] == b"NOW-ALLOWED"
+            assert _untag(vrx.receive()["bytes"]) == ("kitchen", b"NOW-ALLOWED")
 
 
 def test_the_picture_survives_a_ptt_burst(client):
@@ -380,7 +408,7 @@ def test_the_picture_survives_a_ptt_burst(client):
         _floor_until(rx, "desk")
         with _vws(client, "kitchen") as vtx, _vws(client, "desk") as vrx:
             vtx.send_bytes(b"STILL-WATCHING")
-            assert vrx.receive()["bytes"] == b"STILL-WATCHING"
+            assert _untag(vrx.receive()["bytes"]) == ("kitchen", b"STILL-WATCHING")
 
 
 def test_a_listener_cannot_open_a_camera_on_another_listener(client):
