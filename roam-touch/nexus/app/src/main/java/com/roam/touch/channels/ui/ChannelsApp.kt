@@ -464,9 +464,9 @@ fun ChannelsApp(vm: ChannelsViewModel = viewModel()) {
                         },
                         onPress = vm0::press,
                         onRelease = vm0::release,
-                        onVideo = { on, facing ->
-                            if (on && !ui.videoOut) askStreamCamera()
-                            vm0.setVideo(on, facing)
+                        onVideo = { on, facing, target ->
+                            if (on) askStreamCamera()
+                            vm0.setVideo(on, facing, target)
                         },
                     )
                 }

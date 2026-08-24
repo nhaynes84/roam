@@ -54,7 +54,7 @@ fun StreamScreen(
     onRole: (Role) -> Unit,
     onPress: () -> Unit,
     onRelease: () -> Unit,
-    onVideo: (Boolean, String) -> Unit = { _, _ -> },
+    onVideo: (Boolean, String, String?) -> Unit = { _, _, _ -> },
 ) {
     Column(
         Modifier
@@ -88,16 +88,28 @@ fun StreamScreen(
         }
 
         if (ui.role != Role.OFF && ui.channelOpen) {
-            // ★ Plain "Video". It was "Show the room" and he called that obtuse — a
-            //   control should name the thing, not describe a scenario.
-            Text("Video", fontSize = 14.sp, color = Idle)
+            // ⚠️⚠️ TWO controls. One cannot mean both cameras: reading THIS device's
+            //    state while acting on the SENDER's makes the control look dead — the
+            //    far camera turns on, this one does not, and the chip springs back.
+            Text("Video — this device", fontSize = 14.sp, color = Idle)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                RoleChip("Off", !ui.videoOut) { onVideo(false, ui.videoFacing) }
+                RoleChip("Off", !ui.videoOut) { onVideo(false, ui.videoFacing, ui.device) }
                 RoleChip("Back", ui.videoOut && ui.videoFacing == "back") {
-                    onVideo(true, "back")
+                    onVideo(true, "back", ui.device)
                 }
                 RoleChip("Front", ui.videoOut && ui.videoFacing == "front") {
-                    onVideo(true, "front")
+                    onVideo(true, "front", ui.device)
+                }
+            }
+
+            val sender = ui.floor?.sender
+            if (sender != null && sender != ui.device) {
+                val far = ui.floor.videoFacing(sender)
+                Text("Video — $sender", fontSize = 14.sp, color = Idle)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    RoleChip("Off", far == null) { onVideo(false, "back", sender) }
+                    RoleChip("Back", far == "back") { onVideo(true, "back", sender) }
+                    RoleChip("Front", far == "front") { onVideo(true, "front", sender) }
                 }
             }
         }

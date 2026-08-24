@@ -96,7 +96,7 @@ fun NexusApp(
     onRole: (Role) -> Unit,
     onPress: () -> Unit,
     onRelease: () -> Unit,
-    onVideo: (Boolean, String) -> Unit,
+    onVideo: (Boolean, String, String?) -> Unit,
 ) {
     var tab by remember { mutableStateOf(Tab.CHANNELS) }
     var openApp by remember { mutableStateOf<NexusAppId?>(null) }

@@ -37,6 +37,8 @@ data class StreamUi(
     /** The most recent frame from whoever is showing a picture. */
     val incomingFrame: ByteArray? = null,
     val videoNotice: String? = null,
+    /** This device's own name, so the UI can tell the two cameras apart. */
+    val device: String = "",
 ) {
     val channelOpen: Boolean get() = floor?.open == true
     val talkingNow: String? get() = floor?.talker
@@ -59,7 +61,7 @@ class StreamViewModel(
     private val video: StreamVideo? = null,
 ) : ViewModel() {
 
-    private val _ui = MutableStateFlow(StreamUi())
+    private val _ui = MutableStateFlow(StreamUi(device = device))
     val ui: StateFlow<StreamUi> = _ui.asStateFlow()
 
     private var client: IntercomClient? = null
@@ -210,6 +212,9 @@ class StreamViewModel(
     /** Ask the hub to turn a camera on. Default target is the sender. */
     fun setVideo(on: Boolean, facing: String = "back", target: String? = null) =
         client?.setVideo(on, facing, target)
+
+    /** Which lens the hub says a given device is showing, or null for off. */
+    fun facingOf(dev: String): String? = _ui.value.floor?.videoFacing(dev)
 
     private fun startVideo(facing: String, reopen: Boolean) {
         val v = video ?: return

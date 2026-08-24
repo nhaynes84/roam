@@ -52,22 +52,51 @@ struct StreamView: View {
             }
 
             if stream.role != .off && stream.channelOpen {
-                // ★ Plain "Video" with the lens beside it. It said "Show the room",
-                //   which he called obtuse — name the thing, do not describe a scene.
+                // ⚠️⚠️ TWO controls, because there are two cameras in play and one
+                //    control cannot mean both. The old single picker READ this Mac's
+                //    camera state but ACTED on the sender's, so pressing it as a
+                //    receiver turned on the far camera, left this one off, and snapped
+                //    straight back — indistinguishable from a dead control, which is
+                //    exactly what he saw.
                 Text("Video").font(.system(size: 14)).foregroundStyle(.secondary)
-                Picker("", selection: Binding(
-                    get: { stream.videoOut ? stream.videoFacing : "off" },
-                    set: { choice in
-                        if choice == "off" { stream.setVideo(false) }
-                        else { stream.setVideo(true, facing: choice) }
-                    })
-                ) {
-                    Text("Off").tag("off")
-                    Text("Back").tag("back")
-                    Text("Front").tag("front")
+
+                // ★ Only Off/On here: a Mac has one camera, so offering Back/Front is
+                //   a choice that does not exist. He said so.
+                HStack(spacing: 10) {
+                    Text("This Mac").font(.system(size: 14)).frame(width: 110, alignment: .leading)
+                    Picker("", selection: Binding(
+                        get: { stream.videoOut },
+                        set: { stream.setVideo($0, target: stream.device) })
+                    ) {
+                        Text("Off").tag(false)
+                        Text("On").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
+
+                // The far camera, named. A phone has two lenses, so this one offers them.
+                if let sender = stream.floor?.sender, sender != stream.device {
+                    HStack(spacing: 10) {
+                        Text(sender).font(.system(size: 14)).lineLimit(1)
+                            .frame(width: 110, alignment: .leading)
+                        Picker("", selection: Binding(
+                            get: {
+                                stream.floor.map { $0.videoLive(sender) ? $0.videoFacing(sender) : "off" } ?? "off"
+                            },
+                            set: { choice in
+                                if choice == "off" { stream.setVideo(false, target: sender) }
+                                else { stream.setVideo(true, facing: choice, target: sender) }
+                            })
+                        ) {
+                            Text("Off").tag("off")
+                            Text("Back").tag("back")
+                            Text("Front").tag("front")
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                    }
+                }
             }
 
             if stream.role == .receiver {
