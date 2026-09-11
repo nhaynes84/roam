@@ -1,0 +1,4 @@
+.venv/
+profile/
+shots/
+__pycache__/
