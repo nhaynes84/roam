@@ -70,32 +70,46 @@ def test_get_and_exists(fake_tmux):
 # ----------------------------------------------------------------- sending
 
 
-def test_send_uses_literal_keys_and_a_separate_enter(fake_tmux):
+def _pasted(fake_tmux) -> list[str]:
+    """The stdin of every load-buffer call -- i.e. what was pasted."""
+    return [s for a, s in fake_tmux.calls if a and a[0] == "load-buffer"]
+
+
+def test_send_goes_as_a_bracketed_paste_and_a_separate_enter(fake_tmux):
+    """★ ALWAYS a bracketed paste now, never a `send-keys -l` burst -- a literal
+    keystroke burst dropped characters when the TUI was under render pressure."""
+    fake_tmux.pane_output["%0"] = "deploy the thing"  # so the input-landed poll returns fast
     channels_mod.send("%0", "deploy the thing")
-    sends = fake_tmux.argv_for("send-keys")
-    assert sends[0] == ("send-keys", "-t", "%0", "-l", "--", "deploy the thing")
-    assert sends[1] == ("send-keys", "-t", "%0", "Enter")
+    assert _pasted(fake_tmux) == ["deploy the thing"]
+    assert "-p" in fake_tmux.argv_for("paste-buffer")[0]  # bracketed
+    # Enter is always a separate, deliberate keystroke.
+    assert fake_tmux.argv_for("send-keys") == [("send-keys", "-t", "%0", "Enter")]
 
 
 def test_send_does_not_execute_key_names_in_the_transcript(fake_tmux):
-    """Without -l, "Enter" and "C-c" in a transcript become keystrokes."""
-    channels_mod.send("%0", "press Enter then C-c to stop it")
-    first = fake_tmux.argv_for("send-keys")[0]
-    assert "-l" in first
-    assert first[-1] == "press Enter then C-c to stop it"
+    """A transcript with "Enter"/"C-c" must be TYPED, never interpreted. Paste
+    carries it verbatim; the only send-keys call is the final Enter."""
+    text = "press Enter then C-c to stop it"
+    fake_tmux.pane_output["%0"] = text
+    channels_mod.send("%0", text)
+    assert _pasted(fake_tmux) == [text]
+    assert fake_tmux.argv_for("send-keys") == [("send-keys", "-t", "%0", "Enter")]
 
 
 def test_send_survives_a_leading_dash(fake_tmux):
-    """Regression: tmux read `-N ...` as an option and dropped the message."""
-    channels_mod.send("%0", "-N is not a flag here")
-    first = fake_tmux.argv_for("send-keys")[0]
-    assert first[-2] == "--"
-    assert first[-1] == "-N is not a flag here"
+    """Regression: a leading dash was read as a tmux option and the message
+    dropped. Paste via load-buffer stdin is immune to option parsing."""
+    text = "-N is not a flag here"
+    fake_tmux.pane_output["%0"] = text
+    channels_mod.send("%0", text)
+    assert _pasted(fake_tmux) == [text]
 
 
 def test_send_without_enter_stages_the_text(fake_tmux):
+    """enter=False pastes the text but does NOT submit it -- no Enter keystroke."""
     channels_mod.send("%0", "half a thought", enter=False)
-    assert len(fake_tmux.argv_for("send-keys")) == 1
+    assert _pasted(fake_tmux) == ["half a thought"]
+    assert fake_tmux.argv_for("send-keys") == []
 
 
 def test_multiline_text_goes_as_one_bracketed_paste(fake_tmux):
@@ -171,3 +185,66 @@ def test_channel_to_dict_carries_the_label(fake_tmux):
     payload = channels_mod.list_channels()[0].to_dict()
     assert payload["pane_id"] == "%0"
     assert payload["label"] == "◑ Roam Touch rebuild discussion"
+
+
+# --------------------------------------------------------------- busy detection
+
+#: A pane genuinely mid-reply. Captured off %42 on 2026-09-07: the interrupt hint
+#: lives in the FOOTER, second line from the bottom, alongside the permissions hint.
+BUSY_SCREEN = """\
+  Some earlier reply text that has nothing to do with the footer.
+
+✻ Transmuting… (1m 43s · ↓ 6.0k tokens)
+
+────────────────────────────────────────────
+❯
+────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · esc to interrupt · ← for agents
+  ⧉  gaggiuino-build-sheet
+"""
+
+#: ⚠️⚠️ THE REGRESSION. Captured off %24 on 2026-09-07: an agent EXPLAINING the busy
+#: mechanism put the marker in its own transcript, on line 5 of 59. The footer has
+#: none -- the pane is idle at its prompt -- but a whole-screen substring match
+#: pinned it `working` for 17 minutes and silently swallowed a queued message.
+IDLE_SCREEN_DISCUSSING_THE_MARKER = """\
+  Both parts scoped now. Here's the reality of adding it as a model option:
+
+  - Busy/status — my busy-detection keys on Claude's "esc to interrupt" footer;
+  codex's TUI differs, so status/queue-on-busy would misread a codex pane.
+
+✻ Churned for 22s
+
+────────────────────────────────────────────
+❯
+────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents
+  ⧉  yellow-gaggia
+"""
+
+
+class TestBusyReadsTheFooterOnly:
+    """The hint is TUI chrome. Matching it anywhere on screen means any pane that
+    writes about it pins itself busy, and a held message then never flushes."""
+
+    def test_a_pane_mid_reply_is_busy(self, fake_tmux):
+        fake_tmux.pane_output["%0"] = BUSY_SCREEN
+        assert channels_mod.busy("%0") is True
+
+    def test_a_pane_merely_discussing_the_marker_is_not_busy(self, fake_tmux):
+        fake_tmux.pane_output["%0"] = IDLE_SCREEN_DISCUSSING_THE_MARKER
+        assert channels_mod.busy("%0") is False
+
+    def test_an_ordinary_idle_pane_is_not_busy(self, fake_tmux):
+        fake_tmux.pane_output["%0"] = "❯\n  ⏵⏵ bypass permissions on · ← for agents\n"
+        assert channels_mod.busy("%0") is False
+
+    def test_the_marker_just_above_the_window_does_not_count(self, fake_tmux):
+        """Guards the window size itself: one line further up is transcript."""
+        body = "\n".join(["esc to interrupt"] + ["filler"] * channels_mod.BUSY_TAIL_LINES)
+        fake_tmux.pane_output["%0"] = body + "\n"
+        assert channels_mod.busy("%0") is False
+
+    def test_a_dead_pane_is_not_busy(self, fake_tmux):
+        fake_tmux.pane_output["%0"] = ""
+        assert channels_mod.busy("%0") is False

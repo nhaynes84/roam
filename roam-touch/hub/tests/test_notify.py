@@ -125,16 +125,15 @@ def test_a_notice_with_no_pane_lands_on_the_host_channel(client, auth):
     assert history[-1]["body"] == "nightly backup failed"
 
 
-def test_the_host_channel_is_listed_and_never_reads_as_dead(client, auth):
-    """It has no pane, so the live/dead question does not apply to it. Showing
-    it as a dead channel would say the box is gone, which is a lie."""
+def test_the_host_channel_is_hidden_from_every_users_list(client, auth):
+    """★ Owner: "i don't need that shit ... keep it for YOU to monitor, and if shit
+    does go there, that's a bug we should fix." The @host dead-letter is hidden from
+    the channel list -- but it still EXISTS and still catches pane-less notices
+    (verified in test_a_notice_with_no_pane_lands_on_the_host_channel), which the box
+    side watches."""
     notify(client, auth, "from cron")
     channels = client.get("/channels", headers=auth).json()["channels"]
-    host = next(c for c in channels if c["pane_id"] == HOST_CHANNEL_ID)
-    assert host["live"] is True
-    assert host["status"] == "idle"
-    assert host["label"]
-    assert host["idle_s"] is None  # no screen to fingerprint; never a fake zero
+    assert all(c["pane_id"] != HOST_CHANNEL_ID for c in channels)
 
 
 def test_nothing_can_be_typed_into_the_host_channel(client, auth):

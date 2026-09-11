@@ -119,7 +119,10 @@ def test_live_channels_sort_above_dead_ones(client, auth, fake_tmux):
     )
 
 
-def test_status_becomes_working_after_a_send_and_idle_after_the_outcome(client, auth):
+def test_status_becomes_working_after_a_send_and_idle_after_the_outcome(client, auth, fake_tmux):
+    # ★ "working" now means TRULY mid-reply -- the pane shows the interrupt hint.
+    #   Without it a send would read "idle", which is the stuck-chip bug this guards.
+    fake_tmux.pane_output["%0"] = "streaming ... esc to interrupt"
     client.post("/channels/0/send", json={"text": "do the thing"}, headers=auth)
     working = client.get("/channels/0", headers=auth).json()["channel"]
     assert working["status"] == "working"
@@ -165,27 +168,40 @@ def test_archiving_a_channel_hides_it_without_losing_history(client, auth):
 
 
 def test_send_types_into_the_pane_and_records_it(client, auth, fake_tmux):
+    """Idle pane: the message is pasted in immediately and recorded as a `sent`."""
+    fake_tmux.pane_output["%0"] = "ship it"   # idle (no interrupt hint) -> typed now
     resp = client.post(
         "/channels/0/send", json={"text": "ship it", "origin": "watch"}, headers=auth
     )
     assert resp.status_code == 200
     event = resp.json()["event"]
     assert event["kind"] == "sent"
-    assert event["body"] == "ship it"
-    assert event["meta"] == {"origin": "watch", "enter": True}
+    assert event["body"] == "ship it"                 # private channel: no attribution
+    assert event["meta"]["origin"] == "watch"
+    assert event["meta"]["enter"] is True
+    # ★ Always a bracketed paste now, never `send-keys -l`.
+    pasted = [s for a, s in fake_tmux.calls if a and a[0] == "load-buffer"]
+    assert pasted == ["ship it"]
+    assert fake_tmux.argv_for("send-keys") == [("send-keys", "-t", "%0", "Enter")]
+
+
+def test_send_to_a_busy_pane_is_held_and_reads_working(client, auth, fake_tmux):
+    """A pane mid-reply shows the interrupt hint: the message is HELD (not typed
+    into a working agent) and the chip reads "working"."""
+    fake_tmux.pane_output["%0"] = "thinking ... esc to interrupt"
+    resp = client.post("/channels/0/send", json={"text": "later"}, headers=auth)
+    assert resp.json()["queued"] is True
     assert resp.json()["channel"]["status"] == "working"
-    assert fake_tmux.argv_for("send-keys")[0] == (
-        "send-keys", "-t", "%0", "-l", "--", "ship it",
-    )
+    assert [s for a, s in fake_tmux.calls if a and a[0] == "load-buffer"] == []
 
 
 def test_send_without_enter_is_honoured(client, auth, fake_tmux):
     client.post(
         "/channels/0/send", json={"text": "staged", "enter": False}, headers=auth
     )
-    assert fake_tmux.argv_for("send-keys") == [
-        ("send-keys", "-t", "%0", "-l", "--", "staged")
-    ]
+    pasted = [s for a, s in fake_tmux.calls if a and a[0] == "load-buffer"]
+    assert pasted == ["staged"]
+    assert fake_tmux.argv_for("send-keys") == []   # not submitted
 
 
 def test_send_to_a_dead_pane_is_404_and_types_nothing(client, auth, fake_tmux):
@@ -307,7 +323,9 @@ def test_history_orders_the_full_exchange(client, auth):
     events = client.get("/channels/0/history", headers=auth).json()["events"]
     kinds = [e["kind"] for e in events if e["kind"] != "opened"]
     assert kinds == ["sent", "receipt", "outcome"]
-    assert events[-1]["meta"] == {"ms": 90}
+    # ★ `origin` is now stamped on every kind, not just sends — the ledger answers
+    #   "who said this" without anybody re-deriving it. An outcome came from the agent.
+    assert events[-1]["meta"] == {"ms": 90, "origin": "agent"}
 
 
 def test_history_since_returns_only_what_the_client_missed(client, auth):
@@ -356,7 +374,8 @@ def test_hook_posts_receipt_and_outcome_by_tmux_pane(client, auth):
     )
     assert receipt.status_code == 201
     assert receipt.json()["event"]["pane_id"] == "%1"
-    assert receipt.json()["event"]["meta"] == {"source": "tmux-hook"}
+    # ★ A receipt that echoes nothing is him at the keyboard, and says so.
+    assert receipt.json()["event"]["meta"] == {"source": "tmux-hook", "origin": "tmux"}
     outcome = client.post(
         "/events", json={"pane_id": "%1", "kind": "outcome", "body": "done"}, headers=auth
     )
@@ -1084,3 +1103,216 @@ def test_two_different_messages_are_not_treated_as_an_echo():
     duplicates one."""
     assert _echo_key("check the roaster temp") != _echo_key("check the grinder temp")
     assert _echo_key("") == _echo_key("   \n  ")
+
+
+class TestIntercomReconnect:
+    """★★ A device that reconnects must not be killed by its own old socket.
+
+    Every role change tears the socket down and opens another immediately, so this
+    race fires constantly. Keyed on the device NAME, the late teardown of the old
+    connection deleted the new one — the device disappeared from the hub while its
+    app was plainly running, and a camera it had been told to start could never be
+    told to stop.
+    """
+
+    # ⚠️ The two-socket race itself is NOT covered here: starlette's TestClient
+    #    deadlocks when a second intercom socket is opened while the first is live,
+    #    because `announce()` writes to a peer nobody is draining. Asserting it would
+    #    mean re-implementing the route's cleanup rule in the test, which would pass
+    #    whatever the route actually did. The guard is one line — `peers.get(device)
+    #    is websocket` — and it is verified against real devices instead.
+
+    def test_the_last_socket_leaving_does_clean_up(self, client, auth):
+        q = "?device=phone&role=standby&token=test-token"
+        with client.websocket_connect(f"/intercom{q}") as ws:
+            ws.receive_json()
+        state = client.get("/intercom/state", headers=auth).json()
+        assert "phone" not in state["standby"]
+
+
+# ---- echo matching: the two ways equality has failed on real traffic ----------
+
+def test_an_echo_missing_its_last_character_still_matches(client, auth):
+    """★★ Observed on events 4039/4040, 2026-08-26. The pane echoed the message back
+    one character short — a trailing `;` simply gone — so the keys differed, the
+    receipt was not recognised as an echo, and the thread drew his message twice.
+    Owner: *"i just sent a message and it doubled in the thread."*
+    """
+    text = ("ok, good, i need to send a link the the apple store app for hilary, "
+            "we'll watch for when she signs up; it may not be her org email so i "
+            "dn't want to preload any profile stuff;")
+    sent = client.post(
+        "/channels/0/send", json={"text": text}, headers=auth
+    ).json()["event"]
+    receipt = client.post(
+        "/events",
+        json={"pane": "%0", "kind": "receipt", "body": text[:-1]},
+        headers=auth,
+    ).json()["event"]
+    assert receipt["meta"]["echo_of"] == sent["id"]
+
+
+def test_a_short_message_that_merely_starts_the_same_is_NOT_an_echo(client, auth):
+    """⚠️ THE dangerous direction. A receipt wrongly marked as an echo stops being
+    the record that he typed something, so the message VANISHES rather than doubling.
+    Doubling is a nuisance; vanishing is data loss — hence the tiny tolerance."""
+    client.post("/channels/0/send", json={"text": "run the tests"}, headers=auth)
+    receipt = client.post(
+        "/events",
+        json={"pane": "%0", "kind": "receipt", "body": "run the tests again please"},
+        headers=auth,
+    ).json()["event"]
+    assert receipt["meta"].get("echo_of") is None
+
+
+def test_a_tiny_message_is_never_matched_by_prefix(client, auth):
+    """A 16-character floor: "yes" being a prefix of "yes go ahead" must not silently
+    swallow one of them."""
+    client.post("/channels/0/send", json={"text": "yes go ahead"}, headers=auth)
+    receipt = client.post(
+        "/events", json={"pane": "%0", "kind": "receipt", "body": "yes"}, headers=auth,
+    ).json()["event"]
+    assert receipt["meta"].get("echo_of") is None
+
+
+# ---- the ledger answers "who said this", and admits when text was mangled -----
+
+def test_an_echo_inherits_the_origin_of_what_it_echoes(client, auth):
+    """★★ Source, uniformly. An echo did not originate at the keyboard — it came from
+    whichever device sent the message it duplicates. Owner: *"each message should be
+    immutable, timestamped and source defined."*"""
+    client.post("/channels/0/send", json={"text": "ship it", "origin": "nexus-phone"},
+                headers=auth)
+    receipt = client.post(
+        "/events", json={"pane": "%0", "kind": "receipt", "body": "ship it"},
+        headers=auth,
+    ).json()["event"]
+    assert receipt["meta"]["origin"] == "nexus-phone"
+
+
+def test_a_keyboard_prompt_is_marked_as_coming_from_tmux(client, auth):
+    receipt = client.post(
+        "/events", json={"pane": "%0", "kind": "receipt", "body": "typed by hand"},
+        headers=auth,
+    ).json()["event"]
+    assert receipt["meta"]["origin"] == "tmux"
+
+
+def test_text_altered_in_transit_is_recorded_not_swallowed(client, auth):
+    """⚠️ The terminal is a lossy channel — it has expanded tabs to four spaces and
+    dropped a trailing character. Cosmetic for prose, but a Makefile or a TSV arrives
+    altered and nothing said so. Now the event says so."""
+    text = "make: \tbuild\tthe thing that has tabs in it and is long enough to match"
+    client.post("/channels/0/send", json={"text": text}, headers=auth)
+    # What the pane actually reports back: every tab expanded to four spaces.
+    mangled = text.replace("\t", "    ")
+    receipt = client.post(
+        "/events", json={"pane": "%0", "kind": "receipt", "body": mangled},
+        headers=auth,
+    ).json()["event"]
+    assert receipt["meta"]["echo_of"] is not None, "still recognised as the echo"
+    assert receipt["meta"].get("transit_altered") is True
+
+
+def test_an_identical_echo_is_not_flagged_as_altered(client, auth):
+    client.post("/channels/0/send", json={"text": "nothing was lost here"},
+                headers=auth)
+    receipt = client.post(
+        "/events", json={"pane": "%0", "kind": "receipt", "body": "nothing was lost here"},
+        headers=auth,
+    ).json()["event"]
+    assert receipt["meta"].get("transit_altered") is None
+
+
+def test_a_truncated_capture_is_still_the_echo(client, auth):
+    """★★ Observed on events 4099/4100, 2026-08-26. A 1320-character message was
+    reported back by the pane as its LAST 298 characters, cut mid-word — similarity
+    0.37, far below the fuzzy bar — so the fragment drew as a second message labelled
+    "typed in tmux". Owner: *"is that due to splitting my messages when they are
+    long?"* Effectively yes: it was delivered as keystrokes and most of it was lost.
+    """
+    text = ("ok, no you have the 3d model of the estack assy, you don't need me to "
+            "tell you where things sit; and i wont say i know what the gap is "
+            "between the two positions, i gave you measurements for where i'm "
+            "placing them in my rack so that's something you have all the data for")
+    sent = client.post(
+        "/channels/0/send", json={"text": text}, headers=auth
+    ).json()["event"]
+    fragment = text[-120:]          # what the pane actually reported
+    receipt = client.post(
+        "/events", json={"pane": "%0", "kind": "receipt", "body": fragment},
+        headers=auth,
+    ).json()["event"]
+    assert receipt["meta"]["echo_of"] == sent["id"]
+    assert receipt["meta"]["transit_altered"] is True
+
+
+def test_text_he_added_to_is_not_swallowed_as_a_truncation(client, auth):
+    """⚠️ Direction matters. The reported text must be contained in the SENT text,
+    never the other way round — otherwise him adding to a message would lose it."""
+    client.post("/channels/0/send",
+                json={"text": "please run the whole test suite now"}, headers=auth)
+    receipt = client.post(
+        "/events",
+        json={"pane": "%0", "kind": "receipt",
+              "body": "please run the whole test suite now and then deploy it"},
+        headers=auth,
+    ).json()["event"]
+    assert receipt["meta"].get("echo_of") is None
+
+
+def test_the_channel_reports_which_device_last_spoke(client, auth):
+    """★★ DERIVED from the ledger, never stored beside it. This was a column for about
+    an hour; every `sent` already carried `meta.origin`, and two copies of one fact is
+    how they come to disagree. Owner: *"i thought you already had message source
+    metadata for every message?"*"""
+    client.post("/channels/0/send",
+                json={"text": "from the laptop", "origin": "nexus-mac"}, headers=auth)
+    ch = client.get("/channels/0", headers=auth).json()["channel"]
+    assert ch["last_input_origin"] == "nexus-mac"
+
+    client.post("/channels/0/send",
+                json={"text": "now from the phone", "origin": "nexus-phone"},
+                headers=auth)
+    ch = client.get("/channels/0", headers=auth).json()["channel"]
+    assert ch["last_input_origin"] == "nexus-phone", "it follows the newest send"
+
+
+def test_a_channel_nobody_has_sent_to_has_no_origin(client, auth):
+    """⚠️ None means unknown, and a client must be able to tell that apart from a
+    device name — it is the difference between "not mine" and "no idea"."""
+    ch = client.get("/channels/0", headers=auth).json()["channel"]
+    assert ch["last_input_origin"] is None
+
+
+def test_the_websocket_hello_is_filtered_by_user(client, auth):
+    """★★ THE leak a second person exposed. The channel list arrives over the socket
+    (`hello`), and only the REST route filtered — so every ws client saw every
+    channel. Owner: *"i see all my channels on hers."*
+    """
+    import json as _json
+    # A channel owned by nobody (his), and one owned by jeanne.
+    his = client.post("/channels/0/label", headers=auth,
+                      json={"label": "Warble"}).json()["channel"]["pane_id"]
+    hers = client.get("/channels", headers=auth).json()["channels"][0]["pane_id"]
+    client.post(f"/channels/{hers.lstrip('%')}/owner", headers=auth,
+                json={"owner": "jeanne"})
+
+    with client.websocket_connect(f"/ws?user=jeanne&token={TOKEN}") as ws:
+        hello = ws.receive_json()
+        while hello.get("type") != "hello":
+            hello = ws.receive_json()
+        labels = {c["pane_id"] for c in hello["channels"]}
+        assert hers in labels, "her own channel is present"
+        assert his not in labels, "his channel must not be on her socket"
+
+
+def test_the_websocket_defaults_to_the_owner(client, auth):
+    """No user on the socket → his full rail, exactly as every existing client sees
+    it. The fix must not change what an un-parameterised client receives."""
+    with client.websocket_connect(f"/ws?token={TOKEN}") as ws:
+        hello = ws.receive_json()
+        while hello.get("type") != "hello":
+            hello = ws.receive_json()
+        # He owns the unowned panes, so he sees them.
+        assert len(hello["channels"]) >= 1
