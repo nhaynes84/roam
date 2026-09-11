@@ -1,0 +1,223 @@
+#!/usr/bin/env python3
+"""ptyrun -- drive interactive commands that need a REAL tty.
+
+★ The capability from openclaw's terminal/interactive plugins, built the talos-native
+  way: on tmux. The harness `!` shell mode hands a child a PIPE, not a tty, so anything
+  interactive (a REPL, `git rebase -i`, an ssh/login prompt, `claude setup-token`) hangs
+  with zero output -- the exact trap that produced a 0-byte token file during the auth
+  work (talos-auth §8). A pty fixes it, and tmux IS a pty multiplexer that is already
+  everywhere on this box.
+
+⚠️ ISOLATED SOCKET. Runs on `tmux -L roampty`, a SEPARATE server from the default one
+   the ROAM hub lists as channels. So a pty session never shows up in Nexus. A holding
+   `_init` session anchors the server (and carries `remain-on-exit on`, so a finished
+   command leaves its final output and exit code readable instead of vanishing).
+
+Typical flow (what makes it expect-like):
+    id=$(ptyrun start -- claude setup-token | jq -r .id)
+    ptyrun wait  "$id" 'https://'          # block until the URL prompt is drawn
+    ptyrun screen "$id"                     # read it
+    ptyrun send  "$id" "$CODE" --enter      # answer
+    ptyrun wait  "$id" 'success|token'      # confirm
+    ptyrun dead  "$id"                       # {dead, status}
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import subprocess
+import sys
+import time
+
+SOCK = ["tmux", "-L", "roampty"]
+ANCHOR = "_init"          # the holding session
+ANCHOR_WIN = "__anchor__"  # its window -- excluded from `list`
+
+
+def tmux(*args: str, check: bool = True) -> str:
+    r = subprocess.run([*SOCK, *args], capture_output=True, text=True)
+    if check and r.returncode != 0:
+        sys.exit(f"tmux {' '.join(args)}: {r.stderr.strip() or r.returncode}")
+    return r.stdout
+
+
+def ensure_server() -> None:
+    have = subprocess.run([*SOCK, "has-session", "-t", ANCHOR],
+                          capture_output=True, text=True)
+    if have.returncode != 0:
+        # A wide, tall anchor session keeps the server alive and sets the size new
+        # windows inherit -- roomy enough that capture-pane sees real output.
+        tmux("new-session", "-d", "-s", ANCHOR, "-n", ANCHOR_WIN, "-x", "220", "-y", "50")
+        tmux("set-option", "-g", "remain-on-exit", "on")
+        tmux("set-option", "-g", "history-limit", "20000")
+        # ⚠️ Off, or tmux renames every window to its running command -- which is
+        #    why the anchor showed up as "zsh" and leaked into `list`. Job windows
+        #    are identified by pane id anyway; their name only labels them.
+        tmux("set-window-option", "-g", "automatic-rename", "off")
+
+
+def out(obj) -> None:
+    print(json.dumps(obj, ensure_ascii=False))
+
+
+# ---------------------------------------------------------------- commands
+
+def cmd_start(argv: list[str]) -> None:
+    name = None
+    if argv and argv[0] == "--name":
+        name, argv = argv[1], argv[2:]
+    if argv and argv[0] == "--":
+        argv = argv[1:]
+    if not argv:
+        sys.exit("start: nothing to run (use: ptyrun start -- <cmd...>)")
+    ensure_server()
+    command = " ".join(_shq(a) for a in argv)
+    if not name:  # a readable label (auto-rename is off, so windows aren't named for us)
+        name = argv[0].split("/")[-1][:24]
+    pane = tmux("new-window", "-d", "-P", "-F", "#{pane_id}", "-n", name, command).strip()
+    out({"id": pane, "name": name, "running": command})
+
+
+def cmd_send(argv: list[str]) -> None:
+    pane, rest = argv[0], argv[1:]
+    enter = "--enter" in rest
+    text = " ".join(a for a in rest if a != "--enter")
+    tmux("send-keys", "-t", pane, "-l", text)   # -l: literal, no key-name parsing
+    if enter:
+        tmux("send-keys", "-t", pane, "Enter")
+    out({"sent": text, "enter": enter, "id": pane})
+
+
+def cmd_key(argv: list[str]) -> None:
+    """Named keys, parsed by tmux: Enter, Escape, Tab, Up, Down, C-c, C-d, BSpace..."""
+    pane, keys = argv[0], argv[1:]
+    tmux("send-keys", "-t", pane, *keys)
+    out({"keys": keys, "id": pane})
+
+
+def _capture(pane: str, all_history: bool = False) -> str:
+    args = ["capture-pane", "-p", "-t", pane]
+    if all_history:
+        args += ["-S", "-"]
+    return subprocess.run([*SOCK, *args], capture_output=True, text=True).stdout
+
+
+def cmd_screen(argv: list[str]) -> None:
+    pane, rest = argv[0], argv[1:]
+    all_history = "--all" in rest
+    screen = _capture(pane, all_history).rstrip("\n")
+    if "--tail" in rest:
+        n = int(rest[rest.index("--tail") + 1])
+        screen = "\n".join(screen.splitlines()[-n:])
+    # Plain text on purpose: the agent reads a terminal, not JSON.
+    print(screen)
+
+
+def cmd_wait(argv: list[str]) -> None:
+    """Block until PATTERN (regex) appears on screen, or timeout. Expect's core."""
+    pane, pattern, rest = argv[0], argv[1], argv[2:]
+    timeout = float(rest[rest.index("--timeout") + 1]) if "--timeout" in rest else 30.0
+    rx = re.compile(pattern)
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        screen = _capture(pane, all_history=True)
+        if rx.search(screen):
+            out({"matched": True, "pattern": pattern, "id": pane,
+                 "tail": "\n".join(screen.rstrip("\n").splitlines()[-8:])})
+            return
+        if _is_dead(pane)[0]:
+            break
+        time.sleep(0.3)
+    out({"matched": False, "pattern": pattern, "id": pane,
+         "dead": _is_dead(pane)[0],
+         "tail": "\n".join(_capture(pane, True).rstrip("\n").splitlines()[-8:])})
+    sys.exit(3)
+
+
+def cmd_settle(argv: list[str]) -> None:
+    """Wait until the screen stops changing (command finished drawing)."""
+    pane, rest = argv[0], argv[1:]
+    timeout = float(rest[rest.index("--timeout") + 1]) if "--timeout" in rest else 20.0
+    need = int(rest[rest.index("--stable") + 1]) if "--stable" in rest else 3
+    last, stable = None, 0
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        cur = _capture(pane)
+        stable = stable + 1 if cur == last else 0
+        last = cur
+        if stable >= need:
+            out({"settled": True, "id": pane})
+            return
+        time.sleep(0.3)
+    out({"settled": False, "id": pane})
+
+
+def _is_dead(pane: str) -> tuple[bool, int | None]:
+    r = subprocess.run(
+        [*SOCK, "display-message", "-p", "-t", pane, "#{pane_dead} #{pane_dead_status}"],
+        capture_output=True, text=True)
+    if r.returncode != 0:
+        return True, None  # pane gone entirely
+    parts = r.stdout.split()
+    dead = parts and parts[0] == "1"
+    status = int(parts[1]) if dead and len(parts) > 1 and parts[1].lstrip("-").isdigit() else None
+    return bool(dead), status
+
+
+def cmd_dead(argv: list[str]) -> None:
+    dead, status = _is_dead(argv[0])
+    out({"dead": dead, "status": status, "id": argv[0]})
+
+
+def cmd_list(_argv: list[str]) -> None:
+    have = subprocess.run([*SOCK, "has-session", "-t", ANCHOR],
+                          capture_output=True, text=True)
+    if have.returncode != 0:
+        out({"sessions": []})
+        return
+    fmt = ("#{session_name}\t#{pane_id}\t#{window_name}\t#{pane_dead}"
+           "\t#{pane_dead_status}\t#{pane_current_command}")
+    rows = tmux("list-panes", "-a", "-F", fmt).splitlines()
+    sessions = []
+    for row in rows:
+        sname, pid, wname, dead, dstat, curcmd = (row.split("\t") + [""] * 6)[:6]
+        if wname == ANCHOR_WIN:   # the holding window, not a real pty job
+            continue
+        sessions.append({"id": pid, "name": wname, "dead": dead == "1",
+                         "status": int(dstat) if dead == "1" and dstat.lstrip("-").isdigit() else None,
+                         "command": curcmd})
+    out({"sessions": sessions})
+
+
+def cmd_kill(argv: list[str]) -> None:
+    tmux("kill-window", "-t", argv[0], check=False)
+    out({"killed": argv[0]})
+
+
+def cmd_clean(_argv: list[str]) -> None:
+    subprocess.run([*SOCK, "kill-server"], capture_output=True, text=True)
+    out({"cleaned": True})
+
+
+def _shq(s: str) -> str:
+    import shlex
+    return shlex.quote(s)
+
+
+COMMANDS = {
+    "start": cmd_start, "send": cmd_send, "key": cmd_key, "screen": cmd_screen,
+    "wait": cmd_wait, "settle": cmd_settle, "dead": cmd_dead, "list": cmd_list,
+    "kill": cmd_kill, "clean": cmd_clean,
+}
+
+
+def main() -> int:
+    if len(sys.argv) < 2 or sys.argv[1] not in COMMANDS:
+        sys.exit(__doc__)
+    COMMANDS[sys.argv[1]](sys.argv[2:])
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
