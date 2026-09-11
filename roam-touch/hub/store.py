@@ -35,7 +35,7 @@ from transcript import MAX_BODY_CHARS, cap_body, summarise
 
 DEFAULT_DB_PATH = Path(__file__).with_name("hub.sqlite")
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 11
 
 #: Where a channel's last inbound message came from. This is the whole
 #: notification rule: **reply where the last message came from.**
@@ -152,6 +152,12 @@ class StoredChannel:
     #: None until something arrives; unknown means notify.
     last_input_source: str | None = None
     last_input_at: float | None = None
+    #: ★★ Whose channel this is, or "shared". Remembered here as well as on the
+    #: pane because a pane dies and its options die with it -- and a dead channel
+    #: keeps its history and stays in the list. Without this, her finished sessions
+    #: would silently become unowned and drop off her list the moment they ended.
+    #: Empty means unowned, which reads as the hub owner's. See `Channel.visible_to`.
+    owner: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -196,6 +202,10 @@ def _row_to_channel(row: sqlite3.Row) -> StoredChannel:
         last_output_at=row["last_output_at"],
         last_input_source=row["last_input_source"],
         last_input_at=row["last_input_at"],
+        # ⚠️ Keyed defensively: a row read back through a SELECT written before
+        #    this column existed has no such key, and a KeyError here would take
+        #    down the whole channel list.
+        owner=(row["owner"] if "owner" in row.keys() else "") or "",
     )
 
 
@@ -252,13 +262,66 @@ class Store:
                 archived       INTEGER NOT NULL DEFAULT 0,
                 last_output_at REAL,
                 last_input_source TEXT,
-                last_input_at  REAL
+                last_input_at  REAL,
+                owner          TEXT NOT NULL DEFAULT ''
+            );
+
+            -- ★★ How far each PERSON has read each channel.
+            --
+            -- ⚠️ Keyed by (user, pane), NOT by device. Read state was kept in each
+            -- client's own settings, so reading a thread on the Mac left it bold on
+            -- the phone -- owner: *"i'm getting unread tag counts on threads I read
+            -- on other devices."* Unread is a fact about a PERSON, not about a piece
+            -- of hardware, and the only place that fact can live once is here.
+            CREATE TABLE IF NOT EXISTS read_cursors (
+                user    TEXT NOT NULL,
+                pane_id TEXT NOT NULL,
+                cursor  INTEGER NOT NULL,
+                ts      REAL NOT NULL,
+                PRIMARY KEY (user, pane_id)
             );
 
             CREATE TABLE IF NOT EXISTS schema_meta (
                 key   TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             );
+
+            -- v10 -> v11: scheduled jobs. A job fires a prompt into a channel on
+            -- a schedule and lets the ordinary outcome/delivery path carry the
+            -- answer back -- the same primitives a person's message already uses,
+            -- so a scheduled turn is indistinguishable from a typed one downstream.
+            -- Ported (design, not code) from openclaw's `src/cron`.
+            CREATE TABLE IF NOT EXISTS cron_jobs (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                name         TEXT    NOT NULL DEFAULT '',
+                kind         TEXT    NOT NULL,            -- 'at' | 'every' | 'cron'
+                expr         TEXT    NOT NULL,            -- ISO ts | interval | cron expr
+                tz           TEXT    NOT NULL DEFAULT '', -- IANA tz ('' = host/UTC)
+                pane_id      TEXT    NOT NULL DEFAULT '', -- channel it prompts
+                prompt       TEXT    NOT NULL DEFAULT '', -- what it sends
+                delivery     TEXT    NOT NULL DEFAULT 'channel', -- channel|notify|none
+                owner        TEXT    NOT NULL DEFAULT 'nick',
+                enabled      INTEGER NOT NULL DEFAULT 1,
+                delete_after_run INTEGER NOT NULL DEFAULT 0,
+                created_at   REAL    NOT NULL,
+                updated_at   REAL    NOT NULL,
+                last_run_at  REAL,
+                next_run_at  REAL,                        -- NULL = recompute / done
+                run_count    INTEGER NOT NULL DEFAULT 0
+            );
+
+            -- One firing. `event_id` links the run to the `sent` event it produced,
+            -- so the app can jump from a run straight to the turn in the thread.
+            CREATE TABLE IF NOT EXISTS cron_runs (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_id      INTEGER NOT NULL,
+                started_at  REAL    NOT NULL,
+                finished_at REAL,
+                status      TEXT    NOT NULL DEFAULT 'fired', -- fired|ok|error|skipped
+                detail      TEXT    NOT NULL DEFAULT '',
+                event_id    INTEGER
+            );
+            CREATE INDEX IF NOT EXISTS cron_runs_job_idx ON cron_runs(job_id, id);
             """
         )
         # v2 -> v3: channels gained the liveness heartbeat. Unknown until the
@@ -274,6 +337,21 @@ class Store:
         if "last_input_source" not in channel_columns:
             self._db.execute("ALTER TABLE channels ADD COLUMN last_input_source TEXT")
             self._db.execute("ALTER TABLE channels ADD COLUMN last_input_at REAL")
+        # v6 -> v7: channels remember an owner. Existing rows stay '' -- unowned,
+        # which reads as the hub owner's, so every channel he already had stays on
+        # his list rather than disappearing the day a second person appears.
+        if "owner" not in channel_columns:
+            self._db.execute(
+                "ALTER TABLE channels ADD COLUMN owner TEXT NOT NULL DEFAULT ''"
+            )
+        # v9 -> v10: `last_input_origin` is GONE, and the reason is worth keeping.
+        # It was added to answer "which device last spoke to this channel", and every
+        # `sent` event already carried exactly that in `meta.origin`. Two places
+        # holding one fact is how they come to disagree -- the failure mode this
+        # codebase has hit repeatedly. The ledger is the source of truth; the channel
+        # view now DERIVES this from the last `sent` (see `last_origin`).
+        if "last_input_origin" in channel_columns:
+            self._db.execute("ALTER TABLE channels DROP COLUMN last_input_origin")
 
         columns = {r["name"] for r in self._db.execute("PRAGMA table_info(events)")}
 
@@ -528,12 +606,71 @@ class Store:
 
     # -------------------------------------------------------------- channels
 
+    def read_cursors(self, user: str) -> dict[str, int]:
+        """How far this person has read in every channel."""
+        rows = self._db.execute(
+            "SELECT pane_id, cursor FROM read_cursors WHERE user = ?",
+            ((user or "").strip().lower(),),
+        ).fetchall()
+        return {r["pane_id"]: int(r["cursor"]) for r in rows}
+
+    def mark_read(self, user: str, pane_id: str, cursor: int) -> int:
+        """Record that `user` has read `pane_id` up to `cursor`.
+
+        ⚠️ MONOTONIC -- never moves backwards. Clients report independently and a
+        slow one can arrive with a stale number after a fast one; taking the smaller
+        would make a thread he just read turn bold again a second later.
+        """
+        who = (user or "").strip().lower()
+        with self._lock:
+            self._db.execute(
+                "INSERT INTO read_cursors(user, pane_id, cursor, ts) "
+                "VALUES(?, ?, ?, ?) "
+                "ON CONFLICT(user, pane_id) DO UPDATE SET "
+                "  cursor = MAX(cursor, excluded.cursor), ts = excluded.ts",
+                (who, pane_id, int(cursor), time.time()),
+            )
+            self._db.commit()
+        row = self._db.execute(
+            "SELECT cursor FROM read_cursors WHERE user = ? AND pane_id = ?",
+            (who, pane_id),
+        ).fetchone()
+        return int(row["cursor"]) if row else int(cursor)
+
+    def set_channel_label(self, pane_id: str, label: str) -> None:
+        """Rename a channel in the ledger.
+
+        ⚠️ Also needed for a DEAD channel: its pane is gone, so there is no
+        `@roam_label` left to carry the name and the store is the only record.
+        """
+        with self._lock:
+            self._db.execute(
+                "UPDATE channels SET label = ? WHERE pane_id = ?",
+                (label, pane_id),
+            )
+            self._db.commit()
+
+    def set_channel_owner(self, pane_id: str, owner: str) -> None:
+        """Persist who owns a channel, so it survives the pane dying.
+
+        ⚠️ Unlike `remember_channel`, this DOES write an empty value -- un-claiming
+        is a deliberate act, while the poller's empty is merely "the pane did not
+        say".
+        """
+        with self._lock:
+            self._db.execute(
+                "UPDATE channels SET owner = ? WHERE pane_id = ?",
+                ((owner or "").strip().lower(), pane_id),
+            )
+            self._db.commit()
+
     def remember_channel(
         self,
         pane_id: str,
         label: str = "",
         session: str = "",
         ts: float | None = None,
+        owner: str | None = None,
     ) -> StoredChannel:
         """Record that a pane exists (or existed). Idempotent.
 
@@ -543,14 +680,20 @@ class Store:
         """
         stamp = time.time() if ts is None else float(ts)
         with self._lock:
+            # ⚠️ `owner` is COALESCEd rather than overwritten: the poller calls this
+            #    every couple of seconds with whatever the live pane says, and a pane
+            #    whose option is missing (or a pane that just died) must not erase a
+            #    remembered owner. Only a non-empty value updates it.
             self._db.execute(
-                "INSERT INTO channels(pane_id, label, session, first_seen, last_seen) "
-                "VALUES(?, ?, ?, ?, ?) "
+                "INSERT INTO channels(pane_id, label, session, first_seen, last_seen, owner) "
+                "VALUES(?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(pane_id) DO UPDATE SET "
                 "  label = excluded.label, "
                 "  session = excluded.session, "
-                "  last_seen = excluded.last_seen",
-                (pane_id, label, session, stamp, stamp),
+                "  last_seen = excluded.last_seen, "
+                "  owner = CASE WHEN excluded.owner != '' "
+                "               THEN excluded.owner ELSE channels.owner END",
+                (pane_id, label, session, stamp, stamp, (owner or "").strip().lower()),
             )
             self._db.commit()
             row = self._db.execute(
@@ -566,6 +709,30 @@ class Store:
                 (float(ts), pane_id),
             )
             self._db.commit()
+
+    def last_origin(self, pane_id: str) -> str | None:
+        """Which device last SENT to this channel, straight from the ledger.
+
+        ★★ Derived, never stored. This was briefly a column on `channels`, and it was
+        redundant the moment it was written: every `sent` already carries
+        `meta.origin`. Owner: *"i thought you already had message source metadata for
+        every message?"* -- he was right, and two copies of one fact is how they come
+        to disagree.
+
+        ⚠️ Cheap because of `events_pane_idx` on (pane_id, id): this walks back from
+        the newest event in one pane, and stops at the first `sent`.
+        """
+        row = self._db.execute(
+            "SELECT meta FROM events WHERE pane_id = ? AND kind = ? "
+            "ORDER BY id DESC LIMIT 1",
+            (pane_id, EventKind.SENT.value),
+        ).fetchone()
+        if row is None:
+            return None
+        try:
+            return (json.loads(row["meta"] or "{}") or {}).get("origin")
+        except (ValueError, TypeError):
+            return None
 
     def set_channel_input(
         self, pane_id: str, source: str, ts: float | None = None
@@ -620,6 +787,153 @@ class Store:
     def prune_placeholder(self, pane_ids: Sequence[str]) -> None:  # pragma: no cover
         """Deliberately absent: the hub never hard-deletes. Kept as a marker."""
         raise NotImplementedError("the hub never hard-deletes; use archive_*")
+
+    # ------------------------------------------------------------- cron jobs
+    #
+    # ⚠️ A scheduled job hard-deletes, unlike events/channels: it is live
+    # configuration, not history. The RUNS it produced are ordinary ledger
+    # events and stay; the `cron_runs` rows are the audit trail and stay too.
+    #: Columns a caller may set through create/update. Everything else
+    #: (id, created_at, run counters) is owned by the store.
+    _CRON_WRITABLE = (
+        "name", "kind", "expr", "tz", "pane_id", "prompt", "delivery",
+        "owner", "enabled", "delete_after_run", "next_run_at",
+    )
+
+    def create_job(self, fields: dict[str, Any]) -> dict[str, Any]:
+        """Insert a job. `kind`/`expr` are required; the rest take defaults."""
+        if not fields.get("kind") or not fields.get("expr"):
+            raise ValueError("kind and expr are required")
+        now = time.time()
+        cols = {k: fields[k] for k in self._CRON_WRITABLE if k in fields}
+        cols.setdefault("name", "")
+        cols["created_at"] = now
+        cols["updated_at"] = now
+        # sqlite stores bools as ints
+        for flag in ("enabled", "delete_after_run"):
+            if flag in cols:
+                cols[flag] = 1 if cols[flag] else 0
+        names = ", ".join(cols)
+        marks = ", ".join("?" for _ in cols)
+        with self._lock:
+            cur = self._db.execute(
+                f"INSERT INTO cron_jobs({names}) VALUES({marks})",
+                tuple(cols.values()),
+            )
+            self._db.commit()
+            job_id = int(cur.lastrowid)
+        return self.get_job(job_id)  # type: ignore[return-value]
+
+    def update_job(self, job_id: int, fields: dict[str, Any]) -> dict[str, Any] | None:
+        """Patch the writable columns of one job. Unknown keys are ignored."""
+        cols = {k: fields[k] for k in self._CRON_WRITABLE if k in fields}
+        for flag in ("enabled", "delete_after_run"):
+            if flag in cols:
+                cols[flag] = 1 if cols[flag] else 0
+        cols["updated_at"] = time.time()
+        assignments = ", ".join(f"{k} = ?" for k in cols)
+        with self._lock:
+            cur = self._db.execute(
+                f"UPDATE cron_jobs SET {assignments} WHERE id = ?",
+                (*cols.values(), int(job_id)),
+            )
+            self._db.commit()
+            if cur.rowcount == 0:
+                return None
+        return self.get_job(job_id)
+
+    def delete_job(self, job_id: int) -> bool:
+        with self._lock:
+            cur = self._db.execute("DELETE FROM cron_jobs WHERE id = ?", (int(job_id),))
+            self._db.execute("DELETE FROM cron_runs WHERE job_id = ?", (int(job_id),))
+            self._db.commit()
+            return cur.rowcount > 0
+
+    def get_job(self, job_id: int) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._db.execute(
+                "SELECT * FROM cron_jobs WHERE id = ?", (int(job_id),)
+            ).fetchone()
+        return _job_to_dict(row) if row else None
+
+    def list_jobs(self, owner: str | None = None) -> list[dict[str, Any]]:
+        """Every job, or one owner's. Ordered soonest-next-run first."""
+        with self._lock:
+            if owner is None:
+                rows = self._db.execute(
+                    "SELECT * FROM cron_jobs ORDER BY next_run_at IS NULL, next_run_at"
+                ).fetchall()
+            else:
+                rows = self._db.execute(
+                    "SELECT * FROM cron_jobs WHERE owner = ? "
+                    "ORDER BY next_run_at IS NULL, next_run_at",
+                    (owner,),
+                ).fetchall()
+        return [_job_to_dict(r) for r in rows]
+
+    def due_jobs(self, now: float) -> list[dict[str, Any]]:
+        """Enabled jobs whose next run has arrived. Soonest first."""
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT * FROM cron_jobs WHERE enabled = 1 "
+                "AND next_run_at IS NOT NULL AND next_run_at <= ? "
+                "ORDER BY next_run_at",
+                (float(now),),
+            ).fetchall()
+        return [_job_to_dict(r) for r in rows]
+
+    def mark_job_ran(
+        self, job_id: int, ran_at: float, next_run_at: float | None
+    ) -> None:
+        """Advance a job past a firing: stamp last run, set the next, count it."""
+        with self._lock:
+            self._db.execute(
+                "UPDATE cron_jobs SET last_run_at = ?, next_run_at = ?, "
+                "run_count = run_count + 1, updated_at = ? WHERE id = ?",
+                (float(ran_at), next_run_at, time.time(), int(job_id)),
+            )
+            self._db.commit()
+
+    def record_run(
+        self, job_id: int, started_at: float, status: str = "fired",
+        detail: str = "", event_id: int | None = None,
+    ) -> int:
+        with self._lock:
+            cur = self._db.execute(
+                "INSERT INTO cron_runs(job_id, started_at, status, detail, event_id) "
+                "VALUES(?, ?, ?, ?, ?)",
+                (int(job_id), float(started_at), status, detail, event_id),
+            )
+            self._db.commit()
+            return int(cur.lastrowid)
+
+    def finish_run(
+        self, run_id: int, status: str, detail: str = "",
+        event_id: int | None = None, finished_at: float | None = None,
+    ) -> None:
+        with self._lock:
+            self._db.execute(
+                "UPDATE cron_runs SET finished_at = ?, status = ?, detail = ?, "
+                "event_id = COALESCE(?, event_id) WHERE id = ?",
+                (finished_at or time.time(), status, detail, event_id, int(run_id)),
+            )
+            self._db.commit()
+
+    def list_runs(self, job_id: int, limit: int = 50) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT * FROM cron_runs WHERE job_id = ? ORDER BY id DESC LIMIT ?",
+                (int(job_id), max(1, int(limit))),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def _job_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+    """One job row as the API/app consume it, with bools un-inted."""
+    d = dict(row)
+    d["enabled"] = bool(d.get("enabled"))
+    d["delete_after_run"] = bool(d.get("delete_after_run"))
+    return d
 
 
 def bulk_remember(store: Store, channels: Iterable[Any]) -> None:

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import difflib
 import hashlib
 import json
 import logging
@@ -35,6 +36,7 @@ from fastapi import (
     HTTPException,
     Path as PathParam,
     Query,
+    Request,
     UploadFile,
     WebSocket,
     WebSocketDisconnect,
@@ -46,7 +48,9 @@ from pydantic import AliasChoices, BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from starlette.concurrency import run_in_threadpool
 
+import apps as apps_mod
 import channels as channels_mod
+import cron as cron_mod
 import files as files_mod
 import images as images_mod
 import intercom as intercom_mod
@@ -159,6 +163,12 @@ log = logging.getLogger("roam.hub")
 # --------------------------------------------------------------------- config
 
 
+#: How long a peer gets to accept one 20ms audio frame before it is dropped for
+#: being slow. Deliberately about one frame time: a frame that misses its slot is
+#: already stale, and holding it only pushes the delay further out.
+RELAY_DEADLINE_S = 0.05
+
+
 class Settings(BaseSettings):
     """Hub configuration. Every field is settable as `ROAM_HUB_<FIELD>`."""
 
@@ -184,6 +194,19 @@ class Settings(BaseSettings):
     #: receipt is still recognised as the echo of that send rather than as him
     #: typing at the keyboard.
     echo_window_s: float = 60.0
+
+    #: ★★ How soon after the hub types into a pane a receipt is certainly its echo.
+    #:
+    #: ⚠️ The matching used to be LOOSE ON TIME (60s) and STRICT ON TEXT (exact), which
+    #: is backwards: the clock is the reliable signal and the text is the corrupted one.
+    #: The path is hub -> types into a tmux pane -> the agent's hook reports what it
+    #: saw, and that terminal is lossy -- it has expanded tabs to four spaces and
+    #: dropped a trailing character, each time breaking equality and drawing his
+    #: message twice. A real echo lands in about 100ms (observed: events 4054/4055,
+    #: 0.1s apart), so inside this window the text may differ and it is still the echo.
+    #: A false match would need him to hand-type a near-identical message within two
+    #: seconds of the app sending one.
+    echo_certain_s: float = 2.0
 
     #: The folders the file browser may see, and nothing else. Read-only: the
     #: hub never writes inside them (`POST /share` copies *out*, into the
@@ -300,6 +323,11 @@ class Broadcaster:
 
 
 class SendRequest(BaseModel):
+    #: ⚠️ WHO is asking, so one person cannot reach into the other's private
+    #: sessions -- owner: *"she shouldn't be able to manage my sessions or me
+    #: hers."* An organisational hint like everywhere else, defaulting to the hub
+    #: owner so every existing client keeps working untouched.
+    user: str | None = None
     text: str = Field(min_length=1, description="Exactly what to type into the pane.")
     enter: bool = Field(
         default=True,
@@ -347,6 +375,11 @@ class NoticeRequest(BaseModel):
 class InterruptRequest(BaseModel):
     """Stop whatever the channel is doing. No text, so nothing is 'typed'."""
 
+    #: ⚠️ WHO is asking, so one person cannot reach into the other's private
+    #: sessions -- owner: *"she shouldn't be able to manage my sessions or me
+    #: hers."* An organisational hint like everywhere else, defaulting to the hub
+    #: owner so every existing client keeps working untouched.
+    user: str | None = None
     action: str = Field(
         default="escape",
         description="escape (stop generating) | interrupt (C-c to the process)",
@@ -362,19 +395,90 @@ class CreateChannelRequest(BaseModel):
     session: str | None = None
     cwd: str | None = None
     origin: str = "client"
+    #: ★ Who this channel belongs to, or "shared" for one both people work in.
+    #: None leaves the pane unowned, which is what a hand-opened pane looks like
+    #: and reads as the hub owner's.
+    owner: str | None = None
 
 
 class KillRequest(BaseModel):
     origin: str = "client"
+    #: ⚠️ WHO is asking, so one person cannot reach into the other's private
+    #: sessions -- owner: *"she shouldn't be able to manage my sessions or me
+    #: hers."* An organisational hint like everywhere else, defaulting to the hub
+    #: owner so every existing client keeps working untouched.
+    user: str | None = None
+
+
+
+class LabelRequest(BaseModel):
+    """Rename a channel."""
+
+    label: str = Field(min_length=1, max_length=80)
+    user: str | None = None
+
+
+class ReadRequest(BaseModel):
+    """How far this person has read a channel."""
+
+    cursor: int = Field(ge=0)
+    user: str | None = None
+
+
+class OwnerRequest(BaseModel):
+    """Hand a channel to someone, or share it with everyone."""
+
+    #: A name, "shared", or "" to leave it unowned. Owner: *"shared channels for
+    #: trips and stuff where we can both collab."*
+    owner: str = ""
+    user: str | None = None
 
 
 class ArchiveRequest(BaseModel):
     archived: bool = True
 
 
+class CronJobRequest(BaseModel):
+    """Create or replace a scheduled job."""
+
+    name: str = Field(default="", max_length=120)
+    kind: str = Field(description="Schedule kind: 'at', 'every' or 'cron'.")
+    expr: str = Field(
+        min_length=1,
+        description="ISO timestamp / '20m' for at; '10m'/'1h'/'1d' for every; a "
+        "5- or 6-field cron expression for cron.",
+    )
+    tz: str = Field(default="", max_length=64, description="IANA tz for cron/at.")
+    pane_id: str = Field(default="", description="Channel to fire the prompt into.")
+    prompt: str = Field(default="", description="What to send when it fires.")
+    delivery: str = Field(default="channel", description="channel | notify | none.")
+    owner: str | None = None
+    enabled: bool = True
+    delete_after_run: bool = False
+
+
+class CronPatchRequest(BaseModel):
+    """Edit fields of a job; every field optional (only what is sent changes)."""
+
+    name: str | None = None
+    kind: str | None = None
+    expr: str | None = None
+    tz: str | None = None
+    pane_id: str | None = None
+    prompt: str | None = None
+    delivery: str | None = None
+    enabled: bool | None = None
+    delete_after_run: bool | None = None
+
+
 class RespondRequest(BaseModel):
     """Choose one option on a pane's open selector."""
 
+    #: ⚠️ WHO is asking, so one person cannot reach into the other's private
+    #: sessions -- owner: *"she shouldn't be able to manage my sessions or me
+    #: hers."* An organisational hint like everywhere else, defaulting to the hub
+    #: owner so every existing client keeps working untouched.
+    user: str | None = None
     option: int = Field(ge=1, le=12, description="The option number, as displayed.")
 
 
@@ -387,6 +491,8 @@ class ShareRequest(BaseModel):
     """
 
     path: str = Field(min_length=1, max_length=1024)
+    #: Which person's roots and inbox this share is against.
+    user: str | None = None
 
 
 class PresenceRequest(BaseModel):
@@ -414,11 +520,26 @@ class PresenceRequest(BaseModel):
 # --------------------------------------------------------------------- views
 
 
-def channel_status(live: bool, last_kind: str | None) -> str:
-    """`dead` | `working` | `idle` -- what the panel puts on the channel chip."""
+def channel_status(
+    live: bool, last_kind: str | None, pane_id: str | None = None,
+    asking: bool = False,
+) -> str:
+    """`dead` | `asking` | `working` | `idle` -- what the panel puts on the chip."""
     if not live:
         return "dead"
+    # ★ A live open question outranks working and idle: the channel is waiting on HIM,
+    #   and that has to read differently from "idle -- your move is optional" and from
+    #   "working -- leave it alone". Driven by app.state.prompts (screen-truth), so it
+    #   clears the instant the selector leaves the screen.
+    if asking:
+        return "asking"
     if last_kind in (EventKind.SENT.value, EventKind.RECEIPT.value):
+        # ⚠️ Only "working" if the agent is TRULY mid-reply. A message received but
+        #    producing no closing outcome event (a rapid-send burst, a Stop that
+        #    extracted nothing) would otherwise leave the chip spinning "working"
+        #    forever -- the stuck state seen on her channels.
+        if pane_id is not None and not channels_mod.busy(pane_id):
+            return "idle"
         return "working"
     return "idle"
 
@@ -458,6 +579,11 @@ def host_channel_view(store: Store, stored: StoredChannel | None) -> dict[str, A
         "last_input_at": None,
         "event_count": store.event_count(HOST_CHANNEL_ID),
         "last_event": last.to_dict(INLINE_BODY_CHARS) if last else None,
+        # ⚠️ Every channel row carries an owner, including this one. A client that
+        #    reads `c["owner"]` should never have to special-case one row — the host
+        #    channel is unowned, which is a value, not an absence.
+        "owner": "",
+        "shared": False,
     }
 
 
@@ -466,6 +592,7 @@ def channel_view(
     pane_id: str,
     live: Channel | None,
     stored: StoredChannel | None,
+    asking_panes: set[str] | None = None,
 ) -> dict[str, Any]:
     """One merged channel: whatever tmux says now, plus whatever we remember."""
     if pane_id == HOST_CHANNEL_ID:
@@ -484,7 +611,10 @@ def channel_view(
         "index": live.index if live else None,
         "command": live.command if live else None,
         "live": live is not None,
-        "status": channel_status(live is not None, last.kind if last else None),
+        "status": channel_status(
+            live is not None, last.kind if last else None, pane_id,
+            asking=asking_panes is not None and pane_id in asking_panes,
+        ),
         "archived": bool(stored.archived) if stored else False,
         "first_seen": stored.first_seen if stored else None,
         "last_seen": stored.last_seen if stored else None,
@@ -497,8 +627,19 @@ def channel_view(
         # its next answer will be delivered.
         "last_input_source": stored.last_input_source if stored else None,
         "last_input_at": stored.last_input_at if stored else None,
+        # ★★ WHICH DEVICE last spoke here — derived from the last `sent`, not stored
+        #    alongside it. `last_input_source` only says app-vs-tmux, and his Mac and
+        #    his phone are both "app"; telling them apart is the whole notification
+        #    question, and the ledger already answered it.
+        "last_input_origin": store.last_origin(pane_id),
         "event_count": store.event_count(pane_id),
         "last_event": last.to_dict(INLINE_BODY_CHARS) if last else None,
+        # ⚠️ The LIVE pane wins, but a dead channel falls back to what we
+        #    remembered -- a pane's options die with the pane, and a finished
+        #    session must not silently become unowned and drop off its owner's
+        #    list. Empty means unowned, which reads as the hub owner's.
+        "owner": (live.owner if live and live.owner
+                  else (stored.owner if stored else "")),
     }
 
 
@@ -506,6 +647,7 @@ def build_channel_list(
     store: Store,
     live_channels: list[Channel],
     include_archived: bool = False,
+    asking_panes: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Live panes merged with remembered ones.
 
@@ -520,7 +662,9 @@ def build_channel_list(
         stored = stored_by_id.get(pane_id)
         if stored is not None and stored.archived and not include_archived:
             continue
-        views.append(channel_view(store, pane_id, live_by_id.get(pane_id), stored))
+        views.append(
+            channel_view(store, pane_id, live_by_id.get(pane_id), stored, asking_panes)
+        )
     views.sort(
         key=lambda v: (
             0 if v["live"] else 1,
@@ -594,7 +738,13 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
         #: pane_id -> messages held while that pane was asking a question.
         app.state.queued = {}
         #: The open audio channel and who currently holds the floor.
-        app.state.intercom = intercom_mod.Intercom()
+        # ★★ Many streams now, not one channel. Each carries its own floor so
+        #    talking on one says nothing about the others -- owner: *"i want to talk
+        #    to my wife without disrupting my son."*
+        app.state.streams = intercom_mod.Streams()
+        # Peers keyed by (stream, device): the same laptop can be a monitor on the
+        # kitchen stream and a source on another, and one socket per pair keeps
+        # those from overwriting each other.
         app.state.intercom_peers = {}
         #: Video sockets, kept apart from audio so a frame cannot delay speech.
         app.state.video_peers = {}
@@ -605,12 +755,19 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
         #: split it in one test.
         app.state.intercom_stats = {}
         app.state.poller = asyncio.create_task(_poll_forever(app))
+        #: The scheduler: fires cron_jobs into their channels on time. Separate
+        #: task from the poller so a slow tmux poll never delays a due job and a
+        #: scheduler stall never freezes liveness.
+        app.state.scheduler = asyncio.create_task(cron_mod.run_scheduler(app))
         try:
             yield
         finally:
             app.state.poller.cancel()
+            app.state.scheduler.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await app.state.poller
+            with contextlib.suppress(asyncio.CancelledError):
+                await app.state.scheduler
             if store is None:  # only close what we opened
                 app.state.store.close()
 
@@ -655,6 +812,87 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
         """
         return " ".join((text or "").split())[:200]
 
+    def _text_similar(a: str, b: str) -> bool:
+        """Close enough to be the same message mangled in transit.
+
+        ⚠️ SIMILARITY, not prefix. A prefix rule was tried and rejected the same
+        minute: "run the tests" is a prefix of "run the tests again please", so a
+        message he genuinely typed would have been swallowed as an echo of a shorter
+        one — and a receipt wrongly marked as an echo VANISHES rather than doubling.
+
+        The two corruptions actually observed both score far above this bar: tabs
+        expanded to four spaces measured 0.93, and a dropped trailing character on a
+        175-character message is 0.997. The false case above is 0.67.
+        """
+        if not a or not b:
+            return False
+        if difflib.SequenceMatcher(None, a, b).ratio() >= 0.85:
+            return True
+        # ⚠️ A TRUNCATED CAPTURE. Observed 2026-08-26: a 1320-character message came
+        #    back as its last 298 characters, cut mid-word, so similarity was 0.37 and
+        #    the fragment rendered as a second message "typed in tmux". A contiguous
+        #    substring of what we just sent is not something he typed by hand.
+        #
+        # ⚠️ Direction matters: the REPORTED text must be contained in the SENT text,
+        #    never the other way round. "run the tests" sent and "run the tests again
+        #    please" reported is him adding to it, and swallowing that would lose a
+        #    real message. The length floor keeps a short coincidence out.
+        return False
+
+    def _echo_matches(sent: str, reported: str, age_s: float = 0.0) -> bool:
+        """Whether `reported` is the pane echoing `sent` back at us.
+
+        ⚠️⚠️ NOT equality, and this is the SECOND way equality has failed. The first
+        was tab expansion (see `_echo_key`). The second, observed on events 4039/4040:
+        the receipt came back a **prefix** of what was sent, one character short --
+        a trailing `;` simply missing. The keys therefore differed, the receipt was not
+        recognised as an echo, and the thread drew his message twice.
+
+            sent     '...preload any profile stuff;'   (175 chars)
+            reported '...preload any profile stuff'    (174 chars)
+
+        ★ So a short truncated tail counts as a match. The tolerance is deliberately
+        TINY, because the dangerous direction is the other one: a receipt wrongly
+        marked as an echo stops being the record that he typed something, and the
+        message disappears rather than doubling. Doubling is a nuisance; vanishing is
+        data loss.
+
+        The guard rails that make this safe: it is only ever compared against the
+        SINGLE most recent `sent` in the SAME pane inside the echo window, the shared
+        prefix must be long enough not to be a coincidence, and at most two characters
+        may be missing.
+        """
+        a, b = _echo_key(sent), _echo_key(reported)
+        if a == b:
+            return True
+        # ⚠️ FULL text, not the 200-character key, for the containment test below: the
+        #    fragment that failed was the TAIL of a 1320-character message, and a tail
+        #    can never be found inside a key that stops at character 200.
+        whole_sent = " ".join((sent or "").split())
+        whole_reported = " ".join((reported or "").split())
+        # ★ Inside the certain window the clock has already answered the question, so
+        #   the text only has to be recognisable. Outside it, fall back to exactness:
+        #   a busy pane can echo late, and a late receipt that merely resembles an
+        #   older send is far more likely to be him retyping.
+        if age_s > settings.echo_certain_s:
+            return False
+        if _text_similar(a, b):
+            return True
+        # ⚠️ A TRUNCATED CAPTURE. Observed 2026-08-26: a 1320-character message came
+        #    back as its last 298 characters, cut mid-word, so similarity was 0.37 and
+        #    the fragment rendered as a second message "typed in tmux". A contiguous
+        #    run of what we just sent is not something he typed by hand.
+        #
+        # ⚠️ DIRECTION MATTERS: the reported text must sit inside the SENT text, never
+        #    the other way round. "run the tests" sent and "run the tests again please"
+        #    reported is him adding to it, and swallowing that would lose a real
+        #    message. The length floor keeps a short coincidence out.
+        return (
+            len(whole_reported) >= 40
+            and len(whole_reported) < len(whole_sent)
+            and whole_reported in whole_sent
+        )
+
     def _note_prompt_origin(st: Store, pane_id: str, prompt: str) -> int | None:
         """A prompt was submitted in this pane. Was it him, or was it us?
 
@@ -682,11 +920,12 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
         """
         recent = st.history(pane_id, limit=6)
         typed = (prompt or "").strip()
-        cutoff = time.time() - settings.echo_window_s
+        now = time.time()
+        cutoff = now - settings.echo_window_s
         for event in reversed(recent):
             if event.kind != EventKind.SENT.value or event.ts < cutoff:
                 continue
-            if not typed or _echo_key(event.body) == _echo_key(typed):
+            if not typed or _echo_matches(event.body, typed, age_s=now - event.ts):
                 # Our own send coming back: the conversation stays put, and the
                 # event names the message it duplicates.
                 return event.id
@@ -820,15 +1059,51 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
             _publish_presence()
         return {"removed": removed, "presence": app.state.presence.snapshot()}
 
+    async def _require_manage(pane_id: str, user: str | None) -> None:
+        """Refuse to touch a channel that is not this caller's to touch.
+
+        ★★ THE ONE BOUNDARY HE ASKED TO BE ENFORCED: *"she shouldn't be able to
+        manage my sessions or me hers."* Everything else in the profiles work is
+        tidiness; this is the part with teeth.
+
+        ⚠️ Shared channels are managed by BOTH -- that is what sharing one means.
+        ⚠️ 404, not 403: confirming that a private channel exists is itself the
+        leak. A pane that is not yours is a pane that is not there.
+        """
+        st = _store()
+        live = await _live_channels()
+        match = next((c for c in live if c.pane_id == pane_id), None)
+        stored = st.get_channel(pane_id)
+        if match is None and stored is None:
+            return  # the route's own 404 has a better message
+        view = channel_view(st, pane_id, match, stored)
+        if not _visible_to(view, user):
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND, detail=f"unknown channel: {pane_id}"
+            )
+
     @app.get("/channels", tags=["channels"], dependencies=[Depends(require_auth)])
     async def list_channels_endpoint(
         include_archived: bool = Query(False),
+        user: str | None = Query(None, max_length=64),
     ) -> dict[str, Any]:
+        """The channels this client should see.
+
+        ★ Owner: *"shared channels for trips and stuff where we can both collab."*
+        A shared channel is on both lists; a private one is on its owner's; an
+        UNOWNED pane -- every pane he has ever opened by hand -- stays on his.
+
+        ⚠️ `user` is an organisational hint, not a credential, exactly like the Apps
+        shelf. It picks whose list to draw. Omitting it yields the owner's, which is
+        what every existing client does and must keep doing.
+        """
         live = await _live_channels()
         st = _store()
         await run_in_threadpool(_remember_all, st, live)
+        rows = build_channel_list(st, live, include_archived, asking_panes=set(app.state.prompts))
+        rows = [r for r in rows if _visible_to(r, user)]
         return {
-            "channels": build_channel_list(st, live, include_archived),
+            "channels": rows,
             "latest_event_id": st.latest_event_id(),
             "server_time": time.time(),
         }
@@ -869,6 +1144,7 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
                 request.session,
                 request.label,
                 request.cwd,
+                request.owner,
             )
         except TmuxError as exc:
             raise HTTPException(
@@ -890,11 +1166,138 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
         _publish(
             {
                 "type": "channels",
-                "channels": build_channel_list(st, all_live),
+                "channels": build_channel_list(st, all_live, asking_panes=set(app.state.prompts)),
                 "server_time": time.time(),
             }
         )
         return {"channel": channel_view(st, pane_id, live, st.get_channel(pane_id))}
+
+    @app.post(
+        "/channels/{pane}/label",
+        tags=["channels"],
+        dependencies=[Depends(require_auth)],
+    )
+    async def set_label_endpoint(
+        payload: LabelRequest, pane: str = PathParam(...)
+    ) -> dict[str, Any]:
+        """Rename a channel.
+
+        ★ Owner: *"i need the ability to rename any channel."* Names came only from
+        `spawn`, so anything opened by hand -- or named badly once -- was stuck with
+        it forever.
+
+        ⚠️ Written to the PANE and to the store. The pane option is the live truth; the
+        store is what keeps the name once the pane dies, and a dead channel has no
+        option left to read.
+        """
+        pane_id = normalise_pane_id(pane)
+        await _require_manage(pane_id, payload.user)
+        label = payload.label.strip()
+        if not label:
+            raise HTTPException(400, detail="a channel needs a name")
+
+        st = _store()
+        live = await _live_channels()
+        match = next((c for c in live if c.pane_id == pane_id), None)
+        if match is None and st.get_channel(pane_id) is None:
+            raise HTTPException(404, detail=f"unknown channel: {pane_id}")
+        if match is not None:
+            try:
+                await run_in_threadpool(channels_mod.set_label, pane_id, label)
+            except TmuxError as exc:
+                raise HTTPException(
+                    status.HTTP_502_BAD_GATEWAY, detail=str(exc)
+                ) from exc
+        await run_in_threadpool(st.set_channel_label, pane_id, label)
+
+        live = await _live_channels()
+        match = next((c for c in live if c.pane_id == pane_id), None)
+        view = channel_view(st, pane_id, match, st.get_channel(pane_id))
+        _publish({"type": "channel", "channel": view})
+        return {"channel": view}
+
+    @app.post(
+        "/channels/{pane}/read",
+        tags=["channels"],
+        dependencies=[Depends(require_auth_flex)],
+    )
+    async def mark_read_endpoint(
+        payload: ReadRequest, pane: str = PathParam(...)
+    ) -> dict[str, Any]:
+        """Record how far this PERSON has read.
+
+        ★★ Owner: *"i'm getting unread tag counts on threads I read on other
+        devices."* Read state lived in each client's own settings, so reading a thread
+        on the Mac left it bold on the phone. Unread is a fact about a person, not
+        about a piece of hardware.
+        """
+        pane_id = normalise_pane_id(pane)
+        who = (payload.user or channels_mod.DEFAULT_OWNER).strip().lower()
+        cursor = await run_in_threadpool(
+            _store().mark_read, who, pane_id, payload.cursor
+        )
+        return {"pane_id": pane_id, "user": who, "cursor": cursor}
+
+    @app.get(
+        "/read",
+        tags=["channels"],
+        dependencies=[Depends(require_auth_flex)],
+    )
+    async def read_cursors_endpoint(
+        user: str | None = Query(None, max_length=64),
+    ) -> dict[str, Any]:
+        """Every channel this person has read, and how far."""
+        who = (user or channels_mod.DEFAULT_OWNER).strip().lower()
+        return {"user": who, "cursors": _store().read_cursors(who)}
+
+    @app.post(
+        "/channels/{pane}/owner",
+        tags=["channels"],
+        dependencies=[Depends(require_auth)],
+    )
+    async def set_owner_endpoint(
+        payload: OwnerRequest, pane: str = PathParam(...)
+    ) -> dict[str, Any]:
+        """Give a channel an owner, or mark it shared.
+
+        ★ This is how the December trip becomes a channel they both work in:
+        `{"owner": "shared"}`. It is also how a channel spawned by hand gets
+        claimed, since a hand-opened pane carries no option.
+
+        ⚠️ Guarded like any other write: you cannot reassign a channel you cannot
+        already manage, which is what stops one person quietly taking the other's.
+        ⚠️ Written to the PANE and to the store. The pane option is the live truth;
+        the store is what keeps it once the pane dies.
+        """
+        pane_id = normalise_pane_id(pane)
+        await _require_manage(pane_id, payload.user)
+        owner = payload.owner.strip().lower()
+        live = await _live_channels()
+        if any(c.pane_id == pane_id for c in live):
+            try:
+                await run_in_threadpool(channels_mod.set_owner, pane_id, owner)
+            except TmuxError as exc:
+                raise HTTPException(
+                    status.HTTP_502_BAD_GATEWAY, detail=str(exc)
+                ) from exc
+        st = _store()
+        stored = st.get_channel(pane_id)
+        if stored is None and not any(c.pane_id == pane_id for c in live):
+            raise HTTPException(404, detail=f"unknown channel: {pane_id}")
+        await run_in_threadpool(st.set_channel_owner, pane_id, owner)
+        match = next((c for c in live if c.pane_id == pane_id), None)
+        # ★ Push the change so a newly-shared channel appears on the other person's
+        #   client immediately, not only after they reconnect. A `channels` frame is
+        #   narrowed per-socket by the WS pump, so this cannot leak a private channel.
+        # ⚠️ Re-read live AFTER writing the owner: `live` above was captured before the
+        #    pane option changed, so broadcasting it would send the channel with its OLD
+        #    owner and the WS pump would filter it out for the person it was just shared
+        #    with -- the share would silently never arrive.
+        fresh = await _live_channels()
+        app.state.broadcaster.publish(
+            {"type": "channels", "channels": build_channel_list(st, fresh, asking_panes=set(app.state.prompts))}
+        )
+        return {"channel": channel_view(st, pane_id, match, st.get_channel(pane_id))}
 
     @app.post(
         "/channels/{pane}/kill",
@@ -912,6 +1315,7 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
         """
         pane_id = normalise_pane_id(pane)
         request = payload or KillRequest()
+        await _require_manage(pane_id, request.user)
         st = _store()
         live = await run_in_threadpool(channels_mod.get, pane_id)
         if live is None:
@@ -954,6 +1358,7 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
         into a working agent.
         """
         pane_id = normalise_pane_id(pane)
+        await _require_manage(pane_id, payload.user)
         st = _store()
         current = app.state.prompts.get(pane_id)
         if current is None:
@@ -1018,6 +1423,7 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
     )
     async def send_endpoint(payload: SendRequest, pane: str = PathParam(...)):
         pane_id = normalise_pane_id(pane)
+        await _require_manage(pane_id, payload.user)
         st = _store()
         offending = sorted(_CONTROL_CHARS & set(payload.text))
         if offending:
@@ -1041,17 +1447,42 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
         #    the one that told Codex to run `npm install -g`. His call between
         #    queueing and blocking the composer: "queue is friendlier and never loses
         #    your words". Flushed by /respond once the question is answered.
+        # ★ Shared channels carry two speakers, and the agent otherwise sees Nick's and
+        #   Jeanne's messages as identical text -- so it guesses who is talking and gets
+        #   it wrong. Prefix the sender's name so it always knows. Private channels are
+        #   unambiguous (the owner), so their text is left exactly as typed.
+        who = (payload.user or channels_mod.DEFAULT_OWNER).strip().capitalize()
+        wire = f"{who}: {payload.text}" if live.shared else payload.text
         if pane_id in app.state.prompts:
-            app.state.queued.setdefault(pane_id, []).append(payload.text)
+            app.state.queued.setdefault(pane_id, []).append(wire)
             return {
                 "queued": True,
                 "pane": pane_id,
                 "waiting_on": app.state.prompts[pane_id],
                 "detail": "held until the open prompt is answered",
             }
+        # ★ Don't type into a channel that's mid-reply: keystrokes sent while the
+        #   agent is still drawing get dropped, which stranded messages as stale
+        #   renders that never submitted. Hold it and flush when the reply finishes.
+        #   Record the SENT event now so his words show in the thread immediately;
+        #   the keystrokes land once the pane is free.
+        if await run_in_threadpool(channels_mod.busy, pane_id):
+            st.remember_channel(pane_id, live.label, live.session)
+            st.set_channel_input(pane_id, INPUT_APP)
+            held_event = st.append(
+                pane_id, EventKind.SENT, wire,
+                meta={"origin": payload.origin, "enter": payload.enter, "held": True},
+            )
+            _publish_event(held_event)
+            app.state.queued.setdefault(pane_id, []).append(wire)
+            return {
+                "event": held_event.to_dict(),
+                "queued": True,
+                "channel": channel_view(st, pane_id, live, st.get_channel(pane_id)),
+            }
         try:
             await run_in_threadpool(
-                channels_mod.send, pane_id, payload.text, payload.enter
+                channels_mod.send, pane_id, wire, payload.enter
             )
         except (TmuxError, ValueError) as exc:
             event = st.append(
@@ -1073,7 +1504,7 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
         event = st.append(
             pane_id,
             EventKind.SENT,
-            payload.text,
+            wire,
             meta={"origin": payload.origin, "enter": payload.enter},
         )
         _publish_event(event)
@@ -1100,6 +1531,7 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
         """
         pane_id = normalise_pane_id(pane)
         request = payload or InterruptRequest()
+        await _require_manage(pane_id, request.user)
         key = CONTROL_ACTIONS.get(request.action)
         if key is None:
             raise HTTPException(
@@ -1239,7 +1671,37 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
         if payload.kind == EventKind.RECEIPT.value:
             echo_of = _note_prompt_origin(st, pane_id, payload.body)
             if echo_of is not None:
+                original = st.get_event(echo_of)
                 meta = {**(meta or {}), "echo_of": echo_of}
+                # ★★ SOURCE, uniformly. An echo did not originate at the keyboard --
+                #    it originated on whichever device sent the message it duplicates,
+                #    and saying so makes the ledger answer "who said this" without
+                #    anybody re-deriving it from `echo_of`.
+                if original is not None:
+                    meta["origin"] = (original.meta or {}).get("origin", "app")
+                    # ⚠️ WHAT CAME BACK IS NOT WHAT WENT OUT. The terminal is a lossy
+                    #    channel: it has expanded tabs to four spaces and dropped a
+                    #    trailing character. Cosmetic for prose, but a Makefile or a
+                    #    TSV sent through a channel arrives altered and nothing said
+                    #    so. Now the ledger records it.
+                    # ⚠️ RAW bodies, not echo keys. The key normalises runs of
+                    #    whitespace to single spaces, which is exactly the corruption
+                    #    being looked for — comparing keys made the check blind to the
+                    #    tab expansion it exists to catch.
+                    if (original.body or "") != (payload.body or ""):
+                        meta["transit_altered"] = True
+                        log.warning(
+                            "pane %s: text altered in transit (sent %d chars, "
+                            "echoed %d) -- tabs or trailing characters lost",
+                            pane_id, len(original.body or ""), len(payload.body or ""),
+                        )
+            else:
+                # Nothing to echo: he typed it at the keyboard.
+                meta = {**(meta or {}), "origin": "tmux"}
+        elif payload.kind in (EventKind.OUTCOME.value, EventKind.ERROR.value,
+                              EventKind.NOTE.value):
+            # The agent in the pane produced it.
+            meta = {**(meta or {}), "origin": (meta or {}).get("origin", "agent")}
         event = st.append(pane_id, payload.kind, payload.body, meta)
         _publish_event(event)
         return {"event": event.to_dict()}
@@ -1353,7 +1815,113 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
     # one tap. All the path safety lives in `files.py`; these routes only map
     # its two exception types onto status codes.
 
-    roots = {"CAD": settings.collab_cad, "Photos": settings.collab_photos}
+    # ---------------------------------------------------------------- apps
+    #
+    # ★ The shelf. `apps.py` decides WHAT is on it and for WHOM; these two routes
+    # add the only things that need the machine: is it answering, and start it.
+    #
+    # ★★ A tile is a host, not a link. Owner: *"these sites don't just run all the
+    # time and keeping track of them in chrome is challenging."* So the shelf reports
+    # liveness, and a dead tile is one tap from being a live one.
+
+    def _app_is_live(port: int, timeout: float = 0.35) -> bool:
+        """Whether something is listening. A connect, not a GET.
+
+        ⚠️ Deliberately not an HTTP request: EnCountAble answers `/` with a 307 to
+        the picker, a login-walled app answers 401, and both are "up". The question
+        the shelf asks is whether the port is open, and nothing more.
+        ⚠️ Short timeout because this runs once per hosted tile on every shelf
+        fetch, and a hung probe would stall the whole home screen.
+        """
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=timeout):
+                return True
+        except OSError:
+            return False
+
+    @app.get("/apps", tags=["apps"], dependencies=[Depends(require_auth_flex)])
+    async def list_apps(
+        request: Request,
+        user: str | None = Query(None, max_length=64),
+    ) -> dict[str, Any]:
+        """This caller's shelf.
+
+        ⚠️ `user` is an ORGANISATIONAL hint, not a credential -- owner: *"encountable
+        doesn't need to be locked down, we infer 'her data / version' based on 'HER
+        nexus'."* It says which shelf to draw; it does not gate anything, and the
+        bearer token is still what gets you in the door.
+        """
+        shelf = apps_mod.visible_for(user)
+        # ★ The host the client actually reached us on, so the URL it is handed
+        #   works from where it is standing. See `apps.url_for`.
+        host = request.url.hostname or settings.host
+        rows = []
+        for entry in shelf:
+            live = None
+            if entry.hosted:
+                # ★ A tile served BY the hub (its own port) is up whenever the hub
+                #   is answering -- which it is, since this request reached it. The
+                #   `_app_is_live` probe hits 127.0.0.1, but the hub binds only the
+                #   tailnet address, so probing itself falsely reads "down".
+                if entry.port == settings.port:
+                    live = True
+                else:
+                    live = await run_in_threadpool(_app_is_live, entry.port)
+            rows.append(apps_mod.to_json(entry, host, live))
+        return {"apps": rows}
+
+    @app.post(
+        "/apps/{app_id}/start", tags=["apps"],
+        dependencies=[Depends(require_auth_flex)],
+    )
+    async def start_app(
+        request: Request,
+        app_id: str = PathParam(..., max_length=64),
+    ) -> dict[str, Any]:
+        """Bring a hosted app up, and say whether it came up.
+
+        ⚠️ `kickstart` rather than `bootstrap`: the job is already loaded (KeepAlive),
+        so bootstrap would fail with "service already loaded" on the common path.
+        ⚠️ The launchd label comes from the REGISTRY, never from the URL -- `app_id`
+        is looked up, so there is no arrangement of path characters that reaches
+        launchctl with an attacker's string.
+        """
+        entry = apps_mod.find(app_id)
+        if entry is None or not entry.hosted:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="no such app")
+
+        def _kickstart() -> None:
+            subprocess.run(
+                ["launchctl", "kickstart", f"gui/{os.getuid()}/{entry.service}"],
+                capture_output=True, timeout=15,
+            )
+
+        await run_in_threadpool(_kickstart)
+        # Next.js needs a moment between "process exists" and "port is open".
+        for _ in range(20):
+            if await run_in_threadpool(_app_is_live, entry.port):
+                break
+            await asyncio.sleep(0.25)
+
+        host = request.url.hostname or settings.host
+        live = await run_in_threadpool(_app_is_live, entry.port)
+        return apps_mod.to_json(entry, host, live)
+
+    # ★★ Per-user Files roots. Owner: *"she doesn't need to see my Files app ... give
+    #    her her own shared folders from talos."* His Files were global — she saw his
+    #    CAD and Photos. Now each person's roots are their own, and the browser is
+    #    handed the caller's set, not a shared one.
+    HIS_ROOTS = {"CAD": settings.collab_cad, "Photos": settings.collab_photos}
+    HER_COLLAB = Path(os.path.expanduser("~/Jeanne/Collab"))
+    HER_ROOTS = {"Projects": HER_COLLAB / "Projects", "Files": HER_COLLAB / "Files"}
+    HIS_INBOX = settings.inbox
+    HER_INBOX = HER_COLLAB / "Files"
+
+    def _roots_for(user: str | None) -> dict[str, Path]:
+        return HER_ROOTS if (user or "").strip().lower() == "jeanne" else HIS_ROOTS
+
+    def _inbox_for(user: str | None) -> Path:
+        return HER_INBOX if (user or "").strip().lower() == "jeanne" else HIS_INBOX
 
     def _browse_error(exc: files_mod.BrowseError) -> HTTPException:
         # 404 for "not there", 400 for "not yours". Never echo a filesystem
@@ -1383,20 +1951,27 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
         )
 
     @app.get("/files", tags=["files"], dependencies=[Depends(require_auth_flex)])
-    async def list_files(path: str = Query("", max_length=1024)) -> dict[str, Any]:
+    async def list_files(
+        path: str = Query("", max_length=1024),
+        user: str | None = Query(None, max_length=64),
+    ) -> dict[str, Any]:
         """One directory. An empty `path` lists the roots themselves."""
         try:
-            return await run_in_threadpool(files_mod.listdir, path, roots)
+            return await run_in_threadpool(files_mod.listdir, path, _roots_for(user))
         except files_mod.BrowseError as exc:
             raise _browse_error(exc) from exc
 
     @app.get(
         "/files/raw", tags=["files"], dependencies=[Depends(require_auth_flex)]
     )
-    async def raw_file(path: str = Query(..., max_length=1024)) -> FileResponse:
+    async def raw_file(
+        path: str = Query(..., max_length=1024),
+        user: str | None = Query(None, max_length=64),
+    ) -> FileResponse:
         """The file itself -- the `<img>` target, the STL the viewer loads."""
         try:
-            target = await run_in_threadpool(files_mod.resolve_file, path, roots)
+            target = await run_in_threadpool(
+                files_mod.resolve_file, path, _roots_for(user))
         except files_mod.BrowseError as exc:
             raise _browse_error(exc) from exc
         return FileResponse(
@@ -1412,6 +1987,7 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
     async def thumb_file(
         path: str = Query(..., max_length=1024),
         size: int = Query(320, ge=48, le=1024),
+        user: str | None = Query(None, max_length=64),
     ) -> FileResponse:
         """A small JPEG for the grid, falling back to the original.
 
@@ -1420,7 +1996,8 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
         available the page still works -- it is just heavier.
         """
         try:
-            target = await run_in_threadpool(files_mod.resolve_file, path, roots)
+            target = await run_in_threadpool(
+                files_mod.resolve_file, path, _roots_for(user))
         except files_mod.BrowseError as exc:
             raise _browse_error(exc) from exc
         small = await run_in_threadpool(
@@ -1433,7 +2010,10 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
         )
 
     @app.post("/upload", tags=["files"], dependencies=[Depends(require_auth_flex)])
-    async def upload_file(file: UploadFile = File(...)) -> dict[str, Any]:
+    async def upload_file(
+        file: UploadFile = File(...),
+        user: str | None = Query(None, max_length=64),
+    ) -> dict[str, Any]:
         """Hand Claude a file that is NOT on talos -- an attachment from a client.
 
         ★ `/share` can only pass along something already sitting in the shared
@@ -1445,7 +2025,8 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
         data = await file.read()
         try:
             landed = await run_in_threadpool(
-                files_mod.deposit, file.filename or "attachment", data, settings.inbox
+                files_mod.deposit, file.filename or "attachment", data,
+                _inbox_for(user)
             )
         except files_mod.BrowseError as exc:
             raise _browse_error(exc) from exc
@@ -1468,7 +2049,8 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
         """
         try:
             landed = await run_in_threadpool(
-                files_mod.share, payload.path, roots, settings.inbox
+                files_mod.share, payload.path,
+                _roots_for(payload.user), _inbox_for(payload.user)
             )
         except files_mod.BrowseError as exc:
             raise _browse_error(exc) from exc
@@ -1501,14 +2083,18 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
         dependencies=[Depends(require_auth_flex)],
         response_class=HTMLResponse,
     )
-    async def stl_page(path: str = Query(..., max_length=1024)) -> HTMLResponse:
+    async def stl_page(
+        path: str = Query(..., max_length=1024),
+        user: str | None = Query(None, max_length=64),
+    ) -> HTMLResponse:
         """The STL viewer. ⚠️ **STL only** -- see `web/stl.html` for why.
 
         The path is resolved before the page is served, so a bad one is a 404
         here rather than a viewer that loads, spins and fails.
         """
         try:
-            target = await run_in_threadpool(files_mod.resolve_file, path, roots)
+            target = await run_in_threadpool(
+                files_mod.resolve_file, path, _roots_for(user))
         except files_mod.BrowseError as exc:
             raise _browse_error(exc) from exc
         if files_mod.classify(target) != "mesh":
@@ -1584,6 +2170,122 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
         """The radio, for a phone browser. See `web/radio.html`."""
         return _page("radio.html", {'"__ROAM_TOKEN__"': _js_literal(token)})
 
+    # -------------------------------------------------------- cron / schedules
+
+    def _cron_fields(payload: CronJobRequest) -> dict[str, Any]:
+        """Validate a job's schedule and return the row fields to store. A bad
+        expr/tz raises here as a 400 rather than failing silently at fire time."""
+        kind = (payload.kind or "").lower()
+        if kind not in ("at", "every", "cron"):
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                detail="kind must be 'at', 'every' or 'cron'",
+            )
+        try:
+            next_run = cron_mod.first_run(
+                kind, payload.expr, payload.tz or "", time.time()
+            )
+        except ValueError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        return {
+            "name": payload.name or "",
+            "kind": kind,
+            "expr": payload.expr,
+            "tz": payload.tz or "",
+            "pane_id": normalise_pane_id(payload.pane_id) if payload.pane_id else "",
+            "prompt": payload.prompt or "",
+            "delivery": payload.delivery or "channel",
+            "owner": payload.owner or apps_mod.DEFAULT_USER,
+            "enabled": payload.enabled,
+            "delete_after_run": payload.delete_after_run,
+            "next_run_at": next_run,
+        }
+
+    @app.get("/cron", tags=["cron"], dependencies=[Depends(require_auth_flex)])
+    async def list_cron() -> dict[str, Any]:
+        st = _store()
+        jobs = await run_in_threadpool(st.list_jobs, None)
+        for j in jobs:
+            j["schedule"] = cron_mod.describe(j)
+        return {"jobs": jobs}
+
+    @app.post(
+        "/cron", tags=["cron"], dependencies=[Depends(require_auth)],
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def create_cron(payload: CronJobRequest) -> dict[str, Any]:
+        job = await run_in_threadpool(_store().create_job, _cron_fields(payload))
+        job["schedule"] = cron_mod.describe(job)
+        app.state.broadcaster.publish({"type": "cron", "action": "created", "job": job})
+        return job
+
+    @app.get(
+        "/cron/{job_id}", tags=["cron"],
+        dependencies=[Depends(require_auth_flex)],
+    )
+    async def get_cron(job_id: int = PathParam(...)) -> dict[str, Any]:
+        st = _store()
+        job = await run_in_threadpool(st.get_job, job_id)
+        if job is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="no such job")
+        job["schedule"] = cron_mod.describe(job)
+        job["runs"] = await run_in_threadpool(st.list_runs, job_id, 20)
+        return job
+
+    @app.patch("/cron/{job_id}", tags=["cron"], dependencies=[Depends(require_auth)])
+    async def patch_cron(
+        payload: CronPatchRequest, job_id: int = PathParam(...)
+    ) -> dict[str, Any]:
+        st = _store()
+        existing = await run_in_threadpool(st.get_job, job_id)
+        if existing is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="no such job")
+        fields = payload.model_dump(exclude_none=True)
+        if fields.get("pane_id"):
+            fields["pane_id"] = normalise_pane_id(fields["pane_id"])
+        # Recompute the next fire when the schedule (or enabled) changed, so an
+        # edit takes effect immediately instead of on the old cadence.
+        if any(k in fields for k in ("kind", "expr", "tz", "enabled")):
+            merged = {**existing, **fields}
+            try:
+                fields["next_run_at"] = cron_mod.first_run(
+                    merged["kind"], merged["expr"], merged.get("tz") or "", time.time()
+                )
+            except ValueError as exc:
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST, detail=str(exc)
+                ) from exc
+        job = await run_in_threadpool(st.update_job, job_id, fields)
+        job["schedule"] = cron_mod.describe(job)
+        app.state.broadcaster.publish({"type": "cron", "action": "updated", "job": job})
+        return job
+
+    @app.delete("/cron/{job_id}", tags=["cron"], dependencies=[Depends(require_auth)])
+    async def delete_cron(job_id: int = PathParam(...)) -> dict[str, Any]:
+        ok = await run_in_threadpool(_store().delete_job, job_id)
+        if not ok:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="no such job")
+        app.state.broadcaster.publish({"type": "cron", "action": "deleted", "id": job_id})
+        return {"deleted": job_id}
+
+    @app.post("/cron/{job_id}/run", tags=["cron"], dependencies=[Depends(require_auth)])
+    async def run_cron(job_id: int = PathParam(...)) -> dict[str, Any]:
+        """Fire a job right now WITHOUT disturbing its schedule (manual test)."""
+        job = await run_in_threadpool(_store().get_job, job_id)
+        if job is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="no such job")
+        ok, detail = await cron_mod.deliver(app, job)
+        return {"fired": ok, "detail": detail, "job_id": job_id}
+
+    @app.get(
+        "/schedules", tags=["cron"],
+        dependencies=[Depends(require_auth_flex)],
+        response_class=HTMLResponse,
+    )
+    async def schedules_page() -> HTMLResponse:
+        """The Schedules app -- a hub-served page. See `web/schedules.html`."""
+        return _page("schedules.html", {'"__ROAM_TOKEN__"': _js_literal(token)})
+
     # ----------------------------------------------------------- websocket
 
     @app.post(
@@ -1658,6 +2360,61 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
             headers={"Cache-Control": "public, max-age=31536000, immutable"},
         )
 
+    @app.get("/streams", tags=["stream"],
+             dependencies=[Depends(require_auth_flex)])
+    async def list_streams() -> dict[str, Any]:
+        """Every live stream, for the picker.
+
+        ★ A stream exists because somebody is in it and stops existing when the last
+        member leaves. There is no create/delete to get out of step with reality, and
+        the list can never offer a room nobody is in.
+
+        ⚠️ So "+ new stream" on a client is not a call to this API — it is joining a
+        name that does not exist yet. Creating one and then failing to join it would
+        be the only way to produce an empty stream, so there is no such call.
+        """
+        streams: intercom_mod.Streams = app.state.streams
+        return {"streams": streams.snapshot(), "devices": streams.roster()}
+
+    @app.post("/streams/{name}/end", tags=["stream"],
+              dependencies=[Depends(require_auth_flex)])
+    async def end_stream(name: str = PathParam(..., max_length=32)) -> dict[str, Any]:
+        """Close a stream, from anywhere.
+
+        ★★ Deliberately REST and deliberately not scoped to a member. Ending used to
+        require being in the stream, which meant the one moment you most need to shut
+        a camera off — you are looking at a list and something is live that should not
+        be — was the moment you could not. Owner: *"just click the X on the stream to
+        close it ... my laptop cam is still on right now because i didn't know how to
+        close it."*
+
+        ⚠️ Every member is TOLD to leave rather than merely forgotten: only a device
+        can close its own lens, so clearing hub state alone would leave a camera
+        running with nobody watching.
+        """
+        streams: intercom_mod.Streams = app.state.streams
+        try:
+            key = intercom_mod.Streams.normalise(name)
+        except intercom_mod.IntercomError as exc:
+            raise HTTPException(400, detail=str(exc)) from exc
+        live = streams.find(key)
+        if live is None:
+            raise HTTPException(404, detail=f"no such stream: {key}")
+
+        peers = app.state.intercom_peers
+        members = live.end()
+        for member in members:
+            sock = peers.get((key, member))
+            if sock is None:
+                continue
+            with contextlib.suppress(Exception):
+                await sock.send_json({
+                    "type": "drive", "by": "hub", "stream": key,
+                    "action": "leave", "value": None,
+                })
+        streams.prune()
+        return {"ended": key, "members": members}
+
     @app.get("/intercom/state", tags=["channels"],
              dependencies=[Depends(require_auth_flex)])
     async def intercom_state() -> dict[str, Any]:
@@ -1668,10 +2425,15 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
         relaying, or is the listener not playing? rx_frames on the talker and
         tx_frames on the sender separate all three.
         """
-        ic: intercom_mod.Intercom = app.state.intercom
+        streams: intercom_mod.Streams = app.state.streams
+        # ★ The default stream is still spread at the top level so existing tooling
+        #   and the diagnostics above keep reading the same keys; `streams` carries
+        #   the full picture now that there can be more than one.
+        ic = streams.get(intercom_mod.DEFAULT_STREAM)
         return {
             **ic.snapshot(),
-            "peers": sorted(app.state.intercom_peers),
+            "streams": streams.snapshot(),
+            "peers": sorted(f"{s}/{d}" for s, d in app.state.intercom_peers),
             "stats": app.state.intercom_stats,
             "queued": {k: len(v) for k, v in app.state.queued.items()},
         }
@@ -1680,6 +2442,7 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
     async def intercom_video(
         websocket: WebSocket,
         device: str = Query(..., min_length=1, max_length=64),
+        stream: str | None = Query(default=None, max_length=32),
         token_q: str | None = Query(default=None, alias="token"),
     ) -> None:
         """Video frames, on their OWN socket.
@@ -1704,9 +2467,17 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
             return
 
         await websocket.accept()
-        ic: intercom_mod.Intercom = app.state.intercom
-        peers: dict[str, WebSocket] = app.state.video_peers
-        peers[device] = websocket
+        streams: intercom_mod.Streams = app.state.streams
+        try:
+            stream_name = intercom_mod.Streams.normalise(stream)
+        except intercom_mod.IntercomError as exc:
+            await websocket.send_json({"type": "error", "detail": str(exc)})
+            await websocket.close(code=4400)
+            return
+        ic = streams.get(stream_name)
+        peers: dict[tuple[str, str], WebSocket] = app.state.video_peers
+        key = (stream_name, device)
+        peers[key] = websocket
         try:
             while True:
                 message = await websocket.receive()
@@ -1735,7 +2506,8 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
                 ident = device.encode("utf-8")[:255]
                 tagged = bytes([len(ident)]) + ident + raw
                 for other, sock in list(peers.items()):
-                    if other == device:
+                    # Same rule as audio: a picture never crosses streams.
+                    if other[0] != stream_name or other[1] == device:
                         continue
                     try:
                         await sock.send_bytes(tagged)
@@ -1750,7 +2522,12 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
     async def intercom_endpoint(
         websocket: WebSocket,
         device: str = Query(..., min_length=1, max_length=64),
-        role: str = Query(default="receiver"),
+        # "source" | "monitor" | "standby" (the old "sender"/"receiver" still work).
+        # Standby holds the socket and takes no part -- see `Intercom.set_standby`.
+        role: str = Query(default="monitor"),
+        # Which stream. Absent means the default one, so a client that predates
+        # named streams keeps working untouched.
+        stream: str | None = Query(default=None, max_length=32),
         token_q: str | None = Query(default=None, alias="token"),
     ) -> None:
         """Two-way audio, half-duplex by design.
@@ -1776,20 +2553,53 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
             return
 
         await websocket.accept()
-        ic: intercom_mod.Intercom = app.state.intercom
-        peers: dict[str, WebSocket] = app.state.intercom_peers
-        peers[device] = websocket
+        streams: intercom_mod.Streams = app.state.streams
+        try:
+            stream_name = intercom_mod.Streams.normalise(stream)
+        except intercom_mod.IntercomError as exc:
+            await websocket.send_json({"type": "error", "detail": str(exc)})
+            await websocket.close(code=4400)
+            return
+        ic = streams.get(stream_name)
+        peers: dict[tuple[str, str], WebSocket] = app.state.intercom_peers
+        key = (stream_name, device)
+        # ⚠️⚠️ ONE SOCKET PER DEVICE PER STREAM, and the old one is CLOSED rather than
+        #    merely dropped. A client that reconnects while its previous socket is
+        #    still open -- an app resuming from doze does this constantly -- left two
+        #    live sockets under one key. Whichever closed first then ran the cleanup
+        #    and evicted the survivor, so the device disappeared from the roster while
+        #    plainly still connected. Closing the loser makes "registered" and
+        #    "connected" the same thing again.
+        if (stale := peers.get(key)) is not None and stale is not websocket:
+            with contextlib.suppress(Exception):
+                await stale.close(code=1012)
+        peers[key] = websocket
 
         async def announce() -> None:
+            """Tell THIS stream's members where the floor is.
+
+            ⚠️ Scoped to the stream. Broadcasting every floor to every socket would
+            make one room's talk-back look like an interruption in another.
+            """
             snap = {"type": "floor", **ic.snapshot()}
             for other, sock in list(peers.items()):
+                if other[0] != stream_name:
+                    continue
                 try:
                     await sock.send_json(snap)
                 except (WebSocketDisconnect, RuntimeError):
                     peers.pop(other, None)
 
-        if role == "sender":
+        # ⚠️ Standby is presence, NOT membership. Registering it against the stream
+        #    is what conjured a room out of a merely-reachable laptop.
+        streams.arrive(device, None if role == "standby" else stream_name)
+        if role in ("source", "sender"):
             ic.open_channel(device)
+        elif role == "standby":
+            # ★★ Connected, but taking no part. This is how a device stays reachable
+            #    for a remote start while Stream reads as OFF -- "off" has to mean
+            #    silent, not absent, or nothing can ever wake it.
+            ic.set_standby(device, True)
         else:
             ic.join(device)
         await announce()
@@ -1810,24 +2620,66 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
                     # ⚠️ The gate. Not a client's decision.
                     if ic.expire():
                         await announce()
-                    if ic.holder() != device:
+                    # ⚠️ The gate is the floor, plus mute FOR A SOURCE ONLY. Mute is
+                    #    a source concept; a monitor's mic is governed by the floor
+                    #    alone. Applying it to everyone left every monitor muted with
+                    #    no control to open it, and PTT went silent.
+                    if ic.holder() != device or (
+                        device == ic.sender and ic.is_muted(device)
+                    ):
                         st["dropped_no_floor"] += 1
                         continue
                     if device == ic.sender:
                         ic.touch_sender()
+                    targets: list[tuple[tuple[str, str], WebSocket]] = []
                     for other, sock in list(peers.items()):
-                        if other == device:
+                        # ⚠️⚠️ SAME STREAM ONLY. This is the line that makes "talk to
+                        #    my wife without disrupting my son" true; without it the
+                        #    audio of every stream lands in every other one.
+                        if other[0] != stream_name or other[1] == device:
                             continue
+                        # ⚠️ A standby device is a doorbell, not an ear. Sending it
+                        #    audio would burn the link on frames nothing plays, and
+                        #    on a phone that is somebody's battery.
+                        if ic.is_standby(other[1]):
+                            continue
+                        targets.append((other, sock))
+
+                    # ⚠️⚠️ CONCURRENTLY, and with a deadline each. Awaiting peers one
+                    #    at a time means the slowest socket in the room sets the
+                    #    latency for everybody behind it in the loop -- one phone on
+                    #    a bad link and the whole house hears late. Harmless with two
+                    #    devices; with several streams and several members each it is
+                    #    the thing that would make this feel broken.
+                    #
+                    # ★ A frame is 640 bytes of 20ms audio. If a peer cannot take it
+                    #   within a frame time, the frame is already stale and DROPPING
+                    #   it is correct -- late audio is worse than missing audio, and
+                    #   buffering it just moves the delay further out.
+                    async def _relay(entry, frame=raw):
+                        who, sock = entry
                         try:
-                            await sock.send_bytes(raw)
-                            ost = app.state.intercom_stats.setdefault(
-                                other, {"rx_frames": 0, "rx_bytes": 0, "tx_frames": 0,
-                                        "tx_bytes": 0, "dropped_no_floor": 0}
+                            await asyncio.wait_for(
+                                sock.send_bytes(frame), timeout=RELAY_DEADLINE_S
                             )
-                            ost["tx_frames"] += 1
-                            ost["tx_bytes"] += len(raw)
                         except (WebSocketDisconnect, RuntimeError):
-                            peers.pop(other, None)
+                            peers.pop(who, None)
+                            return
+                        except (asyncio.TimeoutError, asyncio.CancelledError):
+                            st = app.state.intercom_stats.setdefault(
+                                who[1], {"rx_frames": 0, "rx_bytes": 0, "tx_frames": 0,
+                                         "tx_bytes": 0, "dropped_no_floor": 0})
+                            st["dropped_slow"] = st.get("dropped_slow", 0) + 1
+                            return
+                        ost = app.state.intercom_stats.setdefault(
+                            who[1], {"rx_frames": 0, "rx_bytes": 0, "tx_frames": 0,
+                                     "tx_bytes": 0, "dropped_no_floor": 0}
+                        )
+                        ost["tx_frames"] += 1
+                        ost["tx_bytes"] += len(frame)
+
+                    if targets:
+                        await asyncio.gather(*(_relay(t) for t in targets))
                     continue
 
                 text = message.get("text")
@@ -1843,8 +2695,121 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
                         ic.press(device)
                     elif kind == "release":
                         ic.release(device)
+                    elif kind == "mute":
+                        # This device opening or closing its OWN microphone. Like
+                        # `allow_remote`, there is no form of this that acts on
+                        # somebody else's mic -- muting a person remotely is a
+                        # different feature with different consent.
+                        ic.set_muted(device, bool(control.get("on", True)))
+                    elif kind == "allow_remote":
+                        # This device consenting for ITSELF. There is no form of
+                        # this message that grants it on another device's behalf.
+                        ic.allow_remote(device, bool(control.get("on", True)))
+                        streams.set_armed(device, bool(control.get("on", True)))
+                    elif kind == "end":
+                        # ★★ Close the stream for EVERYONE, and turn their cameras and
+                        #    microphones off on the way out. Owner: *"I can't just
+                        #    close a stream ... that should automatically turn the
+                        #    camera and mic back off on the sender device."*
+                        #
+                        # ⚠️ Each member is told to leave rather than merely being
+                        #    forgotten: only a device can close its own lens, so a hub
+                        #    that just cleared its own state would leave a camera
+                        #    running with nobody watching -- the exact outcome this
+                        #    exists to prevent.
+                        for member in ic.end():
+                            if member == device:
+                                continue
+                            other = peers.get((stream_name, member))
+                            if other is None:
+                                continue
+                            with contextlib.suppress(Exception):
+                                await other.send_json({
+                                    "type": "drive", "by": device,
+                                    "stream": stream_name,
+                                    "action": "leave", "value": None,
+                                })
+                        streams.prune()
+                    elif kind == "drive":
+                        # ★★ REMOTE CONTROL, which is the product. Owner: *"i should
+                        #    be able to ... set the mac as sender, myself as receiver
+                        #    and make sure the mic and camera are toggle-able from my
+                        #    pixel11."* Walking to the other machine to configure it
+                        #    defeats the entire purpose of an intercom.
+                        #
+                        # ⚠️ Gated on the TARGET having armed itself. Arming is the
+                        #    one consent, and it covers being made a source, having a
+                        #    microphone opened and having a camera switched on --
+                        #    they are the same act from the far side: somebody else
+                        #    turning your machine into a live device in your room.
+                        target = str(control.get("target") or "")
+                        if not target or target == device:
+                            continue
+                        if not streams.is_armed(target):
+                            raise intercom_mod.IntercomError(
+                                f"{target} has not enabled remote control"
+                            )
+                        sock = None
+                        for (sname, dname), candidate in peers.items():
+                            if dname == target:
+                                sock = candidate
+                                break
+                        if sock is None:
+                            raise intercom_mod.IntercomError(
+                                f"{target} is not connected"
+                            )
+                        # ⚠️ A DIRECTIVE, not a state change. Only the target can open
+                        #    its own microphone or camera; the hub declaring it done
+                        #    would produce a device that reads as live and delivers
+                        #    silence -- the failure this system keeps re-learning.
+                        # ⚠️⚠️ CARRIES THE WHOLE SETUP. Making a device a Source makes
+                        #    it RECONNECT -- the stream is a query parameter on its
+                        #    socket -- so a follow-up "camera" or "mute" sent a
+                        #    moment later lands on a socket that is already closing
+                        #    and is simply lost. Owner: *"i pick the mac as sender and
+                        #    set the mic and camera how i want it but it doesn't do
+                        #    anything."* One directive, applied by the target AFTER it
+                        #    has joined, has no such window.
+                        directive = {
+                            "type": "drive",
+                            "by": device,
+                            "stream": stream_name,
+                            "action": str(control.get("action") or ""),
+                            "value": control.get("value"),
+                            "camera": control.get("camera"),
+                            "mute": control.get("mute"),
+                        }
+                        try:
+                            await sock.send_json(directive)
+                        except (WebSocketDisconnect, RuntimeError) as exc:
+                            raise intercom_mod.IntercomError(
+                                f"{target} went away"
+                            ) from exc
                     elif kind == "open":
-                        ic.open_channel(device)
+                        target = str(control.get("target") or device)
+                        if target == device:
+                            ic.open_channel(device)
+                        else:
+                            # ★★ A DIRECTIVE, not a state change. Only the target can
+                            #    open its own microphone -- see `request_open`. If the
+                            #    hub flipped the floor here, a target that was asleep
+                            #    or had mic permission denied would leave a channel
+                            #    that reads as open and carries no audio.
+                            ic.request_open(target, by=device)
+                            sock = peers.get((stream_name, target))
+                            if sock is None:
+                                raise intercom_mod.IntercomError(
+                                    f"{target} is not connected"
+                                )
+                            try:
+                                await sock.send_json(
+                                    {"type": "become_sender", "by": device}
+                                )
+                            except (WebSocketDisconnect, RuntimeError) as exc:
+                                peers.pop((stream_name, target), None)
+                                raise intercom_mod.IntercomError(
+                                    f"{target} went away"
+                                ) from exc
                     elif kind == "close":
                         ic.close_channel(device)
                     elif kind == "video":
@@ -1865,17 +2830,44 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
         except WebSocketDisconnect:
             pass
         finally:
-            peers.pop(device, None)
-            if ic.sender == device:
-                ic.close_channel(device)
-            else:
-                ic.leave(device)
-            await announce()
+            # ⚠️⚠️ ONLY clean up if this socket is still the one registered for this
+            #    device. Cleanup used to be keyed on the NAME alone, and a device
+            #    that reconnects — which happens on every single role change, since
+            #    the client tears the socket down and immediately opens another —
+            #    would have its NEW connection destroyed by its OLD one's teardown
+            #    arriving late.
+            #
+            #    That one race produced every symptom he reported at once: the Mac
+            #    vanished from `standby` while its app was plainly running, so the
+            #    hub could no longer reach it; and because the fresh socket had
+            #    already been handed a snapshot still carrying `video`, the Mac
+            #    restarted its camera and then never heard the message turning it
+            #    off — *"when i turn off the stream, the video stream stays running
+            #    on the mac"*, with a green light on and nothing able to stop it.
+            if peers.get(key) is websocket:
+                peers.pop(key, None)
+                # Only forget the device if it has no other socket anywhere.
+                if not any(d == device for _, d in peers):
+                    streams.depart(device)
+                if ic.sender == device:
+                    ic.close_channel(device)
+                else:
+                    ic.leave(device)
+                await announce()
+                # An empty stream stops existing, so the picker never offers a room
+                # nobody is in.
+                streams.prune()
 
     @app.websocket("/ws")
     async def websocket_endpoint(
         websocket: WebSocket,
         since: int | None = Query(default=None, ge=0),
+        # ★★ WHOSE rail this socket is. The channel LIST is filtered by it, on the
+        #    hub, per socket — because the list arrives over THIS socket (the `hello`
+        #    and `channels` frames), not over the REST route that already filtered.
+        #    A second person joined and saw every channel: the filter was only ever on
+        #    the road nobody drove.
+        user: str | None = Query(default=None, max_length=64),
         token_q: str | None = Query(default=None, alias="token"),
     ) -> None:
         header = websocket.headers.get("authorization", "")
@@ -1904,7 +2896,10 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
                     "version": HUB_VERSION,
                     "server_time": time.time(),
                     "latest_event_id": watermark,
-                    "channels": build_channel_list(st, live),
+                    "channels": [
+                        r for r in build_channel_list(st, live, asking_panes=set(app.state.prompts))
+                        if _visible_to(r, user)
+                    ],
                     "presence": app.state.presence.snapshot(),
                 }
             )
@@ -1943,6 +2938,18 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
                         if event_id <= watermark:
                             continue  # already replayed in the backlog
                         watermark = event_id
+                    # ⚠️ A `channels` frame is BROADCAST identically to every socket,
+                    #    so it must be narrowed to this socket's user before it goes
+                    #    out — otherwise the poller quietly hands her his whole rail a
+                    #    couple of seconds after `hello` correctly withheld it.
+                    if message.get("type") == "channels":
+                        message = {
+                            **message,
+                            "channels": [
+                                r for r in message.get("channels", [])
+                                if _visible_to(r, user)
+                            ],
+                        }
                     await websocket.send_json(message)
             except (WebSocketDisconnect, RuntimeError):
                 return
@@ -1966,9 +2973,32 @@ async def _client_pump(websocket: WebSocket, sub: _Subscriber) -> None:
 # ------------------------------------------------------------------- poller
 
 
+def _visible_to(view: dict[str, Any], user: str | None) -> bool:
+    """Whether a built channel row belongs on `user`'s list.
+
+    Mirrors `Channel.visible_to`, but works off the merged view so it covers DEAD
+    channels too -- their pane is gone and its options with it, so the owner comes
+    from the store.
+    """
+    # ⚠️ The @host dead-letter channel is a box-side monitor, not something either
+    #    person converses with -- owner: *"i don't need that shit ... keep it for YOU
+    #    to monitor, and if shit does go there, that's a bug we should fix."* Hidden
+    #    from every user's list; it still exists and still catches stray pane-less
+    #    notices, which the box side watches.
+    if view.get("pane_id") == HOST_CHANNEL_ID:
+        return False
+    owner = (view.get("owner") or "").strip().lower()
+    name = (user or channels_mod.DEFAULT_OWNER).strip().lower()
+    if owner == channels_mod.SHARED:
+        return True
+    if not owner:
+        return name == channels_mod.DEFAULT_OWNER
+    return owner == name
+
+
 def _remember_all(store: Store, live: list[Channel]) -> None:
     for ch in live:
-        store.remember_channel(ch.pane_id, ch.label, ch.session)
+        store.remember_channel(ch.pane_id, ch.label, ch.session, owner=ch.owner)
 
 
 def _sample_activity(
@@ -1993,11 +3023,16 @@ def _sample_activity(
         digest = hashlib.sha1(content.encode("utf-8", "replace")).hexdigest()
         previous = digests.get(ch.pane_id)
         digests[ch.pane_id] = digest
-        # ★ Prompt detection rides the SAME capture as the liveness hash, and only
-        #   when the screen actually moved: a selector cannot appear or disappear
-        #   without the screen changing, so this adds no tmux calls at all.
-        if previous != digest:
-            screens[ch.pane_id] = content
+        # ★ Prompt detection rides the SAME capture as the liveness hash -- no extra
+        #   tmux calls, just a cheap parse of ~60 lines. It MUST see every screen, not
+        #   only the ones that moved this poll. A selector that is already up when this
+        #   process starts (every deploy resets `digests` and `app.state.prompts`) or
+        #   after a transient parse-miss cleared it sits perfectly static -- its digest
+        #   never changes again, so gating detection on movement lost it forever:
+        #   Warble sat on an open question for a WEEK, unanswerable from the app and
+        #   showing "idle". Re-parsing a stable selector is idempotent (events fire only
+        #   on a fingerprint change), so this costs nothing but correctness.
+        screens[ch.pane_id] = content
         # A pane we have never sampled counts as active now: it is the best
         # reading available, and claiming "idle for hours" would be a lie.
         if previous is None or previous != digest:
@@ -2006,6 +3041,96 @@ def _sample_activity(
     for pane_id in set(digests) - {c.pane_id for c in live}:
         digests.pop(pane_id, None)
     return moved
+
+
+async def _flush_when_idle(app: FastAPI, pane_id: str, budget_s: float = 300.0) -> None:
+    """Deliver a held message once the pane stops replying.
+
+    Unlike the prompt flush, a reply can run for minutes, so poll `busy()` until the
+    interrupt hint clears (or a budget elapses), then hand off through the same
+    settled gate. One message per idle window: sending two in a burst would drop the
+    second into the reply the first just triggered, so any remainder re-schedules
+    itself after this reply.
+    """
+    store: Store = app.state.store
+    broadcaster: Broadcaster = app.state.broadcaster
+    deadline = time.monotonic() + budget_s
+    while time.monotonic() < deadline:
+        # ★★ A selector that opened WHILE we waited must stop this flush dead.
+        #    `_flush_idle_queues` has always skipped panes with an open prompt;
+        #    this per-send waiter did not, so a message held for a reply could be
+        #    typed straight into a question that appeared in the meantime -- the
+        #    text lands in the menu and the Enter dismisses it ("User declined to
+        #    answer questions"), losing both the answer and the message. Bail and
+        #    leave it queued: /respond flushes it once the question is answered.
+        if pane_id in app.state.prompts:
+            return
+        if not await run_in_threadpool(channels_mod.busy, pane_id):
+            break
+        await asyncio.sleep(1.0)
+    else:
+        return  # still busy after the budget; a later send re-triggers the flush
+    if not await run_in_threadpool(channels_mod.settled, pane_id):
+        return
+    if pane_id in app.state.prompts:   # opened during the settle window
+        return
+    held = app.state.queued.get(pane_id, [])
+    if not held:
+        return
+    text = held.pop(0)
+    try:
+        await run_in_threadpool(channels_mod.send, pane_id, text, True)
+    except (TmuxError, ValueError) as exc:
+        held.insert(0, text)
+        event = store.append(
+            pane_id, EventKind.ERROR,
+            f"held message could not be sent: {exc}", meta={"attempted": text},
+        )
+        broadcaster.publish({"type": "event", "event": event.to_dict()})
+        return
+    if app.state.queued.get(pane_id):        # more waiting -> after this reply
+        asyncio.create_task(_flush_when_idle(app, pane_id))
+
+
+async def _flush_idle_queues(app: FastAPI) -> None:
+    """Deliver messages held while a channel was mid-reply, from the poll loop.
+
+    ⚠️ Why here and not a per-send task: a per-send waiter that gives up after a
+    budget STRANDS the message -- one sat queued 14.5 h, then a later send flushed
+    it wildly out of context. The poller runs every cycle, so a held message lands
+    the moment its channel goes idle. One per cycle per pane (serialise, so the
+    next does not drop into the reply this one triggers). Panes with an open prompt
+    are skipped -- those flush via /respond once the selector is answered.
+    """
+    store: Store = app.state.store
+    broadcaster: Broadcaster = app.state.broadcaster
+    for pane_id, queued in list(app.state.queued.items()):
+        if not queued or pane_id in app.state.prompts:
+            continue
+        try:
+            if await run_in_threadpool(channels_mod.busy, pane_id):
+                continue
+            if not await run_in_threadpool(channels_mod.settled, pane_id):
+                continue
+            # ⚠️ Never type a held message into a live selector -- re-parse the
+            #    screen right before sending, so a held message can't answer or
+            #    dismiss an open dialog even if the prompt state lags.
+            if prompts_mod.parse(
+                await run_in_threadpool(channels_mod.screen, pane_id)
+            ) is not None:
+                continue
+        except TmuxError:
+            continue
+        text = queued.pop(0)
+        try:
+            await run_in_threadpool(channels_mod.send, pane_id, text, True)
+        except (TmuxError, ValueError) as exc:
+            queued.insert(0, text)
+            event = store.append(
+                pane_id, EventKind.ERROR,
+                f"held message could not be sent: {exc}", meta={"attempted": text},
+            )
+            broadcaster.publish({"type": "event", "event": event.to_dict()})
 
 
 async def _flush_when_ready(app: FastAPI, pane_id: str) -> None:
@@ -2044,12 +3169,19 @@ async def _flush_when_ready(app: FastAPI, pane_id: str) -> None:
             return
 
 
+#: Consecutive polls a selector must be absent before its prompt is cleared. A
+#: single miss is a transient redraw (a status line over the menu), not an answer;
+#: clearing on one closed live dialogs out from under the wearer.
+PROMPT_CLEAR_MISSES = 3
+
+
 def _watch_prompts(
     app: FastAPI,
     store: Store,
     broadcaster: Broadcaster,
     screens: dict[str, str],
     open_prompts: dict[str, str],
+    prompt_misses: dict[str, int],
 ) -> None:
     """Notice a pane asking a question, and notice when it stops.
 
@@ -2070,12 +3202,21 @@ def _watch_prompts(
 
         if found is None:
             if previous is not None:
-                open_prompts.pop(pane_id, None)
-                prompts_state.pop(pane_id, None)
-                broadcaster.publish(
-                    {"type": "prompt", "pane": pane_id, "prompt": None}
-                )
+                # ⚠️ Debounce: a single failed parse -- a status line redrawing over
+                #    the selector, a transient scroll -- must not dismiss a live
+                #    prompt. Clear only after it is gone for several polls in a row.
+                #    This is the bug where a stray status frame closed an open dialog.
+                misses = prompt_misses.get(pane_id, 0) + 1
+                prompt_misses[pane_id] = misses
+                if misses >= PROMPT_CLEAR_MISSES:
+                    open_prompts.pop(pane_id, None)
+                    prompts_state.pop(pane_id, None)
+                    prompt_misses.pop(pane_id, None)
+                    broadcaster.publish(
+                        {"type": "prompt", "pane": pane_id, "prompt": None}
+                    )
             continue
+        prompt_misses.pop(pane_id, None)  # selector present -> reset the miss count
 
         if found.fingerprint == previous:
             # same question, cursor may have moved -- refresh the selection only
@@ -2117,6 +3258,7 @@ async def _poll_forever(app: FastAPI) -> None:
     known: dict[str, str] | None = None  # pane_id -> label
     digests: dict[str, str] = {}  # pane_id -> last screen fingerprint
     open_prompts: dict[str, str] = {}  # pane_id -> fingerprint of the live selector
+    prompt_misses: dict[str, int] = {}  # pane_id -> consecutive polls the selector was gone
     while True:
         try:
             # ★ Adopt anything written straight to the ledger while this process
@@ -2187,7 +3329,7 @@ async def _poll_forever(app: FastAPI) -> None:
                 moved = await run_in_threadpool(
                     _sample_activity, store, live, digests, time.time(), screens
                 )
-                _watch_prompts(app, store, broadcaster, screens, open_prompts)
+                _watch_prompts(app, store, broadcaster, screens, open_prompts, prompt_misses)
                 if moved:
                     broadcaster.publish(
                         {
@@ -2201,11 +3343,12 @@ async def _poll_forever(app: FastAPI) -> None:
                 broadcaster.publish(
                     {
                         "type": "channels",
-                        "channels": build_channel_list(store, live),
+                        "channels": build_channel_list(store, live, asking_panes=set(app.state.prompts)),
                         "server_time": time.time(),
                     }
                 )
             known = current
+            await _flush_idle_queues(app)   # deliver held messages once idle
         except asyncio.CancelledError:
             raise
         except Exception:  # a poller crash must not take the hub down

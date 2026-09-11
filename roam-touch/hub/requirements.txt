@@ -5,6 +5,7 @@ fastapi==0.141.1
 uvicorn[standard]==0.52.1
 pydantic==2.13.4
 pydantic-settings==2.15.0
+croniter==6.2.4        # cron-expression schedules for the scheduler (cron.py)
 
 # tests
 pytest==9.1.1

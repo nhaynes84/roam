@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Schedules</title>
+<style>
+  :root {
+    --bg: #0b0d10; --panel: #14181d; --panel2: #191f26; --line: #232a31;
+    --ink: #e6edf3; --dim: #8b97a3; --accent: #4aa3ff; --ok: #3fb950;
+    --warn: #d9822b; --danger: #e5484d; --amber: #ffc726;
+    --radius: 12px;
+    font-family: -apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 20px 16px 64px; }
+  header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 6px; }
+  h1 { font-size: 22px; margin: 0; letter-spacing: -0.01em; }
+  header .sub { color: var(--dim); font-size: 13px; }
+  .muted { color: var(--dim); }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
+  .job { padding: 13px 14px; margin-top: 10px; }
+  .job .top { display: flex; align-items: center; gap: 10px; }
+  .job .name { font-weight: 600; font-size: 15px; flex: 1; min-width: 0;
+               overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pill { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px;
+          border: 1px solid var(--line); color: var(--dim); white-space: nowrap; }
+  .pill.on { color: var(--ok); border-color: #1c3a24; background: #10231a; }
+  .pill.off { color: var(--dim); }
+  .pill.sched { color: var(--accent); border-color: #1d3450; background: #0e1c2e; font-family: ui-monospace, Menlo, monospace; }
+  .job .meta { color: var(--dim); font-size: 12.5px; margin-top: 7px; line-height: 1.5; }
+  .job .meta b { color: var(--ink); font-weight: 500; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 11px; }
+  button { font: inherit; font-size: 13px; border-radius: 9px; border: 1px solid var(--line);
+           background: var(--panel2); color: var(--ink); padding: 6px 11px; cursor: pointer; }
+  button:hover { border-color: #33404b; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #061018; font-weight: 600; }
+  button.ghost { background: transparent; }
+  button.danger:hover { color: var(--danger); border-color: #4a2327; }
+  button:disabled { opacity: .5; cursor: default; }
+  .runs { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 9px;
+          font-size: 12px; display: none; }
+  .runs.open { display: block; }
+  .run { display: flex; gap: 8px; padding: 3px 0; color: var(--dim); }
+  .run .dot { width: 7px; height: 7px; border-radius: 50%; margin-top: 5px; flex: none; }
+  .dot.ok { background: var(--ok); } .dot.skipped { background: var(--warn); }
+  .dot.error { background: var(--danger); } .dot.fired { background: var(--accent); }
+  /* create form */
+  details.new { margin-top: 16px; }
+  details.new > summary { cursor: pointer; color: var(--accent); font-size: 14px;
+     font-weight: 600; list-style: none; padding: 4px 0; }
+  details.new > summary::-webkit-details-marker { display: none; }
+  .form { padding: 14px; margin-top: 8px; display: grid; gap: 11px; }
+  label { font-size: 12px; color: var(--dim); display: block; margin-bottom: 4px; }
+  input, select, textarea { width: 100%; font: inherit; font-size: 14px; color: var(--ink);
+    background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+  textarea { resize: vertical; min-height: 58px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 11px; }
+  .grid2 .full { grid-column: 1 / -1; }
+  .hint { font-size: 11.5px; color: var(--dim); margin-top: 3px; }
+  .check { display: flex; align-items: center; gap: 8px; color: var(--ink); font-size: 13px; }
+  .check input { width: auto; }
+  .err { color: var(--danger); font-size: 13px; min-height: 18px; }
+  .empty { text-align: center; color: var(--dim); padding: 40px 0; }
+  .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+    background: var(--panel2); border: 1px solid var(--line); border-radius: 10px;
+    padding: 9px 15px; font-size: 13px; opacity: 0; transition: opacity .2s;
+    pointer-events: none; }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Schedules</h1>
+    <span class="sub">automations · fires into a channel on time</span>
+  </header>
+
+  <details class="new" id="newBox">
+    <summary>+ New schedule</summary>
+    <div class="form card">
+      <div>
+        <label>Name</label>
+        <input id="f-name" placeholder="Daily standup summary" autocomplete="off">
+      </div>
+      <div class="grid2">
+        <div>
+          <label>When</label>
+          <select id="f-kind">
+            <option value="every">Every (interval)</option>
+            <option value="cron">Cron expression</option>
+            <option value="at">Once (at)</option>
+          </select>
+        </div>
+        <div>
+          <label id="f-expr-label">Interval</label>
+          <input id="f-expr" placeholder="1h" autocomplete="off">
+          <div class="hint" id="f-expr-hint">e.g. 30s, 10m, 1h, 1d</div>
+        </div>
+        <div id="f-tz-box" style="display:none">
+          <label>Timezone (optional)</label>
+          <input id="f-tz" placeholder="America/Los_Angeles" autocomplete="off">
+        </div>
+      </div>
+      <div>
+        <label>Channel</label>
+        <select id="f-pane"></select>
+      </div>
+      <div>
+        <label>Prompt to send</label>
+        <textarea id="f-prompt" placeholder="Summarise what changed today and post the 3 things I should look at."></textarea>
+      </div>
+      <label class="check"><input type="checkbox" id="f-delete"> Delete after it runs (one-shot cleanup)</label>
+      <div class="err" id="f-err"></div>
+      <div class="row">
+        <button class="primary" id="f-save">Create schedule</button>
+        <button class="ghost" id="f-cancel">Cancel</button>
+      </div>
+    </div>
+  </details>
+
+  <div id="list"></div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+  var TOKEN = "__ROAM_TOKEN__";
+  var $ = function (id) { return document.getElementById(id); };
+
+  function q(k, v) { return encodeURIComponent(k) + "=" + encodeURIComponent(v); }
+  function url(path, params) {
+    var u = path + "?" + q("token", TOKEN);
+    if (params) for (var k in params) u += "&" + q(k, params[k]);
+    return u;
+  }
+  function api(path, opts) {
+    opts = opts || {};
+    opts.headers = opts.headers || {};
+    opts.headers["Authorization"] = "Bearer " + TOKEN;
+    if (opts.body) opts.headers["Content-Type"] = "application/json";
+    return fetch(url(path), opts).then(function (r) {
+      if (!r.ok) return r.json().catch(function(){return {};}).then(function (e) {
+        throw new Error(e.detail || (r.status + " " + r.statusText));
+      });
+      return r.status === 204 ? {} : r.json();
+    });
+  }
+
+  var toastT;
+  function toast(msg) {
+    var t = $("toast"); t.textContent = msg; t.classList.add("show");
+    clearTimeout(toastT); toastT = setTimeout(function () { t.classList.remove("show"); }, 2200);
+  }
+
+  function fmtRel(ts) {
+    if (!ts) return "—";
+    var d = ts * 1000 - Date.now(), s = Math.round(Math.abs(d) / 1000), ago = d < 0;
+    var out;
+    if (s < 60) out = s + "s";
+    else if (s < 3600) out = Math.round(s / 60) + "m";
+    else if (s < 86400) out = Math.round(s / 3600) + "h";
+    else out = Math.round(s / 86400) + "d";
+    return ago ? out + " ago" : "in " + out;
+  }
+
+  var channels = {};   // pane_id -> label
+  function loadChannels() {
+    return api("/channels").then(function (d) {
+      var sel = $("f-pane"); sel.innerHTML = "";
+      (d.channels || []).forEach(function (c) {
+        if (c.pane_id === "@host" || !c.live) return;
+        channels[c.pane_id] = c.label;
+        var o = document.createElement("option");
+        o.value = c.pane_id; o.textContent = c.label + "  (" + c.pane_id + ")";
+        sel.appendChild(o);
+      });
+    });
+  }
+
+  function jobCard(j) {
+    var el = document.createElement("div");
+    el.className = "card job";
+    var target = channels[j.pane_id] || j.pane_id || "no channel";
+    var enabled = j.enabled;
+    el.innerHTML =
+      '<div class="top">' +
+        '<span class="name"></span>' +
+        '<span class="pill sched"></span>' +
+        '<span class="pill ' + (enabled ? "on" : "off") + '">' + (enabled ? "on" : "off") + '</span>' +
+      '</div>' +
+      '<div class="meta">' +
+        '→ <b class="tgt"></b> · next <b>' + fmtRel(j.next_run_at) + '</b>' +
+        ' · last ' + fmtRel(j.last_run_at) + ' · ' + (j.run_count || 0) + ' runs' +
+        '<div class="prompt muted"></div>' +
+      '</div>' +
+      '<div class="row">' +
+        '<button class="run">Run now</button>' +
+        '<button class="ghost tgl">' + (enabled ? "Disable" : "Enable") + '</button>' +
+        '<button class="ghost hist">History</button>' +
+        '<button class="ghost danger del">Delete</button>' +
+      '</div>' +
+      '<div class="runs"></div>';
+    el.querySelector(".name").textContent = j.name || "(unnamed)";
+    el.querySelector(".sched").textContent = j.schedule || (j.kind + " " + j.expr);
+    el.querySelector(".tgt").textContent = target;
+    el.querySelector(".prompt").textContent = j.prompt ? ("“" + j.prompt.slice(0, 120) + (j.prompt.length > 120 ? "…" : "") + "”") : "";
+
+    el.querySelector(".run").onclick = function () {
+      this.disabled = true; var b = this;
+      api("/cron/" + j.id + "/run", { method: "POST" }).then(function (r) {
+        toast(r.fired ? "Fired into " + target : "Skipped: " + r.detail); b.disabled = false; load();
+      }).catch(function (e) { toast(e.message); b.disabled = false; });
+    };
+    el.querySelector(".tgl").onclick = function () {
+      api("/cron/" + j.id, { method: "PATCH", body: JSON.stringify({ enabled: !enabled }) })
+        .then(function () { load(); }).catch(function (e) { toast(e.message); });
+    };
+    el.querySelector(".del").onclick = function () {
+      if (!confirm("Delete “" + (j.name || "this schedule") + "”?")) return;
+      api("/cron/" + j.id, { method: "DELETE" }).then(function () { toast("Deleted"); load(); })
+        .catch(function (e) { toast(e.message); });
+    };
+    var runsBox = el.querySelector(".runs");
+    el.querySelector(".hist").onclick = function () {
+      if (runsBox.classList.contains("open")) { runsBox.classList.remove("open"); return; }
+      api("/cron/" + j.id + "/runs", { }).then(function (d) {
+        runsBox.innerHTML = (d.runs && d.runs.length)
+          ? d.runs.map(function (r) {
+              return '<div class="run"><span class="dot ' + r.status + '"></span><span>' +
+                new Date(r.started_at * 1000).toLocaleString() + " · " + r.status +
+                (r.detail ? " · " + r.detail : "") + "</span></div>";
+            }).join("")
+          : '<div class="muted">No runs yet.</div>';
+        runsBox.classList.add("open");
+      }).catch(function (e) { toast(e.message); });
+    };
+    return el;
+  }
+
+  function load() {
+    return api("/cron").then(function (d) {
+      var list = $("list"); list.innerHTML = "";
+      var jobs = d.jobs || [];
+      if (!jobs.length) { list.innerHTML = '<div class="empty">No schedules yet. Create one above.</div>'; return; }
+      jobs.forEach(function (j) { list.appendChild(jobCard(j)); });
+    }).catch(function (e) { $("list").innerHTML = '<div class="empty">' + e.message + '</div>'; });
+  }
+
+  // --- create form behaviour ---
+  var KIND_UI = {
+    every: { label: "Interval", ph: "1h", hint: "e.g. 30s, 10m, 1h, 1d", tz: false },
+    cron:  { label: "Cron expression", ph: "0 9 * * *", hint: "5- or 6-field, e.g. 0 9 * * 1-5 (weekdays 9am)", tz: true },
+    at:    { label: "When", ph: "2027-01-01T09:00 or 20m", hint: "ISO time, or a relative offset like 20m", tz: true }
+  };
+  function syncKind() {
+    var k = $("f-kind").value, ui = KIND_UI[k];
+    $("f-expr-label").textContent = ui.label;
+    $("f-expr").placeholder = ui.ph;
+    $("f-expr-hint").textContent = ui.hint;
+    $("f-tz-box").style.display = ui.tz ? "" : "none";
+  }
+  $("f-kind").onchange = syncKind;
+  $("f-cancel").onclick = function () { $("newBox").open = false; };
+  $("f-save").onclick = function () {
+    var body = {
+      name: $("f-name").value.trim(),
+      kind: $("f-kind").value,
+      expr: $("f-expr").value.trim(),
+      tz: $("f-tz").value.trim(),
+      pane_id: $("f-pane").value,
+      prompt: $("f-prompt").value.trim(),
+      delete_after_run: $("f-delete").checked
+    };
+    $("f-err").textContent = "";
+    if (!body.expr) { $("f-err").textContent = "Enter a schedule."; return; }
+    if (!body.pane_id) { $("f-err").textContent = "Pick a channel."; return; }
+    if (!body.prompt) { $("f-err").textContent = "Enter a prompt to send."; return; }
+    api("/cron", { method: "POST", body: JSON.stringify(body) }).then(function () {
+      $("f-name").value = ""; $("f-expr").value = ""; $("f-prompt").value = ""; $("f-delete").checked = false;
+      $("newBox").open = false; toast("Schedule created"); load();
+    }).catch(function (e) { $("f-err").textContent = e.message; });
+  };
+
+  syncKind();
+  loadChannels().then(load);
+  setInterval(load, 5000);   // keep next/last-run relative times fresh
+</script>
+</body>
+</html>
